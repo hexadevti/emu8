@@ -49,6 +49,12 @@ void epromSetup() {
     selectedC64FileName = "";
     c64Autoload = false;
   }
+
+  // NES: last-loaded ROM, auto-loaded on boot (validated; garbage -> none).
+  readStringFromEEPROM(NesFileNameEEPROMaddress, &selectedNesFileName);
+  if (selectedNesFileName.length() == 0 || selectedNesFileName.length() > 120 ||
+      selectedNesFileName[0] != '/')
+    selectedNesFileName = "";
     
   if (HdDisk) {
     int size = readStringFromEEPROM(HdFileNameEEPROMaddress, &selectedHdFileName);
@@ -119,6 +125,7 @@ void saveConfig() {
     writeStringToEEPROM(HdFileNameEEPROMaddress, selectedHdFileName);
     writeStringToEEPROM(DiskFileNameEEPROMaddress, selectedDiskFileName);
     writeStringToEEPROM(C64FileNameEEPROMaddress, selectedC64FileName);
+    writeStringToEEPROM(NesFileNameEEPROMaddress, selectedNesFileName);
     EEPROM.commit();
   }
   

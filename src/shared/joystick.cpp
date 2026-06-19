@@ -73,7 +73,9 @@ static void buttonDown(uint8_t btn)
 {
     if (btn == 3)
     {
-        showHideOptionsWindow();   // button 3 opens/closes the settings menu
+        // Button 3 opens/closes the settings menu — except on NES, where it is the Start
+        // button (the NES menu is opened by a screen tap instead, see oskPoll).
+        if (currentPlatform != PLATFORM_NES) showHideOptionsWindow();
         return;
     }
     if (OptionsWindow)
@@ -387,6 +389,26 @@ static void analogJoystickTask(void *pvParameters)
                 if (Pb0)       m &= ~0x10;   // fire (button 0)
             }
             c64SetJoystick(m);
+        }
+
+        // NES: map the 8-way stick + buttons onto controller 1. Active-HIGH bits:
+        // bit0=A, bit1=B, bit2=Select, bit3=Start, bit4=Up, bit5=Down, bit6=Left, bit7=Right.
+        // Pb3 = Start here (the settings menu is opened by a screen tap on NES, see oskPoll).
+        if (currentPlatform == PLATFORM_NES)
+        {
+            uint8_t b = 0;
+            if (joystick && !OptionsWindow)
+            {
+                if (joyX == 0) b |= 0x10;   // up
+                if (joyX == 2) b |= 0x20;   // down
+                if (joyY == 0) b |= 0x40;   // left
+                if (joyY == 2) b |= 0x80;   // right
+                if (Pb0)       b |= 0x01;   // A
+                if (Pb1)       b |= 0x02;   // B
+                if (Pb2)       b |= 0x04;   // Select
+                if (Pb3)       b |= 0x08;   // Start
+            }
+            nesSetController(b);
         }
 
         if (pJoyX != joyX)

@@ -122,7 +122,7 @@ static void splashService()
     tft.drawString("SELECT SYSTEM", 160, 150, 2);
     splashDrawBtn(PLATFORM_APPLE2, "APPLE II", true);
     splashDrawBtn(PLATFORM_C64,    "C64",      true);
-    splashDrawBtn(PLATFORM_NES,    "NES",      false);
+    splashDrawBtn(PLATFORM_NES,    "NES",      true);
     drawn = true;
   }
 
@@ -131,8 +131,8 @@ static void splashService()
     int b = splashHitTest(tx, ty);
     if (b == PLATFORM_APPLE2)    splashSelect(PLATFORM_APPLE2);
     else if (b == PLATFORM_C64)  splashSelect(PLATFORM_C64);
+    else if (b == PLATFORM_NES)  splashSelect(PLATFORM_NES);
     else if (b < 0)              splashFinish();   // tapped outside -> boot current
-    // b == NES: not available yet, ignore
     return;
   }
   if (millis() - startMs >= SPLASH_MS || Pb0 || Pb1 || Pb2 || Pb3) splashFinish();
@@ -151,6 +151,15 @@ void renderLoop(void *pvParameters)
     {
       splashService();
       vTaskDelay(pdMS_TO_TICKS(15));
+      continue;
+    }
+
+    // NES startup ROM-skip warning: hold a full-screen note (skipped/over-budget ROMs) for a few
+    // seconds after boot, before normal rendering / touch handling kicks in.
+    if (currentPlatform == PLATFORM_NES && nesRenderLoadWarning())
+    {
+      Vertical_blankingOn_Off = true;
+      vTaskDelay(pdMS_TO_TICKS(20));
       continue;
     }
 
@@ -173,6 +182,16 @@ void renderLoop(void *pvParameters)
     {
       c64RenderFrame();                  // text screen (top 14 rows when the OSK is open)
       if (oskActive()) oskRender();      // touch keyboard owns the bottom of the screen
+      Vertical_blankingOn_Off = true;
+      vTaskDelay(pdMS_TO_TICKS(10));
+      continue;
+    }
+
+    // NES core renders its own 256x240 framebuffer (filled by the PPU on the CPU core);
+    // convert + push it here, pillarboxed in the 320-wide panel.
+    if (currentPlatform == PLATFORM_NES)
+    {
+      nesRenderFrame();
       Vertical_blankingOn_Off = true;
       vTaskDelay(pdMS_TO_TICKS(10));
       continue;

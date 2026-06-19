@@ -25,6 +25,7 @@ int freeSpace = 0;
 std::vector<std::string> hdFiles;
 std::vector<std::string> diskFiles;
 std::vector<std::string> c64Files;     // C64 .prg/.d64 images on SD
+std::vector<std::string> nesFiles;     // NES .nes ROMs on SD
 
 // keyboard
 unsigned short keyboard_data[3] = {0, 0, 0};
@@ -84,6 +85,7 @@ int logLineCount = 1;
 String selectedDiskFileName;
 String selectedHdFileName;
 String selectedC64FileName;   // last C64 image highlighted/loaded
+String selectedNesFileName;   // currently-loaded NES ROM (for the settings file browser)
 bool c64Autoload = false;     // C64: auto-load the saved image on boot
 uint8_t joyPort = 2;          // C64: joystick port (1 or 2)
 volatile bool c64AutoloadPending = false;  // .prg/.d64 autoload deferred to the BASIC READY trap

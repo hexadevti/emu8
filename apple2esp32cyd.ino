@@ -20,6 +20,13 @@ void setup() {
     joystickSetup();
     sidSetup();        // 3-voice SID -> I2S DAC (GPIO26), LAST so its I2S DMA comes after SD
     c64Autostart();    // boot-autoload the saved image, if enabled
+  } else if (currentPlatform == PLATFORM_NES) {
+    FSSetup();         // SD first: nesSetup loads the first .nes off the card
+    nesSetup();        // 2K RAM, PPU, iNES loader (mappers 0-4), framebuffer = sharedBigBuf
+    videoSetup();      // TFT + render loop (+ splash)
+    oskSetup();
+    joystickSetup();   // analog stick + buttons -> NES controller 1
+    nesApuSetup();     // APU -> I2S DAC (GPIO26), LAST so its I2S DMA comes after SD (like SID)
   } else {             // Apple II
     memoryAlloc();
     FSSetup();
@@ -41,7 +48,7 @@ void loop() {
   switch (currentPlatform) {
     case PLATFORM_APPLE2: cpuLoop(); break;
     case PLATFORM_C64:    c64Loop(); break;
-    // case PLATFORM_NES:  nesLoop(); break;    // TODO
+    case PLATFORM_NES:    nesLoop(); break;
     default:              cpuLoop(); break;
   }
 }

@@ -54,6 +54,7 @@ extern int freeSpace;
 extern std::vector<std::string> hdFiles;
 extern std::vector<std::string> diskFiles;
 extern std::vector<std::string> c64Files;
+extern std::vector<std::string> nesFiles;
 
 // Board Pins
 #define SD_SCK_PIN 18
@@ -159,9 +160,11 @@ extern int logLineCount;
 #define DiskFileNameEEPROMaddress 128
 #define HdFileNameEEPROMaddress 256
 #define C64FileNameEEPROMaddress 384   // C64: last-loaded .prg/.d64/.crt (for autoload)
+#define NesFileNameEEPROMaddress 512   // NES: last-loaded .nes (auto-loaded on boot)
 extern String selectedDiskFileName;
 extern String selectedHdFileName;
 extern String selectedC64FileName;
+extern String selectedNesFileName;   // NES: currently-loaded ROM (settings file browser marker)
 extern bool c64Autoload;          // C64: auto-load selectedC64FileName on boot
 extern uint8_t joyPort;           // C64: joystick port (1 or 2)
 extern String NewDeviceConfig;

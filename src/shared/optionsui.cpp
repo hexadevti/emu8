@@ -64,16 +64,19 @@ static int optionsUiFocus = 0;
 // file list / selection so the file browser, scrolling and actions are platform-aware
 // without duplicating the whole UI.
 static bool ouiIsC64() { return currentPlatform == PLATFORM_C64; }
+static bool ouiIsNES() { return currentPlatform == PLATFORM_NES; }
 
 static std::vector<std::string> &ouiFiles()
 {
   if (ouiIsC64()) return c64Files;
+  if (ouiIsNES()) return nesFiles;
   return HdDisk ? hdFiles : diskFiles;
 }
 
 static std::string ouiSel()
 {
   if (ouiIsC64()) return std::string(selectedC64FileName.c_str());
+  if (ouiIsNES()) return std::string(selectedNesFileName.c_str());
   return std::string((HdDisk ? selectedHdFileName : selectedDiskFileName).c_str());
 }
 
@@ -175,6 +178,13 @@ static void ouiDrawToggles()
     for (int i = 5; i < 8; i++) ouiClearToggle(i);
     return;
   }
+  if (ouiIsNES()) {
+    ouiDrawToggle(0, "SOUND",    sound ? "ON" : "MUTE",          OUI_TXT);
+    ouiDrawToggle(1, "JOYSTICK", joystick ? "ON" : "OFF",        OUI_TXT);
+    ouiDrawToggle(2, "VIDEO",    videoColor ? "COLOR" : "MONO",  OUI_TXT);
+    for (int i = 3; i < 8; i++) ouiClearToggle(i);
+    return;
+  }
   ouiDrawToggle(0, "DEVICE",   HdDisk ? "HD" : "DISK",          OUI_TXT);
   ouiDrawToggle(1, "MACHINE",  AppleIIe ? "IIe" : "II+",        OUI_TXT);
   ouiDrawToggle(2, "SPEED",    Fast1MhzSpeed ? "FAST" : "1MHz", OUI_TXT);
@@ -214,7 +224,8 @@ static void ouiDrawFiles()
   // header
   tft.fillRect(0, OUI_FB_TOP, 320, OUI_FB_HDR_H, OUI_BG);
   char hdr[40];
-  sprintf(hdr, "%s  (%d)", ouiIsC64() ? "PRG/D64/CRT" : (HdDisk ? "HD IMAGES" : "DISK IMAGES"),
+  sprintf(hdr, "%s  (%d)", ouiIsC64() ? "PRG/D64/CRT" : ouiIsNES() ? "NES ROMS"
+                         : (HdDisk ? "HD IMAGES" : "DISK IMAGES"),
           (int)files.size());
   tft.setTextDatum(BL_DATUM);
   tft.setTextColor(OUI_LBL, OUI_BG);
@@ -293,7 +304,7 @@ static void ouiDrawActions()
   uint16_t mc = canMount ? OUI_MOUNT : OUI_CARD2;
   uint16_t mt = canMount ? OUI_TXT : OUI_LBL;
 
-  if (ouiIsC64()) {                       // C64: LOAD & RUN + REBOOT
+  if (ouiIsC64() || ouiIsNES()) {         // C64/NES: LOAD & RUN + REBOOT
     ouiActBtn(6,   120, "LOAD & RUN", mc,         mt,      OUI_FOC_MOUNT);
     ouiActBtn(132, 182, "REBOOT",     OUI_REBOOT, OUI_TXT, OUI_FOC_REBOOT);
     return;
@@ -309,7 +320,8 @@ static void ouiDrawTitle()
   tft.fillRect(0, 0, 320, OUI_TITLE_H, OUI_TITLE);
   tft.setTextDatum(ML_DATUM);
   tft.setTextColor(OUI_TXT, OUI_TITLE);
-  tft.drawString(ouiIsC64() ? "COMMODORE 64  SETTINGS" : "APPLE II  SETTINGS",
+  tft.drawString(ouiIsC64() ? "COMMODORE 64  SETTINGS"
+               : ouiIsNES() ? "NINTENDO  NES  SETTINGS" : "APPLE II  SETTINGS",
                  10, OUI_TITLE_H / 2, 2);
   int cw = OUI_TITLE_H, cx = 320 - cw;
   tft.fillRect(cx, 0, cw, OUI_TITLE_H, OUI_RED);
@@ -342,6 +354,16 @@ static void ouiToggle(int idx)
       case 2: videoColor = !videoColor;   break;
       case 3: c64Autoload = !c64Autoload; break;
       case 4: joyPort = (joyPort == 2) ? 1 : 2; break;
+      default: return;
+    }
+    optionsUiDirty = true;
+    return;
+  }
+  if (ouiIsNES()) {                        // NES grid: SOUND / JOYSTICK / VIDEO
+    switch (idx) {
+      case 0: sound = !sound;           break;
+      case 1: joystick = !joystick;     break;
+      case 2: videoColor = !videoColor; break;
       default: return;
     }
     optionsUiDirty = true;
@@ -388,6 +410,12 @@ static void ouiMount()
     selectedC64FileName = files[shownFile].c_str();
     c64LoadSelected(selectedC64FileName.c_str());
     showHideOptionsWindow();              // close -> CPU resumes -> BASIC autoruns
+    return;
+  }
+  if (ouiIsNES()) {                       // NES: load the highlighted .nes + reset into it
+    if (shownFile >= files.size()) return;
+    if (nesLoadSelected(files[shownFile].c_str()))
+      showHideOptionsWindow();            // close only on success (failure keeps the old ROM)
     return;
   }
   if (HdDisk) setHdFile(); else setDiskFile();
@@ -491,7 +519,7 @@ static void ouiHandleTap(int16_t x, int16_t y)
 
   // action buttons
   if (y >= OUI_ACT_TOP && y < OUI_ACT_TOP + OUI_ACT_H) {
-    if (ouiIsC64()) {                       // LOAD & RUN (6..126) | REBOOT (132..314)
+    if (ouiIsC64() || ouiIsNES()) {         // LOAD & RUN (6..126) | REBOOT (132..314)
       if (x >= 6 && x < 126)        ouiMount();
       else if (x >= 132 && x < 314) ouiReboot();
     } else {                                // MOUNT (4..106) | M+REBOOT (109..211) | REBOOT (214..316)
@@ -521,6 +549,7 @@ void optionsUiPoll()
 void optionsUiOpen()
 {
   if (ouiIsC64() && c64Files.empty()) loadC64FilesSync();   // populate the .prg browser
+  if (ouiIsNES() && nesFiles.empty()) nesScanFiles();       // populate the .nes browser
   optionsUiSyncSelection();
   optionsUiFocus       = 0;
   optionsUiFirstDraw   = true;

@@ -473,6 +473,15 @@ void oskPoll()
   int16_t sx = 0, sy = 0;
   bool down = touchRead(&sx, &sy);
 
+  // NES has no use for the on-screen keyboard (Pb3 is Start, not a menu key), so a screen
+  // tap opens the settings menu directly. oskIgnoreCurrentTouch() on close stops the
+  // lingering finger from immediately reopening it.
+  if (currentPlatform == PLATFORM_NES) {
+    if (down && !osk_prevDown) showHideOptionsWindow();
+    osk_prevDown = down;
+    return;
+  }
+
   if (!osk_visible) {
     if (down && !osk_prevDown) {              // first contact opens the keyboard
       osk_visible     = true;

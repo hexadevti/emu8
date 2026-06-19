@@ -162,6 +162,16 @@ extern volatile bool c64AutoloadPending;   // a .prg/.d64 autoload waiting for t
 
 void c64FreeBtMem();                   // release unused BT controller DRAM (call before SD mount)
 
+// NES core entry points (src/nes/nes.cpp), called by the platform dispatch
+void nesSetup();
+void nesLoop();
+void nesRenderFrame();
+void nesSetController(uint8_t buttons);   // joystick -> NES controller 1 (active-high bits)
+bool nesRenderLoadWarning();              // startup ROM-skip warning overlay (true while showing)
+void nesApuSetup();                       // NES APU audio (I2S DAC GPIO26), called from setup()
+bool nesLoadSelected(const char *path);   // settings: load a .nes ROM + reset the NES
+void nesScanFiles();                      // settings: rescan SD root for *.nes
+
 // SID sound (src/c64/c64_sid.cpp)
 void sidSetup();                       // init the 3-voice synth + I2S DAC output task
 void sidWrite(uint8_t reg, uint8_t val);
