@@ -1,4 +1,4 @@
-// apple2esp32cyd - multi-platform retro emulator for the ESP32 Cheap Yellow Display
+// emu6502 - multi-platform retro emulator for the ESP32 Cheap Yellow Display
 // (ESP32 + ILI9341 TFT via TFT_eSPI), SD-card storage.
 //
 // This header declares the shared state as `extern`; the single definitions live in
@@ -151,7 +151,7 @@ extern uint8_t volume;
 
 // Target system for the multi-platform emulator. Apple II is implemented; C64 and
 // NES are placeholders selectable from the boot splash (see src/shared/video.cpp
-// splashService and the dispatch in apple2esp32cyd.ino). Persisted in EEPROM.
+// splashService and the dispatch in emu6502.ino). Persisted in EEPROM.
 enum Platform : uint8_t { PLATFORM_APPLE2 = 0, PLATFORM_C64 = 1, PLATFORM_NES = 2, PLATFORM_ATARI = 3 };
 extern uint8_t currentPlatform;
 

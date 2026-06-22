@@ -5,7 +5,7 @@
 // so it never collides with the Apple II globals (read8/write8/ram/PC/A/X/Y/SR/cpuLoop).
 // Shared CYD globals (tft, touchRead, running, paused, OptionsWindow, currentPlatform,
 // joystick ADC, sharedBigBuf) are used from global scope. C-linkage entry points (bottom)
-// are called by the platform dispatch (apple2esp32cyd.ino / video.cpp / joystick.cpp).
+// are called by the platform dispatch (emu6502.ino / video.cpp / joystick.cpp).
 //
 // LESSON from the C64 port: any nes:: function used before its definition MUST be declared
 // here, or it silently binds to the Apple global of the same name (read8/write8/push16/...).

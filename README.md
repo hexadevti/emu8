@@ -293,7 +293,7 @@ emulated system. The top-level sketch wires them together:
 
 | Path | Purpose |
 | --- | --- |
-| [`apple2esp32cyd.ino`](apple2esp32cyd.ino) | `setup()` / `loop()` — per-platform init and the main dispatch |
+| [`emu6502.ino`](emu6502.ino) | `setup()` / `loop()` — per-platform init and the main dispatch |
 | [`board.h`](board.h) | Board selection (CYD vs JC4827W543), capability macros, pin map |
 | [`emu.h`](emu.h) · [`proto.h`](proto.h) · [`globals.cpp`](globals.cpp) | Shared state (`extern`), prototypes, definitions |
 | [`rom.h`](rom.h) | Embedded Apple II/IIe ROMs |
