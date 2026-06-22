@@ -1,8 +1,13 @@
 {
   // Build / upload tasks for arduino-cli.
   //
-  // Target: plain ESP32 (TFT build) on COM4 — matches the connected device.
-  // To retarget, edit the --fqbn value and the -p port in BOTH tasks below.
+  // TWO targets share this repo, selected only by which task you run:
+  //   * "Arduino: Build [& Upload]"            -> ESP32 Cheap Yellow Display (plain ESP32), COM4.
+  //   * "Arduino: Build [& Upload] (JC4827W543)" -> Guition JC4827W543 (ESP32-S3), COM5.
+  //
+  // The JC4827W543 tasks pass -DBOARD_JC4827W543 (via compiler.cpp.extra_flags) which flips
+  // board.h to the ESP32-S3 / Arduino_GFX / USB / I2S-amp configuration. The CYD tasks pass
+  // no such define, so board.h defaults to the original CYD setup and that firmware is unchanged.
   //
   // Run with: Terminal > Run Task…  (Build is the default build task: Ctrl+Shift+B)
   "version": "2.0.0",
@@ -45,6 +50,52 @@
         "${workspaceFolder}"
       ],
       "dependsOn": "Arduino: Build",
+      "dependsOrder": "sequence",
+      "group": "build",
+      "problemMatcher": ["$gcc"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "Arduino: Build (JC4827W543)",
+      "type": "shell",
+      "command": "arduino-cli",
+      "args": [
+        "compile",
+        "--fqbn",
+        "esp32:esp32:esp32s3:PSRAM=opi,PartitionScheme=huge_app,CPUFreq=240,FlashMode=qio,FlashSize=4M,UploadSpeed=921600,USBMode=default,CDCOnBoot=default,DebugLevel=none",
+        "--verbose",
+        "--build-property",
+        "compiler.optimization_flags=-O2",
+        "--build-property",
+        "compiler.cpp.extra_flags=-DBOARD_JC4827W543",
+        "${workspaceFolder}"
+      ],
+      "group": "build",
+      "problemMatcher": ["$gcc"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "Arduino: Build & Upload (JC4827W543)",
+      "type": "shell",
+      "command": "arduino-cli",
+      "args": [
+        "upload",
+        "-p",
+        "COM5",
+        "--fqbn",
+        "esp32:esp32:esp32s3:PSRAM=opi,PartitionScheme=huge_app,CPUFreq=240,FlashMode=qio,FlashSize=4M,UploadSpeed=921600,USBMode=default,CDCOnBoot=default,DebugLevel=none",
+        "--verbose",
+        "${workspaceFolder}"
+      ],
+      "dependsOn": "Arduino: Build (JC4827W543)",
       "dependsOrder": "sequence",
       "group": "build",
       "problemMatcher": ["$gcc"],

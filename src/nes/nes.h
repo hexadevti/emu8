@@ -116,3 +116,7 @@ bool nesRenderLoadWarning();   // draw the startup ROM-skip warning; true while 
 void nesApuSetup();            // init the APU audio task (I2S DAC); call last in the NES branch
 bool nesLoadSelected(const char *path);  // settings: load a .nes + reset (returns success)
 void nesScanFiles();          // settings: (re)scan the SD root for *.nes into nesFiles
+
+// Allocate NES hot RAM from internal DRAM (PSRAM fallback). See nes_globals.cpp — keeps the
+// latency-sensitive interpreter/PPU buffers off the slow S3 PSRAM bus.
+void *nesAllocFast(size_t n);

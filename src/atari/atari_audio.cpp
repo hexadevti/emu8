@@ -101,7 +101,11 @@ static void audioTask(void *) {
   size_t wrote;
   while (running) {
     for (int i = 0; i < 128; i++) out[i] = (uint16_t)(genSample() << 8);   // DAC uses the high byte
+#if BOARD_AUDIO_DAC
     i2s_write(I2S_NUM_0, out, sizeof(out), &wrote, portMAX_DELAY);
+#else
+    ampWriteDac8(out, 128);                                                // S3: 8-bit DAC -> I2S amp
+#endif
   }
   vTaskDelete(NULL);
 }
@@ -111,6 +115,7 @@ static void audioSetup() {
   if (!v) { printLog("Atari audio: voice malloc failed (no sound)"); return; }
   for (int i = 0; i < 2; i++) { v[i] = Voice(); v[i].lfsr = 1; }
 
+#if BOARD_AUDIO_DAC
   i2s_config_t cfg = {};
   cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_DAC_BUILT_IN);
   cfg.sample_rate = AUD_FS;
@@ -132,6 +137,12 @@ static void audioSetup() {
   adc_power_acquire();
   xTaskCreatePinnedToCore(audioTask, "atariAud", 4096, NULL, 2, NULL, 0);   // core 0
   printLog("Atari audio: 2 TIA voices on (I2S DAC GPIO26)");
+#else
+  // ESP32-S3: external I2S amp (no internal DAC).
+  ampBegin(AUD_FS);
+  xTaskCreatePinnedToCore(audioTask, "atariAud", 4096, NULL, 2, NULL, 0);   // core 0
+  printLog("Atari audio: 2 TIA voices on (I2S amp)");
+#endif
 }
 
 } // namespace atari

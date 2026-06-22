@@ -8,9 +8,14 @@
 #pragma once
 
 #include <Arduino.h>   // .cpp units (unlike .ino) don't get this implicitly
+#include "board.h"     // board selection (CYD vs JC4827W543) + capability macros + pin map
 #include "FS.h"
 #include <SPI.h>
-#include <TFT_eSPI.h>
+#if BOARD_HAS_TFT_ESPI
+  #include <TFT_eSPI.h>
+#else
+  #include "src/shared/display_gfx.h"   // DisplayGFX: TFT_eSPI-compatible Arduino_GFX backend
+#endif
 #include "SD.h"
 #include <EEPROM.h>
 #include "rom.h"
@@ -51,27 +56,34 @@ extern int freeSpace;
 // SD-relative directory with this. If FSSetup() ever passes a different mountpoint, update it.
 #define SD_VFS_ROOT "/sd"
 #define SD_SPI_HZ   20000000   // SD SPI clock (Hz). 20MHz >> the 4MHz default -> ~5x faster reads.
+extern SPIClass hspi;          // SD HSPI bus (shared with the XPT2046 touch on the JC4827W543)
+// Serializes XPT2046 touch reads against SD-card operations: both use the same HSPI bus, and the
+// SPIClass mutex only protects ONE transaction, not the SD library's multi-transaction
+// (command -> data) sequences. A touch read sneaking in mid-SD-op corrupted the card and the USB
+// host. This mutex makes each touch read and each SD read/write atomic w.r.t. each other.
+extern SemaphoreHandle_t gBusLock;
+static inline void busTake() { if (gBusLock) xSemaphoreTake(gBusLock, portMAX_DELAY); }
+static inline void busGive() { if (gBusLock) xSemaphoreGive(gBusLock); }
 extern std::vector<std::string> hdFiles;
 extern std::vector<std::string> diskFiles;
 extern std::vector<std::string> c64Files;
 extern std::vector<std::string> nesFiles;
 extern std::vector<std::string> atariFiles;   // Atari 2600 .a26/.bin ROMs on SD
 
-// Board Pins
-#define SD_SCK_PIN 18
-#define SD_MISO_PIN 19
-#define SD_MOSI_PIN 23
-#define SD_CS_PIN 5
-#define KEYBOARD_DATA_PIN 21
-#define KEYBOARD_IRQ_PIN 22
-#define ANALOG_X_PIN 4
-#define ANALOG_Y_PIN 35
-#define LED_PIN 17
-#define DIGITAL_BUTTON12_PIN 34 // joystick buttons 0-3
-#define SPEAKER_PIN 26
+// Board Pins, capability macros, and the display backend selection now live in board.h
+// (included above). Pins: SD_*, KEYBOARD_*, ANALOG_*, LED_PIN, DIGITAL_BUTTON12_PIN, SPEAKER_PIN.
+
+// Disk-activity LED: the Apple II disk/HD code blinks LED_PIN during I/O. Boards without an
+// LED define LED_PIN = -1; route the writes through here so they are a safe no-op there
+// (a raw digitalWrite(-1, ...) spams gpio_set_level() "gpio_num error" during every disk access).
+static inline void diskLed(uint8_t level) { if (LED_PIN >= 0) digitalWrite(LED_PIN, level); }
 
 // Video Config
+#if BOARD_HAS_TFT_ESPI
 extern TFT_eSPI tft;
+#else
+extern DisplayGFX tft;
+#endif
 extern int margin_x;
 extern int margin_y;
 static const uint16_t screenWidth  = 240;
@@ -118,6 +130,8 @@ extern bool sound;
 extern bool dacSound;
 extern bool upscale;
 extern bool smoothUpscale;
+extern bool screenFill;   // JC4827W543: scale the emulator video to fill the panel (keep 4:3 aspect)
+extern uint8_t nesDisplaySkip;  // JC4827W543 NES: draw 1 of every N emulated frames (1=every frame; 2-3 trade picture smoothness for game speed)
 extern bool AppleIIe;
 extern bool OptionsWindow;
 extern bool DebugWindow;
@@ -157,6 +171,8 @@ extern int logLineCount;
 #define PlatformEEPROMaddress 8
 #define C64AutoloadEEPROMaddress 9     // C64: auto-load the saved image on boot (0/1)
 #define JoyPortEEPROMaddress 10        // C64: joystick port (1 or 2)
+#define ScreenFillEEPROMaddress 11     // JC4827W543: fill-screen video upscale (char: 1 = fill)
+#define NesDisplaySkipEEPROMaddress 12 // JC4827W543 NES: display frame-skip 1..3 (char)
 #define NewDeviceConfigEEPROMaddress 50
 #define DiskFileNameEEPROMaddress 128
 #define HdFileNameEEPROMaddress 256

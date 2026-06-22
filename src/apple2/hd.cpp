@@ -218,8 +218,8 @@ void setHdFile()
 
 char loadBlock(unsigned short address, unsigned short block)
 {
-  digitalWrite(LED_PIN, LOW);
-  
+  diskLed(LOW);
+
   getBlock(FSTYPE, block);
   try
   {
@@ -230,13 +230,13 @@ char loadBlock(unsigned short address, unsigned short block)
       write8((address + i), actualBlock[i]);
     }
     //printLog("512 bytes written");
-    digitalWrite(LED_PIN, HIGH);
+    diskLed(HIGH);
     
     return 0;
   }
   catch(std::exception ex)
   {
-    digitalWrite(LED_PIN, HIGH);
+    diskLed(HIGH);
     
     
     return 0xb0;
@@ -248,10 +248,9 @@ ushort getBlockQty()
   return (ushort)((hdDiskImageSize - fileHeaderSize) / 512);
 }
 
-void getBlock(fs::FS &fs, ushort block) 
+void getBlock(fs::FS &fs, ushort block)
 {
-  // sprintf(buf,"File getBlock: %d", block);
-  // printLog(buf);
+  busTake();   // hold the shared HSPI bus for the whole HD block read (touch must wait)
   if (block != lastBlock + 1) {
     //printLog("New");
     if (hdFile.available())
@@ -277,6 +276,7 @@ void getBlock(fs::FS &fs, ushort block)
     }
   }
   lastBlock = block;
+  busGive();
 }
 
 void loadHDDir(fs::FS &fs, const char *dirname, uint8_t levels) {

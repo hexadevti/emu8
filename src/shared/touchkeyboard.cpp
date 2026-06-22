@@ -28,6 +28,8 @@
 // monitor, touch each screen corner and note the raw x/y, then update the
 // MIN/MAX values. If the axes feel rotated/mirrored, flip the SWAP/INV flags.
 // ---------------------------------------------------------------------------
+#if BOARD_TOUCH_VIA_TFT
+// ESP32 CYD: XPT2046 read via TFT_eSPI getTouchRaw() (rotation 3, 320x240 panel).
 #define OSK_TS_MINX     350
 #define OSK_TS_MAXX     3900
 #define OSK_TS_MINY     280
@@ -36,7 +38,22 @@
 #define OSK_TS_INVX     1      // mirror horizontally
 #define OSK_TS_INVY     1      // mirror vertically
 #define OSK_TS_ZTHRESH  350    // minimum pressure to count as a touch
-#define OSK_TOUCH_DEBUG      // print raw + mapped touch coords to Serial
+#else
+// JC4827W543: raw XPT2046 on the shared HSPI bus, mapped onto the centered 320x240 logical
+// area of the 480x272 panel. Calibrated from the raw values at the four physical panel corners:
+// rawX 205..3870 maps RIGHT..LEFT and rawY 400..3725 maps BOTTOM..TOP, i.e. both axes are
+// mirrored relative to the display (INVX/INVY=1). (pressure here is z1 + 4095 - z2.)
+// Re-run with OSK_TOUCH_DEBUG uncommented if a future panel differs.
+#define OSK_TS_MINX     205
+#define OSK_TS_MAXX     3870
+#define OSK_TS_MINY     400
+#define OSK_TS_MAXY     3725
+#define OSK_TS_SWAP_XY  0
+#define OSK_TS_INVX     1
+#define OSK_TS_INVY     1
+#define OSK_TS_ZTHRESH  400
+#endif
+// #define OSK_TOUCH_DEBUG      // uncomment to print raw + mapped touch coords (calibration aid)
 
 // ---------------------------------------------------------------------------
 // Layout geometry (screen is 320 wide x 240 tall in rotation 3)
@@ -67,6 +84,9 @@
 #define OSK_ACT_F5      17
 #define OSK_ACT_F7      18
 #define OSK_ACT_RESET   19   // Apple II RESET key (soft reset only with CTRL held)
+#define OSK_ACT_USR1    20   // Apple II right-side panel buttons reserved for future actions
+#define OSK_ACT_USR2    21
+#define OSK_ACT_USR3    22
 
 #define OSK_MAX_KEYS 80
 
@@ -132,49 +152,55 @@ static void oskAddRowFit(const char *norm, const char *shft, int16_t y, int16_t 
   }
 }
 
-// Top of the on-screen keyboard. The C64 has an extra function-key row, so it starts higher.
-static int oskTopY() { return (currentPlatform == PLATFORM_C64) ? OSK_C64_TOP : OSK_Y; }
+// Top of the on-screen keyboard. Both Apple and C64 are 5 rows starting at OSK_Y now (the C64's
+// function keys moved into the right-hand button column, freeing the old top row for more raster).
+static int oskTopY() { return OSK_Y; }
 
 // C64 keyboard, mapped to the CIA1 matrix (col=PA line, row=PB line). SHIFT is a sticky
 // modifier applied to the next key; cursor LEFT/UP send SHIFT+CRSR. RUN/STOP, RETURN,
-// DEL(=INST/DEL), SPACE are matrix keys. A top row carries the function keys F1/F3/F5/F7
-// (all in matrix column 0); SHIFT turns them into F2/F4/F6/F8.
+// DEL(=INST/DEL), SPACE are matrix keys. Like the Apple layout, the keys are squeezed into the
+// left KBW px and a right-hand button column holds MENU + the function keys F1/F3/F5/F7 (all in
+// matrix column 0; SHIFT turns them into F2/F4/F6/F8). Close the keyboard by tapping above it.
 static void oskBuildLayoutC64()
 {
   oskKeyCount = 0;
-  const int16_t fky = OSK_C64_TOP;          // function-key row (above the number row)
   const int16_t r1y = OSK_Y, r2y = OSK_Y + OSK_ROWH, r3y = OSK_Y + 2 * OSK_ROWH,
                 r4y = OSK_Y + 3 * OSK_ROWH, r5y = OSK_Y + 4 * OSK_ROWH;
 
-  oskAddKeyM(0,   fky, 80, OSK_ROWH, 0, 0, OSK_ACT_F1, 0, 4);
-  oskAddKeyM(80,  fky, 80, OSK_ROWH, 0, 0, OSK_ACT_F3, 0, 5);
-  oskAddKeyM(160, fky, 80, OSK_ROWH, 0, 0, OSK_ACT_F5, 0, 6);
-  oskAddKeyM(240, fky, 80, OSK_ROWH, 0, 0, OSK_ACT_F7, 0, 3);
+  const int16_t KBW  = 264;                 // keyboard area width (right column gets the rest)
+  const int16_t COLX = KBW;
+  const int16_t COLW = 320 - KBW;           // 56 px
 
   static const int8_t c1[] = {7,7,1,1,2,2,3,3,4,4}, q1[] = {0,3,0,3,0,3,0,3,0,3};
-  oskAddRowC64("1234567890", c1, q1, r1y, 0, 288);
-  oskAddKeyM(288, r1y, 32, OSK_ROWH, 0, 0, OSK_ACT_DEL, 0, 0);
+  oskAddRowC64("1234567890", c1, q1, r1y, 0, 238);
+  oskAddKeyM(238, r1y, 26, OSK_ROWH, 0, 0, OSK_ACT_DEL, 0, 0);
 
   static const int8_t c2[] = {7,1,1,2,2,3,3,4,4,5}, q2[] = {6,1,6,1,6,1,6,1,6,1};
-  oskAddRowC64("QWERTYUIOP", c2, q2, r2y, 0, 320);
+  oskAddRowC64("QWERTYUIOP", c2, q2, r2y, 0, 264);
 
   static const int8_t c3[] = {1,1,2,2,3,3,4,4,5}, q3[] = {2,5,2,5,2,5,2,5,2};
-  oskAddRowC64("ASDFGHJKL", c3, q3, r3y, 0, 278);
-  oskAddKeyM(278, r3y, 42, OSK_ROWH, 0, 0, OSK_ACT_RETURN, 0, 1);
+  oskAddRowC64("ASDFGHJKL", c3, q3, r3y, 0, 229);
+  oskAddKeyM(229, r3y, 35, OSK_ROWH, 0, 0, OSK_ACT_RETURN, 0, 1);
 
   static const int8_t c4[] = {1,2,2,3,3,4,4,5,5,6}, q4[] = {4,7,4,7,4,7,4,7,4,7};
-  oskAddRowC64("ZXCVBNM,./", c4, q4, r4y, 0, 320);
+  oskAddRowC64("ZXCVBNM,./", c4, q4, r4y, 0, 264);
 
+  // Row 5: SHIFT, RUN/STOP, a roomy SPACE, cursors (MENU + the X close key are gone).
   int16_t x = 0;
-  oskAddKey (x, r5y, 40, OSK_ROWH, 0,   0,   OSK_ACT_SHIFT);            x += 40;
-  oskAddKeyM(x, r5y, 38, OSK_ROWH, 0,   0,   OSK_ACT_RUNSTOP, 7, 7);   x += 38;
-  oskAddKeyM(x, r5y, 76, OSK_ROWH, ' ', ' ', OSK_ACT_SPACE,   7, 4);   x += 76;
-  oskAddKey (x, r5y, 44, OSK_ROWH, 0,   0,   OSK_ACT_MENU);            x += 44;
-  oskAddKeyM(x, r5y, 24, OSK_ROWH, 0,   0,   OSK_ACT_LEFT,    0, 2);   x += 24;
-  oskAddKeyM(x, r5y, 24, OSK_ROWH, 0,   0,   OSK_ACT_DOWN,    0, 7);   x += 24;
-  oskAddKeyM(x, r5y, 24, OSK_ROWH, 0,   0,   OSK_ACT_UP,      0, 7);   x += 24;
-  oskAddKeyM(x, r5y, 24, OSK_ROWH, 0,   0,   OSK_ACT_RIGHT,   0, 2);   x += 24;
-  oskAddKey (x, r5y, 26, OSK_ROWH, 0,   0,   OSK_ACT_HIDE);           x += 26;
+  oskAddKey (x, r5y, 36, OSK_ROWH, 0,   0,   OSK_ACT_SHIFT);            x += 36;
+  oskAddKeyM(x, r5y, 36, OSK_ROWH, 0,   0,   OSK_ACT_RUNSTOP, 7, 7);   x += 36;
+  oskAddKeyM(x, r5y, 88, OSK_ROWH, ' ', ' ', OSK_ACT_SPACE,   7, 4);   x += 88;
+  oskAddKeyM(x, r5y, 26, OSK_ROWH, 0,   0,   OSK_ACT_LEFT,    0, 2);   x += 26;
+  oskAddKeyM(x, r5y, 26, OSK_ROWH, 0,   0,   OSK_ACT_DOWN,    0, 7);   x += 26;
+  oskAddKeyM(x, r5y, 26, OSK_ROWH, 0,   0,   OSK_ACT_UP,      0, 7);   x += 26;
+  oskAddKeyM(x, r5y, 26, OSK_ROWH, 0,   0,   OSK_ACT_RIGHT,   0, 2);   x += 26;
+
+  // Right-hand button column: MENU + function keys (one per row).
+  oskAddKey (COLX, r1y, COLW, OSK_ROWH, 0, 0, OSK_ACT_MENU);
+  oskAddKeyM(COLX, r2y, COLW, OSK_ROWH, 0, 0, OSK_ACT_F1, 0, 4);
+  oskAddKeyM(COLX, r3y, COLW, OSK_ROWH, 0, 0, OSK_ACT_F3, 0, 5);
+  oskAddKeyM(COLX, r4y, COLW, OSK_ROWH, 0, 0, OSK_ACT_F5, 0, 6);
+  oskAddKeyM(COLX, r5y, COLW, OSK_ROWH, 0, 0, OSK_ACT_F7, 0, 3);
 }
 
 void oskBuildLayout()
@@ -189,34 +215,45 @@ void oskBuildLayout()
   const int16_t r4y = OSK_Y + 3 * OSK_ROWH; // 187
   const int16_t r5y = OSK_Y + 4 * OSK_ROWH; // 212
 
+  // The character keys are squeezed into the left KBW px so a column of side buttons (Menu, Reset,
+  // and three reserved B1/B2/B3) fills the rest on the right, one button per keyboard row.
+  const int16_t KBW    = 264;               // keyboard area width (was the full 320)
+  const int16_t COLX   = KBW;               // left edge of the right-hand button column
+  const int16_t COLW   = 320 - KBW;         // 56 px
+
   // Row 1: digits / symbols, then DEL
-  oskAddRowFit("1234567890-=", "!@#$%^&*()_+", r1y, 0, 288);
-  oskAddKey(288, r1y, 32, OSK_ROWH, 0, 0, OSK_ACT_DEL);
+  oskAddRowFit("1234567890-=", "!@#$%^&*()_+", r1y, 0, 238);
+  oskAddKey(238, r1y, 26, OSK_ROWH, 0, 0, OSK_ACT_DEL);
 
   // Row 2: TAB, then QWERTY row with [ ]
-  oskAddKey(0, r2y, 32, OSK_ROWH, 0, 0, OSK_ACT_TAB);
-  oskAddRowFit("QWERTYUIOP[]", "QWERTYUIOP{}", r2y, 32, 288);
+  oskAddKey(0, r2y, 26, OSK_ROWH, 0, 0, OSK_ACT_TAB);
+  oskAddRowFit("QWERTYUIOP[]", "QWERTYUIOP{}", r2y, 26, 238);
 
   // Row 3: ASDF row with ; ' `
-  oskAddRowFit("ASDFGHJKL;'`", "ASDFGHJKL:\"~", r3y, 0, 320);
+  oskAddRowFit("ASDFGHJKL;'`", "ASDFGHJKL:\"~", r3y, 0, KBW);
 
   // Row 4: \ then ZXCV row with , . /
-  oskAddRowFit("\\ZXCVBNM,./", "|ZXCVBNM<>?", r4y, 0, 320);
+  oskAddRowFit("\\ZXCVBNM,./", "|ZXCVBNM<>?", r4y, 0, KBW);
 
-  // Row 5: modifiers / specials (explicit widths summing to 320)
+  // Row 5: modifiers / specials (explicit widths summing to KBW=264). MENU/RESET/RETURN/ESC all
+  // live in the right column now, so this row carries only CTRL/SHIFT plus a big SPACE and cursors.
   int16_t x = 0;
-  oskAddKey(x, r5y, 34, OSK_ROWH, 0,   0,   OSK_ACT_CTRL);   x += 34;
-  oskAddKey(x, r5y, 34, OSK_ROWH, 0,   0,   OSK_ACT_SHIFT);  x += 34;
-  oskAddKey(x, r5y, 30, OSK_ROWH, 0,   0,   OSK_ACT_ESC);    x += 30;
-  oskAddKey(x, r5y, 70, OSK_ROWH, ' ', ' ', OSK_ACT_SPACE);  x += 70;
-  oskAddKey(x, r5y, 22, OSK_ROWH, 0,   0,   OSK_ACT_LEFT);   x += 22;
-  oskAddKey(x, r5y, 22, OSK_ROWH, 0,   0,   OSK_ACT_DOWN);   x += 22;
-  oskAddKey(x, r5y, 22, OSK_ROWH, 0,   0,   OSK_ACT_UP);     x += 22;
-  oskAddKey(x, r5y, 22, OSK_ROWH, 0,   0,   OSK_ACT_RIGHT);  x += 22;
-  oskAddKey(x, r5y, 42, OSK_ROWH, 0,   0,   OSK_ACT_RETURN); x += 42;
-  // RESET in place of the old hide key (CTRL+RESET = soft reset, like a real Apple II).
-  // Hide the keyboard by tapping above it.
-  oskAddKey(x, r5y, 22, OSK_ROWH, 0,   0,   OSK_ACT_RESET);  x += 22;
+  oskAddKey(x, r5y, 30, OSK_ROWH, 0,   0,   OSK_ACT_CTRL);   x += 30;
+  oskAddKey(x, r5y, 30, OSK_ROWH, 0,   0,   OSK_ACT_SHIFT);  x += 30;
+  oskAddKey(x, r5y, 96, OSK_ROWH, ' ', ' ', OSK_ACT_SPACE);  x += 96;   // roomy spacebar
+  oskAddKey(x, r5y, 27, OSK_ROWH, 0,   0,   OSK_ACT_LEFT);   x += 27;
+  oskAddKey(x, r5y, 27, OSK_ROWH, 0,   0,   OSK_ACT_DOWN);   x += 27;
+  oskAddKey(x, r5y, 27, OSK_ROWH, 0,   0,   OSK_ACT_UP);     x += 27;
+  oskAddKey(x, r5y, 27, OSK_ROWH, 0,   0,   OSK_ACT_RIGHT);  x += 27;
+
+  // Right-hand button column: one per row -> MENU, RESET, RETURN, ESC are live; B3 is a reserved
+  // placeholder (shows a press for now — wire it up in oskHandleKey later).
+  // Hide the keyboard by tapping above it (as before).
+  oskAddKey(COLX, r1y, COLW, OSK_ROWH, 0, 0, OSK_ACT_MENU);
+  oskAddKey(COLX, r2y, COLW, OSK_ROWH, 0, 0, OSK_ACT_RESET);
+  oskAddKey(COLX, r3y, COLW, OSK_ROWH, 0, 0, OSK_ACT_RETURN);
+  oskAddKey(COLX, r4y, COLW, OSK_ROWH, 0, 0, OSK_ACT_ESC);
+  oskAddKey(COLX, r5y, COLW, OSK_ROWH, 0, 0, OSK_ACT_USR3);
 }
 
 void oskSetup()
@@ -251,7 +288,10 @@ static void oskKeyLabel(int i, char *out)
     case OSK_ACT_F3:     strcpy(out, "F3/4");  break;
     case OSK_ACT_F5:     strcpy(out, "F5/6");  break;
     case OSK_ACT_F7:     strcpy(out, "F7/8");  break;
-    case OSK_ACT_RESET:  strcpy(out, "RST");   break;
+    case OSK_ACT_RESET:  strcpy(out, "RESET"); break;
+    case OSK_ACT_USR1:   strcpy(out, "B1");    break;
+    case OSK_ACT_USR2:   strcpy(out, "B2");    break;
+    case OSK_ACT_USR3:   strcpy(out, "B3");    break;
     default:             out[0] = osk_shift ? k.shft : k.norm; out[1] = 0; break;
   }
 }
@@ -313,12 +353,62 @@ int oskRasterHeight()
 // ---------------------------------------------------------------------------
 // Shared, calibrated touch reader (also used by the options UI, optionsui.ino).
 // Returns false when nothing is pressed; otherwise fills screen coords (0..319, 0..239).
+#if !BOARD_TOUCH_VIA_TFT
+// Raw XPT2046 read over the shared HSPI bus (JC4827W543). The touch controller shares the SD
+// card's SCK/MISO/MOSI and has its own CS (TOUCH_CS_PIN); SPI transactions serialize access so
+// it coexists with the SD card. Each channel is a single-shot read: send the control byte, then
+// clock out the 12-bit result (standard XPT2046 sequence).
+static int xptChan(uint8_t ctrl)
+{
+  hspi.transfer(ctrl);
+  uint8_t hi = hspi.transfer(0), lo = hspi.transfer(0);
+  return ((hi << 8) | lo) >> 3;   // 12-bit result
+}
+
+static bool xptRead(uint16_t *x, uint16_t *y, int *z)
+{
+  static bool csInit = false;
+  if (!csInit) { pinMode(TOUCH_CS_PIN, OUTPUT); digitalWrite(TOUCH_CS_PIN, HIGH); csInit = true; }
+
+  busTake();   // exclusive HSPI bus access vs any in-flight SD read/write
+  hspi.beginTransaction(SPISettings(2000000, MSBFIRST, SPI_MODE0));
+  digitalWrite(TOUCH_CS_PIN, LOW);
+  int z1 = xptChan(0xB1);
+  int z2 = xptChan(0xC1);
+  int zz = z1 + (4095 - z2);     // touch pressure proxy (higher = harder press)
+  uint16_t rx = 0, ry = 0;
+  if (zz >= OSK_TS_ZTHRESH) {
+    xptChan(0xD1);              // first reading is noisy; discard
+    rx = (xptChan(0xD1) + xptChan(0xD1)) / 2;   // X channel
+    ry = (xptChan(0x91) + xptChan(0x91)) / 2;   // Y channel
+  }
+  xptChan(0x90);                // power-down conversion
+  digitalWrite(TOUCH_CS_PIN, HIGH);
+  hspi.endTransaction();
+  busGive();
+
+  *x = rx; *y = ry; *z = zz;
+  return zz >= OSK_TS_ZTHRESH;
+}
+#endif
+
 bool touchRead(int16_t *sx, int16_t *sy)
 {
-  if (tft.getTouchRawZ() < OSK_TS_ZTHRESH) return false;
-
   uint16_t rx, ry;
+#if BOARD_TOUCH_VIA_TFT
+  if (tft.getTouchRawZ() < OSK_TS_ZTHRESH) return false;
   tft.getTouchRaw(&rx, &ry);
+#else
+  // Throttle XPT2046 reads: they share the SD HSPI bus, and polling every render frame (~60 Hz)
+  // disrupted SD / the USB host. ~25 Hz is ample for a touch UI; return the cached state between.
+  static uint32_t touchLastMs = 0; static bool touchLastDown = false;
+  static int16_t touchLastSx = 0, touchLastSy = 0;
+  uint32_t touchNow = millis();
+  if (touchNow - touchLastMs < 40) { *sx = touchLastSx; *sy = touchLastSy; return touchLastDown; }
+  touchLastMs = touchNow;
+  int rz;
+  if (!xptRead(&rx, &ry, &rz)) { touchLastDown = false; return false; }
+#endif
 
 #ifdef OSK_TOUCH_DEBUG
   Serial.printf("touch raw x=%u y=%u\n", rx, ry);
@@ -331,14 +421,20 @@ bool touchRead(int16_t *sx, int16_t *sy)
   if (OSK_TS_INVX) fx = 1.0f - fx;
   if (OSK_TS_INVY) fy = 1.0f - fy;
 
-  float u = OSK_TS_SWAP_XY ? fy : fx;   // along the 320-px axis
-  float v = OSK_TS_SWAP_XY ? fx : fy;   // along the 240-px axis
+  float u = OSK_TS_SWAP_XY ? fy : fx;   // along the wide axis
+  float v = OSK_TS_SWAP_XY ? fx : fy;   // along the tall axis
 
+  // Touch maps to the 320x240 logical UI space. On the JC4827W543 the UI is drawn SCALED to fill
+  // the 480x272 panel but still hit-tests in 320x240, so the same 0..319/0..239 mapping is used on
+  // both boards (the full-panel calibration already spread u/v across the whole touch area).
   *sx = (int16_t)constrain((int)(u * 320.0f), 0, 319);
   *sy = (int16_t)constrain((int)(v * 240.0f), 0, 239);
 
 #ifdef OSK_TOUCH_DEBUG
   Serial.printf("touch screen x=%d y=%d\n", *sx, *sy);
+#endif
+#if !BOARD_TOUCH_VIA_TFT
+  touchLastDown = true; touchLastSx = *sx; touchLastSy = *sy;   // cache for the throttle window
 #endif
   return true;
 }
@@ -425,6 +521,10 @@ static void oskHandleKey(int i)
     case OSK_ACT_HIDE:
       oskHide();
       break;
+    case OSK_ACT_MENU:                 // open the settings window from the keyboard
+      oskHide();
+      showHideOptionsWindow();
+      return;
     case OSK_ACT_SHIFT:
       osk_shift = !osk_shift;
       osk_dirty = true;          // labels (number row symbols) change with shift
@@ -438,6 +538,12 @@ static void oskHandleKey(int i)
       // Like a real Apple II: RESET alone does nothing; CTRL+RESET is a soft reset.
       if (osk_ctrl) { oskHide(); cpuReset(); }
       else          { oskDrawKey(i, true); osk_pressedIdx = i; }   // just show the press
+      break;
+    case OSK_ACT_USR1:                 // reserved side-panel buttons: no action wired up yet
+    case OSK_ACT_USR2:
+    case OSK_ACT_USR3:
+      oskDrawKey(i, true);
+      osk_pressedIdx = i;
       break;
     case OSK_ACT_ESC:
       if (osk_ctrl) {                 // Ctrl+Esc opens the settings menu (like PS/2)

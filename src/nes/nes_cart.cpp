@@ -159,7 +159,7 @@ bool nesLoadROM(const char *path) {
   prgRomSize = prgSize;                          // full size — bank-count math (both modes)
 
   // CHR — always fully resident in RAM.
-  chrData = (uint8_t *)malloc(chrAlloc);
+  chrData = (uint8_t *)::nesAllocFast(chrAlloc);   // internal DRAM (PSRAM fallback): read every pixel
   if (!chrData) { f.close(); printLog("NES: CHR malloc failed"); freeCart(); return false; }
   chrSize = chrAlloc;
   if (chrBanks == 0) {                          // CHR-RAM
@@ -175,7 +175,7 @@ bool nesLoadROM(const char *path) {
   // SD through the multi-slot LRU cache. (The fragmented heap has no 128K+ block, and not even
   // enough 8K pieces, so 128K games can't be fully resident — they stream.)
   if (!useStream) {
-    prgRom = (uint8_t *)malloc(prgSize);
+    prgRom = (uint8_t *)::nesAllocFast(prgSize);   // internal DRAM (PSRAM fallback): opcode fetch hot path
     if (prgRom) {
       f.seek(dataOffset);
       if (f.read(prgRom, prgSize) != (int)prgSize) { f.close(); printLog("NES: PRG read short"); freeCart(); return false; }
@@ -209,7 +209,7 @@ bool nesLoadROM(const char *path) {
   }
 
   // Optional 8K PRG-RAM at $6000 (battery or work RAM). Allocate unconditionally.
-  prgRam = (uint8_t *)malloc(8192);
+  prgRam = (uint8_t *)::nesAllocFast(8192);   // internal DRAM: $6000 work/battery RAM, CPU-bus hot
   if (prgRam) memset(prgRam, 0, 8192);
 
   mapperInit();                                 // set up the initial bank windows (streaming loads them)

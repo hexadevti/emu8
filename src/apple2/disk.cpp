@@ -191,6 +191,7 @@ void getTrack(fs::FS &fs, int track, bool force)
 {
   if (track != diskTrack || force)
   {
+    busTake();   // hold the shared HSPI bus for the whole open+seek+read (touch must wait)
     size_t positionToRead = getOffset(track, 0);
     // sprintf(buf, "Reading track %d - %s (%s)", track, selectedDiskFileName.c_str(), force ? "force" : "");
     // printLog(buf);
@@ -213,6 +214,7 @@ void getTrack(fs::FS &fs, int track, bool force)
     {
       printLog("Failed to open file for reading");
     }
+    busGive();
   }
 }
 
@@ -221,7 +223,8 @@ void saveImage(fs::FS &fs, int track)
   sprintf(buf, "Saving Track %0d", track);
   Serial.println(buf);
   int positionToWrite = getOffset(track, 0);
-  
+
+  busTake();   // hold the shared HSPI bus for the whole open+seek+write
   File file = fs.open(selectedDiskFileName.c_str(), "r+");
   if (file) {
     file.seek(positionToWrite, SeekSet);
@@ -233,7 +236,7 @@ void saveImage(fs::FS &fs, int track)
   {
     Serial.println("File failed to open");
   }
-
+  busGive();
 }
 
 void nextDiskFile()
@@ -703,12 +706,12 @@ char processSwitchc0e0(ushort address, char value)
   else if (address == 0xc0e8)
   {
     DriveMotorON_OFF = false;
-    digitalWrite(LED_PIN, HIGH);
+    diskLed(HIGH);
   }
   else if (address == 0xc0e9)
   {
     DriveMotorON_OFF = true;
-    digitalWrite(LED_PIN, LOW);
+    diskLed(LOW);
   }
   else if (address == 0xc0ea)
     Drive1_2 = true;

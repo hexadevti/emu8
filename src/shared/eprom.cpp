@@ -43,6 +43,9 @@ void epromSetup() {
   c64Autoload = (EEPROM.readChar(C64AutoloadEEPROMaddress) == 1);
   joyPort = EEPROM.readChar(JoyPortEEPROMaddress);
   if (joyPort != 1 && joyPort != 2) joyPort = 2;
+  // ==1 test (not readBool) so an uninitialised 0xFF on older devices reads as OFF, not ON.
+  screenFill = (EEPROM.readChar(ScreenFillEEPROMaddress) == 1);
+  { char s = EEPROM.readChar(NesDisplaySkipEEPROMaddress); nesDisplaySkip = (s >= 1 && s <= 3) ? (uint8_t)s : 3; }  // default 3; fresh EEPROM (0xFF) -> 3
   readStringFromEEPROM(C64FileNameEEPROMaddress, &selectedC64FileName);
   if (selectedC64FileName.length() == 0 || selectedC64FileName.length() > 120 ||
       selectedC64FileName[0] != '/') {
@@ -119,6 +122,8 @@ void saveEEPROM() {
     EEPROM.writeChar(VolumeEEPROMaddress, volume);
     EEPROM.writeBool(dacSoundEEPROMaddress, dacSound);
     EEPROM.writeChar(PlatformEEPROMaddress, currentPlatform);
+    EEPROM.writeChar(ScreenFillEEPROMaddress, screenFill ? 1 : 0);
+    EEPROM.writeChar(NesDisplaySkipEEPROMaddress, (char)nesDisplaySkip);
   }
 
 // Persist every user-configurable option (all toggles, volume, and the selected

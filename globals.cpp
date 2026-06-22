@@ -5,7 +5,11 @@
 #include "emu.h"
 
 // Video (tft first!)
+#if BOARD_HAS_TFT_ESPI
 TFT_eSPI tft = TFT_eSPI();
+#else
+DisplayGFX tft;                 // Arduino_GFX backend (JC4827W543); color565() is pure math
+#endif
 const uint16_t colors[8] = {TFT_BLACK, TFT_GREEN, TFT_PURPLE, TFT_WHITE, TFT_BLACK, tft.color565(255, 20, 0), TFT_SKYBLUE, TFT_WHITE};
 const uint16_t colors16[16] = {tft.color565(0, 0, 0), tft.color565(147, 11, 124), tft.color565(98, 76, 0), tft.color565(249, 86, 29),
                                tft.color565(0, 118, 12), tft.color565(126, 126, 126), tft.color565(67, 200, 0), tft.color565(220, 205, 22),
@@ -60,6 +64,8 @@ bool sound = true;
 bool dacSound = false;
 bool upscale = false;
 bool smoothUpscale = false;
+bool screenFill = false;   // JC4827W543: fill the 480x272 panel with the 320x240 video (keep 4:3)
+uint8_t nesDisplaySkip = 3; // JC4827W543 NES: draw 1 of every N frames (core-0 display-skip frees the core-1 interpreter)
 bool AppleIIe = true;
 bool OptionsWindow = false;
 bool DebugWindow = false;

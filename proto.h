@@ -40,6 +40,11 @@ void optionsScreenRender();
 void speakerSetup();
 void speakerToggle();
 
+// audio_amp.cpp (no-DAC boards / ESP32-S3): external I2S amp output the audio cores feed into
+void ampBegin(int sampleRate);
+void ampWriteDac8(const uint16_t *dacBuf, int n);   // 8-bit DAC (value in high byte) -> 16-bit amp
+void ampWriteMono(const int16_t *mono, int n);      // 16-bit signed mono -> amp (Apple speaker)
+
 // keyboardPs2.cpp
 unsigned char keyboard_read();
 void keyboardStrobe();
@@ -49,6 +54,10 @@ void keyboard_bit();
 // joystick.cpp
 void processJoystick(float speedAdjust);
 void joystickSetup();
+void applyPlatformInput();   // push joyX/joyY/Pb0-3 to the active core (shared: analog + USB)
+
+// usbgamepad.cpp (JC4827W543 / ESP32-S3 only): USB-HID host SNES gamepad -> joyX/joyY/Pb0-3
+void usbGamepadSetup();
 
 // touchkeyboard.cpp
 void oskBuildLayout();
@@ -75,6 +84,9 @@ int red(int color);
 int green(int color);
 int blue(int color);
 void renderLoop(void *pvParameters);
+void displayFlush();   // push the rendered frame to the panel (Arduino_GFX canvas); no-op on TFT_eSPI
+void displaySetUiMode(bool ui);   // true=UI scaled to full panel, false=emulator video centered; no-op on TFT_eSPI
+void displaySetVideoRect(int topLogical, int hLogical);   // active video content rect (for fill-screen); no-op on TFT_eSPI
 
 // --- Apple II core ---
 // cpu.cpp

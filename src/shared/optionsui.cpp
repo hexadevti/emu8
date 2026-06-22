@@ -52,12 +52,24 @@ static bool optionsUiWaitRelease = false;
 // Toggle grid slots 6 and 7 (bottom-right) are intentionally left empty for two
 // future buttons; navigation skips them.
 #define OUI_TG_COUNT      6
+#if BOARD_DISPLAY_GFX
+// The JC4827W543 adds a SCREEN (fill / original) toggle in grid slot 6, so the later focus
+// targets shift up by one. On the CYD the panel is already 320x240 (nothing to fill) -> no slot.
+#define OUI_FOC_SCREEN    6   // grid slot 6: fill-screen video toggle
+#define OUI_FOC_VOL       7
+#define OUI_FOC_FILES     8
+#define OUI_FOC_MOUNT     9   // Apple: MOUNT          / C64: LOAD & RUN
+#define OUI_FOC_MNTREBOOT 10  // Apple: MOUNT + REBOOT / C64: (unused)
+#define OUI_FOC_REBOOT    11  // both:  REBOOT
+#define OUI_FOC_COUNT     12
+#else
 #define OUI_FOC_VOL       6
 #define OUI_FOC_FILES     7
 #define OUI_FOC_MOUNT     8   // Apple: MOUNT          / C64: LOAD & RUN
 #define OUI_FOC_MNTREBOOT 9   // Apple: MOUNT + REBOOT / C64: (unused)
 #define OUI_FOC_REBOOT    10  // both:  REBOOT
 #define OUI_FOC_COUNT     11
+#endif
 static int optionsUiFocus = 0;
 
 // The settings window is shared by every platform. These accessors pick the active
@@ -170,6 +182,15 @@ static void ouiClearToggle(int idx)
   tft.fillRect(x, y, OUI_TG_W, OUI_TG_H, OUI_BG);
 }
 
+// JC4827W543 only: a SCREEN toggle in grid slot 6 (drawn after the platform toggles clear it).
+// FILL = video scaled to fill the panel (keep 4:3); ORIG = centered 320x240 with a border.
+static void ouiDrawScreenToggle()
+{
+#if BOARD_DISPLAY_GFX
+  ouiDrawToggle(6, "SCREEN", screenFill ? "FILL" : "ORIG", OUI_TXT);
+#endif
+}
+
 static void ouiDrawToggles()
 {
   if (ouiIsC64()) {
@@ -179,13 +200,22 @@ static void ouiDrawToggles()
     ouiDrawToggle(3, "AUTOLOAD", c64Autoload ? "ON" : "OFF",     OUI_TXT);
     ouiDrawToggle(4, "JOY PORT", joyPort == 1 ? "1" : "2",       OUI_TXT);
     for (int i = 5; i < 8; i++) ouiClearToggle(i);
+    ouiDrawScreenToggle();
     return;
   }
   if (ouiIsNES() || ouiIsAtari()) {          // NES / Atari grid: SOUND / JOYSTICK / VIDEO
     ouiDrawToggle(0, "SOUND",    sound ? "ON" : "MUTE",          OUI_TXT);
     ouiDrawToggle(1, "JOYSTICK", joystick ? "ON" : "OFF",        OUI_TXT);
     ouiDrawToggle(2, "VIDEO",    videoColor ? "COLOR" : "MONO",  OUI_TXT);
-    for (int i = 3; i < 8; i++) ouiClearToggle(i);
+#if BOARD_DISPLAY_GFX
+    if (ouiIsNES()) {                         // NES (S3 only): display frame-skip (game speed vs smoothness)
+      const char *sv = (nesDisplaySkip <= 1) ? "OFF" : (nesDisplaySkip == 2) ? "2" : "3";
+      ouiDrawToggle(3, "SKIP", sv, OUI_TXT);
+      for (int i = 4; i < 8; i++) ouiClearToggle(i);
+    } else
+#endif
+    { for (int i = 3; i < 8; i++) ouiClearToggle(i); }
+    ouiDrawScreenToggle();
     return;
   }
   ouiDrawToggle(0, "DEVICE",   HdDisk ? "HD" : "DISK",          OUI_TXT);
@@ -194,7 +224,7 @@ static void ouiDrawToggles()
   ouiDrawToggle(3, "SOUND",    sound ? "ON" : "MUTE",           OUI_TXT);
   ouiDrawToggle(4, "JOYSTICK", joystick ? "ON" : "OFF",         OUI_TXT);
   ouiDrawToggle(5, "VIDEO",    videoColor ? "COLOR" : "MONO",   OUI_TXT);
-  // Slots 6 and 7 (bottom-right) left empty for two future buttons.
+  ouiDrawScreenToggle();   // slot 6 (S3); slot 7 still free for a future button
 }
 
 static void ouiDrawVolume()
@@ -350,6 +380,10 @@ void optionsUiRender()
 // ---------------------------------------------------------------------------
 // Actions
 // ---------------------------------------------------------------------------
+#if BOARD_DISPLAY_GFX
+static void ouiToggleScreenFill() { screenFill = !screenFill; optionsUiDirty = true; }
+#endif
+
 static void ouiToggle(int idx)
 {
   if (ouiIsC64()) {                       // C64 grid: SOUND/JOYSTICK/VIDEO/AUTOLOAD/JOY PORT
@@ -364,11 +398,16 @@ static void ouiToggle(int idx)
     optionsUiDirty = true;
     return;
   }
-  if (ouiIsNES() || ouiIsAtari()) {        // NES / Atari grid: SOUND / JOYSTICK / VIDEO
+  if (ouiIsNES() || ouiIsAtari()) {        // NES / Atari grid: SOUND / JOYSTICK / VIDEO (+ SKIP on NES)
     switch (idx) {
       case 0: sound = !sound;           break;
       case 1: joystick = !joystick;     break;
       case 2: videoColor = !videoColor; break;
+#if BOARD_DISPLAY_GFX
+      case 3: if (!ouiIsNES()) return;        // NES (S3): cycle display frame-skip 1(off)->2->3
+              nesDisplaySkip = (nesDisplaySkip >= 3) ? 1 : nesDisplaySkip + 1;
+              break;
+#endif
       default: return;
     }
     optionsUiDirty = true;
@@ -463,6 +502,9 @@ void optionsUiAdjust(int dir)         // dir: -1 = up, +1 = down
 {
   int f = optionsUiFocus;
   if (f >= 0 && f < OUI_TG_COUNT) { ouiToggle(f); return; }
+#if BOARD_DISPLAY_GFX
+  if (f == OUI_FOC_SCREEN) { ouiToggleScreenFill(); return; }
+#endif
   if (f == OUI_FOC_VOL) {
     if (dir < 0) { if (volume < 0xf0) volume += 0x10; }
     else         { if (volume > 0) { volume -= 0x10; if (volume > 0xf0) volume = 0; } }
@@ -487,6 +529,9 @@ void optionsUiActivate()              // joystick fire button on the focused con
 {
   int f = optionsUiFocus;
   if (f >= 0 && f < OUI_TG_COUNT) ouiToggle(f);
+#if BOARD_DISPLAY_GFX
+  else if (f == OUI_FOC_SCREEN)    ouiToggleScreenFill();
+#endif
   else if (f == OUI_FOC_FILES)     ouiMount();
   else if (f == OUI_FOC_MOUNT)     ouiMount();
   else if (f == OUI_FOC_MNTREBOOT) ouiMountReboot();
@@ -503,7 +548,10 @@ static void ouiHandleTap(int16_t x, int16_t y)
   if (y >= OUI_TG_TOP && y < OUI_TG_TOP + 2 * OUI_TG_H) {
     int col = x / OUI_TG_W, row = (y - OUI_TG_TOP) / OUI_TG_H;
     int idx = row * 4 + col;
-    if (idx < OUI_TG_COUNT) ouiToggle(idx);   // slots 6,7 are empty
+    if (idx < OUI_TG_COUNT) ouiToggle(idx);
+#if BOARD_DISPLAY_GFX
+    else if (idx == 6) ouiToggleScreenFill();   // grid slot 6 = SCREEN (fill / original)
+#endif
     return;
   }
 

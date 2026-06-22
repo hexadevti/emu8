@@ -31,8 +31,8 @@ void nesSetup() {
   memset(sharedBigBuf, 0, NES_W * NES_H);
 
   // 2K CPU RAM + 2K nametable VRAM are malloc'd here (not static BSS — see nes.h).
-  nes::cpuRam = (uint8_t *)malloc(0x800);
-  nes::vram   = (uint8_t *)malloc(0x800);
+  nes::cpuRam = (uint8_t *)nesAllocFast(0x800);   // internal DRAM: zero-page/stack, hottest RAM
+  nes::vram   = (uint8_t *)nesAllocFast(0x800);   // internal DRAM: nametable fetch every tile
   if (nes::cpuRam) memset(nes::cpuRam, 0, 0x800);
   if (nes::vram)   memset(nes::vram, 0, 0x800);
 
@@ -55,6 +55,33 @@ void nesLoop() {
 void nesRenderFrame() {
   if (!nesScratch || !nes::framebuffer) return;
   const uint16_t *pal = videoColor ? nes::nesPalette : nes::nesPaletteGray;  // VIDEO color/mono
+
+#if BOARD_DISPLAY_GFX
+  // S3 fast path (default, unless fill-screen scaling is on): convert each 8-line band and push it
+  // STRAIGHT to the panel, bypassing the PSRAM canvas write and the full 480x272 QSPI flush. This is
+  // the lever that recovers the fps lost to core-0 PSRAM/MSPI contention with the core-1 interpreter.
+  extern bool screenFill;
+  if (!screenFill) {
+    static bool bordersDrawn = false;
+    if (!bordersDrawn) { tft.fillPanelBlack(); bordersDrawn = true; }   // static black frame, once
+    tft.setBypassCanvas(true);                  // make the top-of-loop displayFlush() a no-op
+    for (int y = 0; y < NES_H; ) {
+      int n = 0;
+      while (y + n < NES_H && n < 8) {
+        const uint8_t *src = nes::framebuffer + (y + n) * NES_W;
+        uint16_t *dst = nesScratch + n * NES_W;
+        for (int xx = 0; xx < NES_W; xx++) dst[xx] = pal[src[xx] & 0x3F];
+        n++;
+      }
+      tft.pushPanelBand(NES_OX, y, NES_W, n, nesScratch);   // direct to panel, centered
+      y += n;
+    }
+    return;
+  }
+#endif
+
+  // Original path (CYD via TFT_eSPI, or S3 with fill-screen scaling on): draw through the abstraction
+  // (canvas on S3, panel on CYD) and let the per-frame flush present it.
   tft.fillRect(0, 0, NES_OX, NES_H, TFT_BLACK);                 // left border
   tft.fillRect(NES_OX + NES_W, 0, 320 - (NES_OX + NES_W), NES_H, TFT_BLACK); // right border
   tft.setSwapBytes(true);

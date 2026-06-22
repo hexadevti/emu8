@@ -1,8 +1,10 @@
 #include "emu.h"
 
 void setup() {
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, HIGH); // Turn off green LED
+  if (LED_PIN >= 0) {
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, HIGH); // Turn off green LED (boards without an LED define LED_PIN = -1)
+  }
   logSetup();
   epromSetup();   // loads currentPlatform (and all saved settings) from EEPROM
   c64FreeBtMem();   // BOTH platforms: reclaim the unused BT controller DRAM (~36K) up front so
