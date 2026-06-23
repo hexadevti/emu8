@@ -34,22 +34,35 @@
 // Set to 1 to log every raw report to serial (for re-mapping a different controller).
 #define GP_LOG_RAW    0
 
+// NOTE on hot-swap: after a device disconnect the ESP32-S3 USB host leaves the root port wedged,
+// and the next plugged device fails to enumerate ("HUB: Failed to issue second reset / Root port
+// reset failed"). A full host re-install (usb_host_uninstall + begin) does NOT clear it (the port
+// reset still fails) and repeating it can crash the board, so it isn't attempted. The native USB
+// port has no GPIO VBUS control to power-cycle the device. Workaround: tap RST after swapping
+// devices — they enumerate cleanly on a cold boot.
 class SnesUsbHost : public EspUsbHost {
 public:
   void onReceive(const usb_transfer_t *transfer) override {
     EspUsbHost *h = (EspUsbHost *)transfer->context;
     endpoint_data_t *ep = &h->endpoint_data_list[transfer->bEndpointAddress & USB_B_ENDPOINT_ADDRESS_EP_NUM_MASK];
-    // Keyboard/mouse are handled by the base class; only decode the gamepad here.
+    // Keyboard/mouse are handled by the base class (onKeyboard below); only decode the gamepad here.
     if (ep->bInterfaceProtocol == HID_ITF_PROTOCOL_KEYBOARD ||
         ep->bInterfaceProtocol == HID_ITF_PROTOCOL_MOUSE) return;
     parseGamepad(transfer->data_buffer, transfer->actual_num_bytes);
+  }
+
+  // A USB keyboard shares this host: the base class decodes its boot report and calls us here.
+  // Forward the raw report (modifier + 6-key rollover) to the per-platform mapper (usbkeyboard.cpp).
+  void onKeyboard(hid_keyboard_report_t report, hid_keyboard_report_t last_report) override {
+    usbKeyboardReport(report.modifier, report.keycode, last_report.keycode);
   }
 
   void onGone(const usb_host_client_event_msg_t *eventMsg) override {
     joyX = joyY = 1; Pb0 = Pb1 = Pb2 = Pb3 = false;
     timerpdl0 = timerpdl1 = JOY_MID;
     applyPlatformInput();
-    printLog("USB gamepad disconnected");
+    usbKeyboardReset();   // release any keys a disconnected keyboard was holding
+    printLog("USB device disconnected (tap RST after plugging a new device)");
   }
 
 private:
@@ -116,7 +129,7 @@ static SnesUsbHost usbHost;
 
 static void usbGamepadTask(void *) {
   usbHost.begin();
-  printLog("USB host started (SNES gamepad on native USB)");
+  printLog("USB host started (SNES gamepad / keyboard on native USB)");
   while (running) {
     usbHost.task();      // pump USB host events / deliver reports to onReceive()
     delay(1);

@@ -78,6 +78,7 @@ static int optionsUiFocus = 0;
 static bool ouiIsC64() { return currentPlatform == PLATFORM_C64; }
 static bool ouiIsNES() { return currentPlatform == PLATFORM_NES; }
 static bool ouiIsAtari() { return currentPlatform == PLATFORM_ATARI; }
+static bool ouiIsIIgs() { return currentPlatform == PLATFORM_IIGS; }   // shares the Apple grid, minus MACHINE
 
 static std::vector<std::string> &ouiFiles()
 {
@@ -215,6 +216,16 @@ static void ouiDrawToggles()
     } else
 #endif
     { for (int i = 3; i < 8; i++) ouiClearToggle(i); }
+    ouiDrawScreenToggle();
+    return;
+  }
+  if (ouiIsIIgs()) {                          // IIGS: DEVICE + SPEED + SOUND/JOYSTICK/VIDEO (no II+/IIe)
+    ouiDrawToggle(0, "DEVICE",   HdDisk ? "HD" : "DISK",          OUI_TXT);
+    ouiDrawToggle(1, "SPEED",    Fast1MhzSpeed ? "FAST" : "1MHz", OUI_TXT);
+    ouiDrawToggle(2, "SOUND",    sound ? "ON" : "MUTE",           OUI_TXT);
+    ouiDrawToggle(3, "JOYSTICK", joystick ? "ON" : "OFF",         OUI_TXT);
+    ouiDrawToggle(4, "VIDEO",    videoColor ? "COLOR" : "MONO",   OUI_TXT);
+    for (int i = 5; i < 8; i++) ouiClearToggle(i);
     ouiDrawScreenToggle();
     return;
   }
@@ -413,6 +424,23 @@ static void ouiToggle(int idx)
     optionsUiDirty = true;
     return;
   }
+  if (ouiIsIIgs()) {                    // IIGS grid: 0=DEVICE 1=SPEED 2=SOUND 3=JOYSTICK 4=VIDEO
+    switch (idx) {
+      case 0:
+        HdDisk = !HdDisk;
+        if (HdDisk) { if (hdFiles.empty())   loadHdFilesSync();   }
+        else        { if (diskFiles.empty()) loadDiskFilesSync(); }
+        shownFile = 0xff; firstShowFile = 0; optionsUiSyncSelection();
+        break;
+      case 1: Fast1MhzSpeed = !Fast1MhzSpeed; break;   // SPEED: FAST (~2.8MHz) vs 1MHz regulator
+      case 2: sound = !sound; break;
+      case 3: joystick = !joystick; break;
+      case 4: videoColor = !videoColor; break;
+      default: return;
+    }
+    optionsUiDirty = true;
+    return;
+  }
   switch (idx) {
     case 0:
       HdDisk = !HdDisk;
@@ -466,6 +494,14 @@ static void ouiMount()
     if (shownFile >= files.size()) return;
     if (atariLoadSelected(files[shownFile].c_str()))
       showHideOptionsWindow();            // close only on success (failure keeps the old ROM)
+    return;
+  }
+  if (ouiIsIIgs()) {                       // IIGS: persist the highlighted image + reboot -> auto-mounted on boot
+    if (shownFile >= files.size()) return;
+    if (ouiIsDir(files[shownFile])) { ouiBrowse(files[shownFile]); return; }
+    if (HdDisk) setHdFile(); else setDiskFile();   // selectedHd/DiskFileName = highlighted image
+    saveConfig();         // persist so the boot auto-load (emu6502.ino) mounts it
+    ESP.restart();        // reboot -> iigsSetup loads it -> firmware boots (slot 7 HD / slot 6 disk)
     return;
   }
   if (HdDisk) setHdFile(); else setDiskFile();

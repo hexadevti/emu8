@@ -37,7 +37,7 @@ void epromSetup() {
   dacSound = EEPROM.readBool(dacSoundEEPROMaddress);
   volume = EEPROM.readChar(VolumeEEPROMaddress);
   currentPlatform = EEPROM.readChar(PlatformEEPROMaddress);
-  if (currentPlatform > PLATFORM_ATARI) currentPlatform = PLATFORM_APPLE2;  // unset/garbage -> default
+  if (currentPlatform > PLATFORM_IIGS) currentPlatform = PLATFORM_APPLE2;  // unset/garbage -> default
 
   // C64 settings (validated so old/uninitialised EEPROM doesn't enable surprises).
   c64Autoload = (EEPROM.readChar(C64AutoloadEEPROMaddress) == 1);

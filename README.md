@@ -4,7 +4,8 @@
 built-in TFT and microSD. Pick a system on the boot splash and it boots disk/cartridge images
 straight off a microSD card — no PC, no external ROM files.
 
-Four cores share one firmware, dispatched at runtime from the boot splash:
+Five systems share one firmware, dispatched at runtime from the boot splash — four mature cores plus
+the **Apple IIGS, which is still in development** (experimental):
 
 | System | CPU | Status | Image formats |
 | --- | --- | --- | --- |
@@ -12,6 +13,7 @@ Four cores share one firmware, dispatched at runtime from the boot splash:
 | **Commodore 64** | 6510 | Playable (VIC-II + SID + CIA); `.crt` cartridge support is partial | `.prg` `.d64` `.crt` |
 | **NES** | 2A03 (6502) | Playable; mappers 0–4 | `.nes` (iNES) |
 | **Atari 2600** | 6507 (6502) | Playable | `.a26` `.bin` (2K/4K/8K/16K/32K) |
+| **Apple IIGS** | 65C816 | **In development** — boots ROM 01, 40-col text + HiRes/DHiRes, standard ProDOS 5.25″/800 KB disks, 1-bit speaker. SHR-heavy/protected titles and GS-native (Ensoniq) sound are not done. | `.dsk` `.po` `.2mg` `.hdv` |
 
 > Derived from [hexadevti/Apple2Esp32](https://github.com/hexadevti/Apple2Esp32). The original was a
 > single-system Apple II emulator; emu6502 generalises the renderer, input, audio and SD layers into a
@@ -30,7 +32,7 @@ shared code switches on.
 | --- | --- | --- |
 | MCU | ESP32-WROOM-32 (no PSRAM) | ESP32-S3 (OPI PSRAM) |
 | Display | ILI9341 320×240 SPI, via TFT_eSPI | NV3041A 480×272 QSPI, via Arduino_GFX |
-| Input | PS/2 keyboard + analog joystick/paddles | **USB SNES gamepad** (USB-HID host) |
+| Input | PS/2 keyboard + analog joystick/paddles | **USB SNES gamepad + USB keyboard** (USB-HID host) |
 | On-screen keyboard | XPT2046 touch (display bus) | XPT2046 touch (dedicated SPI bus) |
 | Audio | Internal DAC (GPIO26) → on-board amp | I2S → NS4168 Class-D amp |
 | Storage | microSD (VSPI) | microSD (shared HSPI w/ touch) |
@@ -53,7 +55,7 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
 - [Pin assignments (CYD)](#pin-assignments-cyd)
 - [Board resources & schematics](#board-resources--schematics)
 - [Project structure](#project-structure)
-- [Experimental: Apple IIGS feasibility](#experimental-apple-iigs-feasibility)
+- [Experimental: Apple IIGS (in development)](#experimental-apple-iigs-in-development)
 - [Credits & license](#credits--license)
 
 ---
@@ -62,10 +64,10 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
 
 ### Shared core
 
-- **Boot-splash platform selector** — tap **APPLE / C64 / NES / ATARI** to choose a system; the
-  selection persists in EEPROM and auto-boots next time.
+- **Boot-splash platform selector** — tap **APPLE / C64 / NES / ATARI / IIGS** to choose a system; the
+  selection persists in EEPROM and auto-boots next time. (**IIGS** is experimental / in development.)
 - **microSD storage** for every platform, with on-screen file browsers per system.
-- **On-screen touch keyboard** (OSK) on both boards, plus PS/2 on the CYD.
+- **On-screen touch keyboard** (OSK) on both boards, plus PS/2 on the CYD and a **USB keyboard** on the JC4827W543.
 - **Audio** routed to the board's amplifier — internal DAC on the CYD, I2S Class-D on the S3.
 - **Settings persistence in EEPROM** (platform, machine type, speed, sound/volume, joystick,
   video options and the last-loaded image per platform).
@@ -108,9 +110,10 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
 
 ## Boot & platform selection
 
-On power-up emu6502 shows a boot splash with four buttons — **APPLE**, **C64**, **NES**, **ATARI**.
-Tap one to switch systems (this saves the choice and reboots into it); tap elsewhere or wait for the
-timeout to boot the currently-selected platform. On the CYD a joystick button also dismisses the splash.
+On power-up emu6502 shows a boot splash with five buttons — **APPLE**, **C64**, **NES**, **ATARI**,
+**IIGS** (the last still in development). Tap one to switch systems (this saves the choice and reboots
+into it); tap elsewhere or wait for the timeout to boot the currently-selected platform. On the CYD a
+joystick button also dismisses the splash.
 
 ---
 
@@ -126,8 +129,24 @@ Controls depend on the board:
 | `Ctrl` + `F12` | Apple **Reset** (CPU reset) |
 | `Ctrl` + `F5` | Reboot the ESP32 |
 
-**Guition JC4827W543** — USB SNES gamepad for gameplay + the on-screen touch keyboard (OSK) for typing
-and menus. The OSK and options menu are reachable through the touch UI.
+**Guition JC4827W543** — a **USB SNES gamepad** for gameplay and/or a **USB keyboard** for typing, plus
+the on-screen touch keyboard (OSK). Plug either into the native USB port. The OSK and options menu are
+also reachable through the touch UI.
+
+USB keyboard mapping (works on every platform):
+
+| Keys | Action |
+| --- | --- |
+| Letters / digits / symbols | Type into the active system (Apple/IIGS keycode, C64 keyboard matrix, …) |
+| Arrow keys | Cursor / d-pad |
+| `F12` | Open / close the options menu (arrows navigate, `Enter` activates) |
+| `F11` | Apple / IIGS **Reset** (CPU reset) |
+| NES: arrows + `X`=A · `Z`=B · `Enter`=Start · `Tab`=Select | NES controller 1 |
+| Atari: arrows + `Space`/`X`=Fire · `Enter`=Reset · `Tab`=Select | Atari stick + console switches |
+
+> Only keyboards that expose the standard HID **boot** protocol are decoded, and one USB device works at
+> a time (no hub). The native USB port has no VBUS switching, so **hot-swapping devices needs a tap of
+> RST** — a freshly plugged keyboard/gamepad enumerates cleanly on a cold boot.
 
 ---
 
@@ -298,22 +317,36 @@ emulated system. The top-level sketch wires them together:
 | [`emu.h`](emu.h) · [`proto.h`](proto.h) · [`globals.cpp`](globals.cpp) | Shared state (`extern`), prototypes, definitions |
 | [`rom.h`](rom.h) | Embedded Apple II/IIe ROMs |
 | [`User_Setup.h`](User_Setup.h) | TFT_eSPI configuration (CYD) |
-| [`src/shared/`](src/shared/) | Display (TFT_eSPI + Arduino_GFX backends), video/splash, SD, EEPROM, options UI, touch keyboard, USB gamepad, joystick, audio, logging |
+| [`src/shared/`](src/shared/) | Display (TFT_eSPI + Arduino_GFX backends), video/splash, SD, EEPROM, options UI, touch keyboard, USB gamepad + USB keyboard, joystick, audio, logging |
 | [`src/apple2/`](src/apple2/) | 6502 CPU, memory, language card, soft switches, Disk II, ProDOS HD, mouse |
 | [`src/c64/`](src/c64/) | 6510, VIC-II, SID, CIA, keyboard, disk, `.crt` loader, ROMs |
 | [`src/nes/`](src/nes/) | 2A03 CPU, PPU, APU, iNES loader, mappers 0–4 |
 | [`src/atari/`](src/atari/) | 6507 CPU, TIA, RIOT, cartridge bank-switching, audio |
-| [`src/iigs/`](src/iigs/) | Apple IIGS memory-feasibility benchmark (experimental, opt-in) |
+| [`src/iigs/`](src/iigs/) | Apple IIGS core — 65C816, banked memory, ROM 01 boot, video, disk (in development) + the original feasibility benchmark |
 | [`data/`](data/) · [`resources/`](resources/) | Sample disk images / test files |
 
 ---
 
-## Experimental: Apple IIGS feasibility
+## Experimental: Apple IIGS (in development)
 
-[`src/iigs/m0_bench.*`](src/iigs/) holds a throwaway PSRAM-timing benchmark used to evaluate whether a
-65C816 Apple IIGS core is viable on the ESP32-S3. It compiles to nothing unless built with
-`-DIIGS_M0_BENCH` (S3 only); when enabled it runs at the top of `setup()`, prints results over serial,
-then halts. No IIGS emulation is implemented — this is research scaffolding only.
+The Apple IIGS is a **work-in-progress fifth platform** (`PLATFORM_IIGS`), selectable from the boot
+splash on the ESP32-S3. It is **not finished** — treat its features as experimental and expect rough
+edges.
+
+What works today: 65C816 CPU core, banked memory, ROM 01 boots to its banner, 40-column text plus
+HiRes / Double-HiRes video, the Apple II 1-bit speaker, and booting standard ProDOS 5.25″ and 800 KB
+disks (`.dsk` / `.po` / `.2mg` / `.hdv`) from SD. A 1 MHz throttle makes Apple II software run at the
+original speed.
+
+Known gaps: GS-native super-hires-heavy or hardware-copy-protected titles don't run, GS-native Ensoniq
+5503 sound isn't implemented, full 65816 edge-case validation is pending, the clock/Battery-RAM
+self-test is stubbed, and boot is slow (~30 s). The core lives in
+[`src/iigs/iigs_boot.cpp`](src/iigs/); a desktop debug harness ([`host/iigs_host.cpp`](host/)) runs the
+same CPU core on a PC for fast iteration.
+
+The original PSRAM-timing feasibility benchmark ([`src/iigs/m0_bench.*`](src/iigs/)) is still present:
+it compiles to nothing unless built with `-DIIGS_M0_BENCH` (S3 only), then runs at the top of
+`setup()`, prints results over serial, and halts.
 
 ---
 

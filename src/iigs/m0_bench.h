@@ -15,5 +15,8 @@
 #pragma once
 
 #ifdef IIGS_M0_BENCH
-void runIIgsM0Bench();
+void runIIgsM0Bench();    // worst-case latency battery (B1..B9)
+#endif
+#ifdef IIGS_M05_BENCH
+void runIIgsM05Bench();   // realistic mix + scatter-fraction sweep + bank-reload throughput
 #endif

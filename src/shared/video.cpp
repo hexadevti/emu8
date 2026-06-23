@@ -69,16 +69,16 @@ uint16_t last_x = 0;
 // (switching to a different one saves to EEPROM and reboots so setup() can init it);
 // tapping elsewhere, a joystick button, or the timeout boots the current platform.
 // Runs on core 0 from renderLoop (which owns the TFT).
-#define SPLASH_MS    3000
+#define SPLASH_MS    12000   // generous: time to read the menu and tap a platform
 #define SPLASH_BTN_Y 164
 #define SPLASH_BTN_H 44
-static const int splashBtnX[4] = {4, 82, 160, 238};
-static const int splashBtnW    = 74;
+static const int splashBtnX[5] = {6, 68, 130, 192, 254};   // pulled in from the right edge (touch is
+static const int splashBtnW    = 58;                       // less reliable at the extreme right)
 
 static int splashHitTest(int16_t x, int16_t y)
 {
   if (y < SPLASH_BTN_Y || y >= SPLASH_BTN_Y + SPLASH_BTN_H) return -1;
-  for (int i = 0; i < 4; i++)
+  for (int i = 0; i < 5; i++)
     if (x >= splashBtnX[i] && x < splashBtnX[i] + splashBtnW) return i;
   return -1;
 }
@@ -112,6 +112,15 @@ static void splashSelect(uint8_t platform)
   if (platform == currentPlatform) { splashFinish(); return; }
   currentPlatform = platform;        // switching platforms needs a reboot to re-init
   saveConfig();
+  // ESP.restart() (an on-chip reset from firmware) reboots this board cleanly - unlike the host-side
+  // RTS reset which wedges it. Brief confirmation, then reboot; setup() inits the saved platform.
+  tft.setUiMode(true);
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString("LOADING...", 160, 110, 2);
+  displayFlush();
+  delay(700);
   ESP.restart();
 }
 
@@ -132,6 +141,7 @@ static void splashService()
     splashDrawBtn(PLATFORM_C64,    "C64",    true);
     splashDrawBtn(PLATFORM_NES,    "NES",    true);
     splashDrawBtn(PLATFORM_ATARI,  "ATARI",  true);
+    splashDrawBtn(PLATFORM_IIGS,   "IIGS",   true);
     drawn = true;
   }
 
@@ -142,6 +152,7 @@ static void splashService()
     else if (b == PLATFORM_C64)   splashSelect(PLATFORM_C64);
     else if (b == PLATFORM_NES)   splashSelect(PLATFORM_NES);
     else if (b == PLATFORM_ATARI) splashSelect(PLATFORM_ATARI);
+    else if (b == PLATFORM_IIGS)  splashSelect(PLATFORM_IIGS);
     else if (b < 0)               splashFinish();   // tapped outside -> boot current
     return;
   }
@@ -274,6 +285,19 @@ void renderLoop(void *pvParameters)
       atariRenderFrame();
       Vertical_blankingOn_Off = true;
       vTaskDelay(pdMS_TO_TICKS(10));
+      continue;
+    }
+
+    // Apple IIGS: the 65C816 (core 1) runs the firmware; draw its 40-col text page here.
+    if (currentPlatform == PLATFORM_IIGS)
+    {
+#if BOARD_DISPLAY_GFX
+      if (clearScr) { tft.fillScreen(TFT_BLACK); clearScr = false; }
+#endif
+      iigsRenderText();                  // UI-mode text (sets fillScreen + drawString); flush at loop top
+      if (oskActive()) { displaySetUiMode(true); oskRender(); }   // on-screen keyboard overlays the bottom
+      Vertical_blankingOn_Off = true;
+      vTaskDelay(pdMS_TO_TICKS(33));      // ~30 fps text refresh
       continue;
     }
 

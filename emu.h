@@ -152,7 +152,7 @@ extern uint8_t volume;
 // Target system for the multi-platform emulator. Apple II is implemented; C64 and
 // NES are placeholders selectable from the boot splash (see src/shared/video.cpp
 // splashService and the dispatch in emu6502.ino). Persisted in EEPROM.
-enum Platform : uint8_t { PLATFORM_APPLE2 = 0, PLATFORM_C64 = 1, PLATFORM_NES = 2, PLATFORM_ATARI = 3 };
+enum Platform : uint8_t { PLATFORM_APPLE2 = 0, PLATFORM_C64 = 1, PLATFORM_NES = 2, PLATFORM_ATARI = 3, PLATFORM_IIGS = 4 };
 extern uint8_t currentPlatform;
 
 // Log Config
