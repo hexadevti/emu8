@@ -46,6 +46,9 @@ static bool optionsUiDirty       = false;
 static bool optionsUiFirstDraw   = false;
 static bool optionsUiPrevDown    = false;
 static bool optionsUiWaitRelease = false;
+static bool ouiHelpOpen          = false;   // HELP overlay (controls cheat-sheet) is showing
+static void ouiOpenHelp();                  // (defined below; forward-declared for the nav handlers)
+static void ouiCloseHelp();
 
 // Joystick focus: left/right moves between controls; the focused one gets a white
 // border. Order: 0..5 toggle cards, then volume, file list, MOUNT, SAVE & REBOOT.
@@ -376,12 +379,107 @@ static void ouiDrawTitle()
   tft.drawString("X", cx + cw / 2, OUI_TITLE_H / 2, 2);
 }
 
+// HELP button: occupies the free toggle-grid slot 7 (bottom-right). Tapping it opens the
+// controls cheat-sheet overlay (ouiDrawHelp). Drawn for every platform.
+static void ouiDrawHelpButton()
+{
+  int idx = 7, col = idx % 4, row = idx / 4;
+  int x = col * OUI_TG_W, y = OUI_TG_TOP + row * OUI_TG_H;
+  uint16_t face = tft.color565(58, 92, 130);
+  tft.fillRoundRect(x + 2, y + 2, OUI_TG_W - 4, OUI_TG_H - 4, 5, face);
+  tft.drawRoundRect(x + 2, y + 2, OUI_TG_W - 4, OUI_TG_H - 4, 5, OUI_BORDER);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(OUI_TXT, face);
+  tft.drawString("HELP", x + OUI_TG_W / 2, y + OUI_TG_H / 2, 2);
+}
+
+// --- HELP overlay (per-platform controls cheat-sheet) ---
+static void ouiHelpHdr(int &y, const char *s)
+{
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(tft.color565(90, 200, 255), OUI_BG);
+  tft.drawString(s, 8, y, 2);
+  y += 19;
+}
+static void ouiHelpRow(int &y, const char *k, const char *v)
+{
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(OUI_ON, OUI_BG);
+  tft.drawString(k, 14, y, 1);
+  tft.setTextColor(tft.color565(205, 210, 220), OUI_BG);
+  tft.drawString(v, 120, y, 1);
+  y += 12;
+}
+
+static void ouiDrawHelp()
+{
+  tft.fillScreen(OUI_BG);
+  // title bar with an X (any tap closes, but the X is the obvious affordance)
+  tft.fillRect(0, 0, 320, OUI_TITLE_H, OUI_TITLE);
+  tft.setTextDatum(ML_DATUM);
+  tft.setTextColor(OUI_TXT, OUI_TITLE);
+  tft.drawString("HELP  /  CONTROLS", 10, OUI_TITLE_H / 2, 2);
+  int cw = OUI_TITLE_H, cx = 320 - cw;
+  tft.fillRect(cx, 0, cw, OUI_TITLE_H, OUI_RED);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(OUI_TXT, OUI_RED);
+  tft.drawString("X", cx + cw / 2, OUI_TITLE_H / 2, 2);
+
+  int y = OUI_TITLE_H + 6;
+  ouiHelpHdr(y, "GLOBAL");
+  ouiHelpRow(y, "F10",           "Open / close menu");
+  ouiHelpRow(y, "Vol +/-",       "Volume (media keys)");
+  ouiHelpRow(y, "Pad SEL+START", "Open / close menu");
+
+  if (ouiIsNES()) {
+    ouiHelpHdr(y, "NES  -  KEYBOARD");
+    ouiHelpRow(y, "Arrows",      "D-pad");
+    ouiHelpRow(y, "X / Z",       "A / B");
+    ouiHelpRow(y, "Enter / Tab", "Start / Select");
+    ouiHelpHdr(y, "NES  -  GAMEPAD");
+    ouiHelpRow(y, "D-pad",       "D-pad");
+    ouiHelpRow(y, "A / B",       "A / B");
+    ouiHelpRow(y, "Start / Sel", "Start / Select");
+  } else if (ouiIsAtari()) {
+    ouiHelpHdr(y, "ATARI  -  KEYBOARD");
+    ouiHelpRow(y, "Arrows",    "Joystick");
+    ouiHelpRow(y, "Space / X", "Fire");
+    ouiHelpRow(y, "Enter",     "Reset switch");
+    ouiHelpRow(y, "Tab",       "Select switch");
+    ouiHelpHdr(y, "ATARI  -  GAMEPAD");
+    ouiHelpRow(y, "D-pad", "Joystick");
+    ouiHelpRow(y, "A / B", "Fire / Select");
+    ouiHelpRow(y, "Start", "Reset");
+  } else if (ouiIsC64()) {
+    ouiHelpHdr(y, "C64  -  KEYBOARD");
+    ouiHelpRow(y, "Keys",   "C64 layout");
+    ouiHelpRow(y, "Arrows", "Cursor");
+    ouiHelpHdr(y, "C64  -  GAMEPAD");
+    ouiHelpRow(y, "D-pad", "Stick");
+    ouiHelpRow(y, "A",     "Fire");
+  } else {   // Apple II / IIGS
+    ouiHelpHdr(y, "APPLE  -  KEYBOARD");
+    ouiHelpRow(y, "Keys",   "Type into Apple");
+    ouiHelpRow(y, "Arrows", "Cursor");
+    ouiHelpRow(y, "F11",    "Reset");
+    ouiHelpHdr(y, "APPLE  -  GAMEPAD");
+    ouiHelpRow(y, "D-pad", "Paddle / stick");
+    ouiHelpRow(y, "A / B", "Button 0 / 1");
+  }
+
+  tft.setTextDatum(BC_DATUM);
+  tft.setTextColor(OUI_LBL, OUI_BG);
+  tft.drawString("Tap anywhere to close", 160, 236, 1);
+}
+
 void optionsUiRender()
 {
   if (!optionsUiDirty) return;
   if (optionsUiFirstDraw) { tft.fillScreen(OUI_BG); optionsUiFirstDraw = false; }
+  if (ouiHelpOpen) { ouiDrawHelp(); optionsUiDirty = false; return; }
   ouiDrawTitle();
   ouiDrawToggles();
+  ouiDrawHelpButton();
   ouiDrawVolume();
   ouiDrawFiles();
   ouiDrawActions();
@@ -519,10 +617,12 @@ static void ouiMountReboot()
 }
 
 // "REBOOT" button (both platforms): persist settings, then restart -> the boot splash, where
-// you can switch platforms.
+// you can switch platforms. (Explicit reboots ask for the splash; platform-select / mount+reboot
+// do not, so they boot straight into the chosen system.)
 static void ouiReboot()
 {
   saveConfig();
+  requestSplashOnNextBoot();
   ESP.restart();
 }
 
@@ -530,12 +630,14 @@ static void ouiReboot()
 // Left/right move the focus; up/down act on the focused control; fire activates it.
 void optionsUiNav(int dir)            // dir: -1 = left, +1 = right
 {
+  if (ouiHelpOpen) { ouiCloseHelp(); return; }   // any input dismisses the help overlay
   optionsUiFocus = (optionsUiFocus + dir + OUI_FOC_COUNT) % OUI_FOC_COUNT;
   optionsUiDirty = true;
 }
 
 void optionsUiAdjust(int dir)         // dir: -1 = up, +1 = down
 {
+  if (ouiHelpOpen) { ouiCloseHelp(); return; }
   int f = optionsUiFocus;
   if (f >= 0 && f < OUI_TG_COUNT) { ouiToggle(f); return; }
 #if BOARD_DISPLAY_GFX
@@ -563,6 +665,7 @@ void optionsUiAdjust(int dir)         // dir: -1 = up, +1 = down
 
 void optionsUiActivate()              // joystick fire button on the focused control
 {
+  if (ouiHelpOpen) { ouiCloseHelp(); return; }
   int f = optionsUiFocus;
   if (f >= 0 && f < OUI_TG_COUNT) ouiToggle(f);
 #if BOARD_DISPLAY_GFX
@@ -575,8 +678,15 @@ void optionsUiActivate()              // joystick fire button on the focused con
   // FOC_VOL: nothing (adjust with up/down)
 }
 
+// HELP overlay open/close. Opening/closing forces a full repaint (the pages don't overlap).
+static void ouiOpenHelp()  { ouiHelpOpen = true;  optionsUiFirstDraw = true; optionsUiDirty = true; }
+static void ouiCloseHelp() { ouiHelpOpen = false; optionsUiFirstDraw = true; optionsUiDirty = true; }
+
 static void ouiHandleTap(int16_t x, int16_t y)
 {
+  // HELP overlay is modal: any tap returns to the settings page.
+  if (ouiHelpOpen) { ouiCloseHelp(); return; }
+
   // close button
   if (y < OUI_TITLE_H && x >= 320 - OUI_TITLE_H) { showHideOptionsWindow(); return; }
 
@@ -588,6 +698,7 @@ static void ouiHandleTap(int16_t x, int16_t y)
 #if BOARD_DISPLAY_GFX
     else if (idx == 6) ouiToggleScreenFill();   // grid slot 6 = SCREEN (fill / original)
 #endif
+    else if (idx == 7) ouiOpenHelp();           // grid slot 7 = HELP (controls cheat-sheet)
     return;
   }
 
@@ -648,6 +759,7 @@ void optionsUiOpen()
   if (ouiIsAtari() && atariFiles.empty()) atariScanFiles(); // populate the .a26/.bin browser
   optionsUiSyncSelection();
   optionsUiFocus       = 0;
+  ouiHelpOpen          = false;  // always open on the settings page, not the help overlay
   optionsUiFirstDraw   = true;
   optionsUiDirty       = true;
   optionsUiWaitRelease = true;   // don't treat the opening tap as a click

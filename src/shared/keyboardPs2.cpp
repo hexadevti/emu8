@@ -92,6 +92,7 @@ void keyboard_bit()
               }
               else if (keyboard_data[2] == 0x03) // CTRL-F5
               {
+                requestSplashOnNextBoot();   // explicit reboot -> show the boot splash
                 ESP.restart();
               }
               else if (keyboard_data[2] == 0x76) // CTRL-ESC

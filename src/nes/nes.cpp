@@ -81,7 +81,10 @@ void nesRenderFrame() {
 #endif
 
   // Original path (CYD via TFT_eSPI, or S3 with fill-screen scaling on): draw through the abstraction
-  // (canvas on S3, panel on CYD) and let the per-frame flush present it.
+  // (canvas on S3, panel on CYD) and let the per-frame flush present it. On S3 fill-screen, ask the
+  // flush to STRETCH the 256x240 picture across the whole panel (no 4:3 aspect, no side bars) so the
+  // NES truly fills the screen; the no-op on CYD leaves the centered 320x240 panel unchanged.
+  displaySetVideoFill(NES_OX, NES_W, true);
   tft.fillRect(0, 0, NES_OX, NES_H, TFT_BLACK);                 // left border
   tft.fillRect(NES_OX + NES_W, 0, 320 - (NES_OX + NES_W), NES_H, TFT_BLACK); // right border
   tft.setSwapBytes(true);

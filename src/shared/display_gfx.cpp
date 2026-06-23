@@ -22,9 +22,19 @@ extern bool screenFill;   // user option: scale the emulator video to fill the p
 // 320x240 space) before drawing, so fill-screen can scale just the content to the panel's full
 // height — dropping the cores' black top/bottom margins (Apple/Atari center 192 lines in 240; the
 // C64 screen is 200) — instead of the whole 320x240 (which would scale those margins up too).
+// gVideoLeft/Width are the matching horizontal rect, and gVideoStretch asks the fill flush to
+// stretch that rect across the FULL panel width (ignoring 4:3 aspect) instead of letterboxing —
+// every core sets it so its picture fills the whole screen in FILL mode. displaySetVideoRect()
+// resets the horizontal rect + stretch to defaults each frame; displaySetVideoFill() overrides after.
 static int gVideoTop = 0, gVideoHeight = DISP_LOGICAL_H;
+static int gVideoLeft = 0, gVideoWidth = DISP_LOGICAL_W;
+static bool gVideoStretch = false;
 void displaySetVideoRect(int topLogical, int hLogical) {
   gVideoTop = topLogical; gVideoHeight = (hLogical > 0) ? hLogical : DISP_LOGICAL_H;
+  gVideoLeft = 0; gVideoWidth = DISP_LOGICAL_W; gVideoStretch = false;   // defaults; fill overrides
+}
+void displaySetVideoFill(int leftLogical, int wLogical, bool stretch) {
+  gVideoLeft = leftLogical; gVideoWidth = (wLogical > 0) ? wLogical : DISP_LOGICAL_W; gVideoStretch = stretch;
 }
 
 // Arduino_Canvas allocates its framebuffer with aligned_alloc() = internal DRAM. A 480x272x2
@@ -202,15 +212,24 @@ void DisplayGFX::flush() {
   // (the render loop leaves it false after drawing the centered video, before this top-of-loop flush).
   if (!screenFill || _uiMode) { _canvas->flush(true); return; }
 
-  // Fill-screen path: scale just the active content rect [gVideoTop, +gVideoHeight] of the canvas
-  // (the cores draw centered at DISP_OFFSET_X/Y) up to the panel's full HEIGHT, keeping aspect (the
-  // same scale horizontally -> scaledW), centered with black side bars. This drops the cores' black
-  // top/bottom margins so the picture truly fills the screen vertically.
+  // Fill-screen path: scale just the active content rect [gVideoLeft/Top, +gVideoWidth/Height] of
+  // the canvas (the cores draw centered at DISP_OFFSET_X/Y) up to the panel's full HEIGHT. By
+  // default it keeps aspect (same scale horizontally -> scaledW) and centers with black side bars,
+  // dropping the cores' black top/bottom margins so the picture fills the screen vertically. When
+  // gVideoStretch is set (all cores do) it stretches the rect across the FULL width — true 100%.
   int vTop = gVideoTop, vH = gVideoHeight;
   if (vH <= 0 || vTop < 0 || vTop + vH > DISP_LOGICAL_H) { vTop = 0; vH = DISP_LOGICAL_H; }   // sanity
-  int scaledW = (int)((long)DISP_LOGICAL_W * PANEL_NATIVE_H / vH);   // horizontal scale == vertical
-  if (scaledW > PANEL_NATIVE_W) scaledW = PANEL_NATIVE_W;            // never overflow the panel width
-  int outX = (PANEL_NATIVE_W - scaledW) / 2;
+  int vLeft = gVideoLeft, vW = gVideoWidth;
+  if (vW <= 0 || vLeft < 0 || vLeft + vW > DISP_LOGICAL_W) { vLeft = 0; vW = DISP_LOGICAL_W; }  // sanity
+
+  int scaledW, outX;
+  if (gVideoStretch) {                  // stretch the content rect over the whole width
+    scaledW = PANEL_NATIVE_W; outX = 0; //   (no 4:3 aspect, no side bars)
+  } else {                              // keep aspect: horizontal scale == vertical, letterbox sides
+    scaledW = (int)((long)vW * PANEL_NATIVE_H / vH);
+    if (scaledW > PANEL_NATIVE_W) scaledW = PANEL_NATIVE_W;          // never overflow the panel width
+    outX = (PANEL_NATIVE_W - scaledW) / 2;
+  }
 
   static uint16_t *fillBuf = nullptr;
   if (!fillBuf) {
@@ -222,7 +241,7 @@ void DisplayGFX::flush() {
   for (int oy = 0; oy < PANEL_NATIVE_H; oy++)
     rowMap[oy] = (int16_t)(DISP_OFFSET_Y + vTop + (int)((long)oy * vH / PANEL_NATIVE_H));
   for (int ox = 0; ox < scaledW; ox++)
-    colMap[ox] = (int16_t)(DISP_OFFSET_X + (int)((long)ox * DISP_LOGICAL_W / scaledW));
+    colMap[ox] = (int16_t)(DISP_OFFSET_X + vLeft + (int)((long)ox * vW / scaledW));
 
   for (int oy = 0; oy < PANEL_NATIVE_H; oy++) {
     const uint16_t *srow = _fb + (size_t)rowMap[oy] * PANEL_NATIVE_W;

@@ -190,7 +190,7 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
     uint8_t kc = keys[i];
     if (!kc || kbContains(last, kc)) continue;
 
-    // Settings menu: F12 toggles; while open, the keyboard drives the menu (all platforms).
+    // Settings menu: F10 toggles; while open, the keyboard drives the menu (all platforms).
     if (OptionsWindow) {
       switch (kc) {
         case HID_KEY_ARROW_LEFT:   optionsUiNav(-1);    break;
@@ -200,11 +200,11 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
         case HID_KEY_ENTER:
         case HID_KEY_KEYPAD_ENTER: optionsUiActivate(); break;
         case HID_KEY_ESCAPE:
-        case HID_KEY_F12:          showHideOptionsWindow(); break;
+        case HID_KEY_F10:          showHideOptionsWindow(); break;
       }
       continue;   // menu swallows every key
     }
-    if (kc == HID_KEY_F12) { showHideOptionsWindow(); continue; }
+    if (kc == HID_KEY_F10) { showHideOptionsWindow(); continue; }
     if (kc == HID_KEY_F11 &&
         (currentPlatform == PLATFORM_APPLE2 || currentPlatform == PLATFORM_IIGS)) {
       cpuReset(); continue;

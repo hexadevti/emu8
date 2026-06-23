@@ -33,6 +33,9 @@
 
 // Set to 1 to log every raw report to serial (for re-mapping a different controller).
 #define GP_LOG_RAW    0
+// Set to 1 to log every HID report (onReceive + onKeyboard) to serial, e.g. to capture a keyboard's
+// media-key report format when adding a new shortcut.
+#define USB_RX_DEBUG  0
 
 // NOTE on hot-swap: after a device disconnect the ESP32-S3 USB host leaves the root port wedged,
 // and the next plugged device fails to enumerate ("HUB: Failed to issue second reset / Root port
@@ -45,6 +48,19 @@ public:
   void onReceive(const usb_transfer_t *transfer) override {
     EspUsbHost *h = (EspUsbHost *)transfer->context;
     endpoint_data_t *ep = &h->endpoint_data_list[transfer->bEndpointAddress & USB_B_ENDPOINT_ADDRESS_EP_NUM_MASK];
+#if USB_RX_DEBUG
+    { int n = transfer->actual_num_bytes; char ln[160];
+      int p = snprintf(ln, sizeof(ln), "RX ep=%02x cls=%02x sub=%02x proto=%02x n=%d:",
+                       transfer->bEndpointAddress, ep->bInterfaceClass, ep->bInterfaceSubClass, ep->bInterfaceProtocol, n);
+      for (int i = 0; i < n && i < 20; i++) p += snprintf(ln + p, sizeof(ln) - p, " %02X", transfer->data_buffer[i]);
+      Serial.println(ln); }
+#endif
+    // A USB keyboard's media keys (Consumer Control) ride the keyboard endpoint here as a short
+    // report-ID'd report, e.g. "02 E9 00" = Vol+, "02 EA 00" = Vol- (report ID 0x02, then the 16-bit
+    // usage). They arrive with proto=KEYBOARD, so catch Volume Up/Down BEFORE the keyboard/mouse
+    // early-return below (the boot keyboard's own 8-byte reports are too long to match, so normal
+    // typing is untouched and still flows through onKeyboard).
+    if (handleConsumerVolume(transfer->data_buffer, transfer->actual_num_bytes)) return;
     // Keyboard/mouse are handled by the base class (onKeyboard below); only decode the gamepad here.
     if (ep->bInterfaceProtocol == HID_ITF_PROTOCOL_KEYBOARD ||
         ep->bInterfaceProtocol == HID_ITF_PROTOCOL_MOUSE) return;
@@ -54,6 +70,11 @@ public:
   // A USB keyboard shares this host: the base class decodes its boot report and calls us here.
   // Forward the raw report (modifier + 6-key rollover) to the per-platform mapper (usbkeyboard.cpp).
   void onKeyboard(hid_keyboard_report_t report, hid_keyboard_report_t last_report) override {
+#if USB_RX_DEBUG
+    Serial.printf("KB mod=%02x keys= %02X %02X %02X %02X %02X %02X\n", report.modifier,
+                  report.keycode[0], report.keycode[1], report.keycode[2],
+                  report.keycode[3], report.keycode[4], report.keycode[5]);
+#endif
     usbKeyboardReport(report.modifier, report.keycode, last_report.keycode);
   }
 
@@ -61,6 +82,7 @@ public:
     joyX = joyY = 1; Pb0 = Pb1 = Pb2 = Pb3 = false;
     timerpdl0 = timerpdl1 = JOY_MID;
     applyPlatformInput();
+    _prevConsumer = 0;    // forget any half-pressed media key
     usbKeyboardReset();   // release any keys a disconnected keyboard was holding
     printLog("USB device disconnected (tap RST after plugging a new device)");
   }
@@ -68,6 +90,24 @@ public:
 private:
   bool _prevMenu = false;
   int  _pmX = 1, _pmY = 1; bool _pmFire = false;
+  uint8_t _prevConsumer = 0;   // last Consumer-Control volume usage seen (press/release edge tracking)
+
+  // Master volume from a USB keyboard's media keys. The Consumer-Control report is short and carries
+  // a 16-bit usage; Volume Up = 0xE9, Volume Down = 0xEA (Consumer page). We step the app volume once
+  // per press (edge-detected) and swallow the report so the gamepad decoder never sees it. Returns
+  // true if the short report was a media-volume press/release (consumed), false otherwise.
+  bool handleConsumerVolume(const uint8_t *d, int n) {
+    if (!d || n < 1 || n > 4) return false;        // gamepad reports are 8 bytes; media reports are short
+    uint8_t cur = 0;
+    for (int i = 0; i < n; i++) if (d[i] == 0xE9 || d[i] == 0xEA) { cur = d[i]; break; }
+    if (!cur && !_prevConsumer) return false;      // short report, no volume usage, none pending: not ours
+    if (cur && cur != _prevConsumer) {             // press edge -> one step (0x10 of the 0x00..0xF0 range)
+      if (cur == 0xE9) { if (volume < 0xf0) volume += 0x10; }
+      else             { if (volume > 0) { volume -= 0x10; if (volume > 0xf0) volume = 0; } }
+    }
+    _prevConsumer = cur;                            // track so holding a media key steps only once
+    return true;
+  }
 
   void parseGamepad(const uint8_t *d, int n) {
     if (n < 2) return;

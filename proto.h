@@ -87,6 +87,7 @@ void uiDirScanProgress(int count);    // draw a "Loading…" bar while a directo
 
 // video.cpp
 void videoSetup();
+void requestSplashOnNextBoot();       // arrange for the boot splash to show after the next reboot
 int red(int color);
 int green(int color);
 int blue(int color);
@@ -94,6 +95,7 @@ void renderLoop(void *pvParameters);
 void displayFlush();   // push the rendered frame to the panel (Arduino_GFX canvas); no-op on TFT_eSPI
 void displaySetUiMode(bool ui);   // true=UI scaled to full panel, false=emulator video centered; no-op on TFT_eSPI
 void displaySetVideoRect(int topLogical, int hLogical);   // active video content rect (for fill-screen); no-op on TFT_eSPI
+void displaySetVideoFill(int leftLogical, int wLogical, bool stretch);   // horizontal content rect + stretch-to-full-width (NES); no-op on TFT_eSPI
 
 // --- Apple II core ---
 // cpu.cpp

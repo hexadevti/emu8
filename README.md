@@ -139,7 +139,7 @@ USB keyboard mapping (works on every platform):
 | --- | --- |
 | Letters / digits / symbols | Type into the active system (Apple/IIGS keycode, C64 keyboard matrix, …) |
 | Arrow keys | Cursor / d-pad |
-| `F12` | Open / close the options menu (arrows navigate, `Enter` activates) |
+| `F10` | Open / close the options menu (arrows navigate, `Enter` activates) |
 | `F11` | Apple / IIGS **Reset** (CPU reset) |
 | NES: arrows + `X`=A · `Z`=B · `Enter`=Start · `Tab`=Select | NES controller 1 |
 | Atari: arrows + `Space`/`X`=Fire · `Enter`=Reset · `Tab`=Select | Atari stick + console switches |

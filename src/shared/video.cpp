@@ -3,7 +3,18 @@
 
 
 #include "bootlogo.h"   // embedded boot-splash logo (RGB565)
+#include <esp_system.h>          // esp_reset_reason()
+#include <esp_attr.h>            // RTC_NOINIT_ATTR
 bool splashActive = true; // true until the boot splash times out or is dismissed
+
+// Boot-splash policy. The SELECT SYSTEM banner only appears on a hardware reset (power-on / RST
+// button) or when the user explicitly asks for it via the "Reboot" settings button / Ctrl-F5 --
+// which call requestSplashOnNextBoot() to stash a magic in RTC memory (it survives the soft reset)
+// just before restarting. Selecting a platform on the splash, and the mount+reboot paths, restart
+// WITHOUT the magic, so they boot straight into the chosen system without re-showing the banner.
+RTC_NOINIT_ATTR static uint32_t splashOnBootMagic;
+#define SPLASH_ON_BOOT_MAGIC 0x5350A5AAu
+void requestSplashOnNextBoot() { splashOnBootMagic = SPLASH_ON_BOOT_MAGIC; }
 
 // colors[] / colors16[] are defined in globals.cpp (after tft, for static-init order).
 int flashCount = 0;
@@ -23,11 +34,17 @@ static StackType_t  renderTaskStack[8192];
 void displayFlush() {}
 void displaySetUiMode(bool) {}
 void displaySetVideoRect(int, int) {}
+void displaySetVideoFill(int, int, bool) {}
 #endif
 
 void videoSetup()
 {
   printLog("Video Setup...");
+  // Decide whether the boot splash shows this run (see splashOnBootMagic above): a soft reboot
+  // (ESP.restart) skips it UNLESS the magic was set; any hardware reset (power-on / RST) shows it.
+  bool softReboot = (esp_reset_reason() == ESP_RST_SW);
+  splashActive = !softReboot || (splashOnBootMagic == SPLASH_ON_BOOT_MAGIC);
+  splashOnBootMagic = 0;   // consume the request; the next plain reboot then skips the splash
   tft.begin();
   tft.setRotation(3);
   tft.invertDisplay(true);
@@ -74,6 +91,7 @@ uint16_t last_x = 0;
 #define SPLASH_BTN_H 44
 static const int splashBtnX[5] = {6, 68, 130, 192, 254};   // pulled in from the right edge (touch is
 static const int splashBtnW    = 58;                       // less reliable at the extreme right)
+static const char *splashLabels[5] = {"APPLE", "C64", "NES", "ATARI", "IIGS"};
 
 static int splashHitTest(int16_t x, int16_t y)
 {
@@ -109,18 +127,25 @@ static void splashFinish()           // boot the current platform
 
 static void splashSelect(uint8_t platform)
 {
-  if (platform == currentPlatform) { splashFinish(); return; }
-  currentPlatform = platform;        // switching platforms needs a reboot to re-init
-  saveConfig();
-  // ESP.restart() (an on-chip reset from firmware) reboots this board cleanly - unlike the host-side
-  // RTS reset which wedges it. Brief confirmation, then reboot; setup() inits the saved platform.
-  tft.setUiMode(true);
-  tft.fillScreen(TFT_BLACK);
+  // Deselect the previously highlighted button and mark the tapped one, swap the subtitle for a
+  // loading message, hold it for a second, then close the splash (or reboot if the platform
+  // changed, since setup() must re-init the new core).
+  uint8_t prev = currentPlatform;
+  currentPlatform = platform;          // drives the highlight in splashDrawBtn below
+  if (prev != platform) splashDrawBtn(prev, splashLabels[prev], true);   // redraw old as inactive
+  splashDrawBtn(platform, splashLabels[platform], true);                 // redraw new as active
+  tft.fillRect(0, 140, 320, 20, TFT_BLACK);            // wipe the "SELECT SYSTEM" subtitle
   tft.setTextDatum(MC_DATUM);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawString("LOADING...", 160, 110, 2);
+  tft.setTextColor(tft.color565(0, 200, 120), TFT_BLACK);
+  tft.drawString("Loading...", 160, 150, 2);
   displayFlush();
-  delay(700);
+  delay(1000);
+
+  if (prev == platform) { splashFinish(); return; }
+  // Switching platforms needs a reboot to re-init. ESP.restart() (an on-chip reset from firmware)
+  // reboots this board cleanly - unlike the host-side RTS reset which wedges it. currentPlatform is
+  // already the new platform; persist it so setup() inits the saved platform after the restart.
+  saveConfig();
   ESP.restart();
 }
 
@@ -238,6 +263,7 @@ void renderLoop(void *pvParameters)
 #endif
       displaySetUiMode(false);
       displaySetVideoRect(20, 200);      // VIC-II screen is 200 lines (logical y 20..220); fill-screen scales that
+      displaySetVideoFill(0, 320, true); // fill-screen stretches the full-width 320x200 picture to 100% (no aspect/bars)
       c64RenderFrame();                  // text screen (top 14 rows when the OSK is open)
       if (oskActive()) { displaySetUiMode(true); oskRender(); }  // keyboard owns the bottom (UI)
       Vertical_blankingOn_Off = true;
@@ -282,6 +308,7 @@ void renderLoop(void *pvParameters)
 #endif
       displaySetUiMode(false);
       displaySetVideoRect(24, 192);      // TIA picture is 192 lines centered in 240 (24px borders)
+      displaySetVideoFill(0, 320, true); // fill-screen stretches the full-width 320x192 picture to 100% (no aspect/bars)
       atariRenderFrame();
       Vertical_blankingOn_Off = true;
       vTaskDelay(pdMS_TO_TICKS(10));
@@ -329,6 +356,11 @@ void renderLoop(void *pvParameters)
     tft.setAddrWindow(0, 0, 320, 240);
     else
     tft.setAddrWindow(margin_x, margin_y, 280, rasterH);
+    // fill-screen: stretch the raster to 100% of the panel (no 4:3 aspect, no side bars). Mirror the
+    // horizontal extent of the addr window above so we sample exactly the columns the raster filled
+    // (full 320 for the 40-col branch; the centered 280 at margin_x for the graphics/80-col branches).
+    if (!OptionsWindow && AppleIIe && !Cols40_80 && !DHiResOn_Off) displaySetVideoFill(0, 320, true);
+    else                                                           displaySetVideoFill(margin_x, (int)screen_width, true);
     tft.startWrite();
     
     
