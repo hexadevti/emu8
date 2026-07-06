@@ -21,9 +21,9 @@ void desktopUiShutdown();
 // Persistence of the desktop session. Load BEFORE the window is created (it carries the saved window
 // size + view prefs + which panels are open); Save on a clean quit (also flushes the ImGui dock
 // layout to imgui.ini and the emulator settings/last-disk to eeprom.bin via saveConfig()).
-void desktopUiLoadConfig();                    // read emu6502.cfg into the UI state
+void desktopUiLoadConfig();                    // read emu8.cfg into the UI state
 void desktopUiGetWindowSize(int *w, int *h);   // saved window size (0 = none stored yet)
-void desktopUiSaveState();                     // write emu6502.cfg + imgui.ini + saveConfig()
+void desktopUiSaveState();                     // write emu8.cfg + imgui.ini + saveConfig()
 
 // Feed every SDL event to ImGui (call from the input pump, on the main thread). The WantCapture
 // flags tell the emulator input layer whether ImGui consumed the keyboard/mouse this frame.

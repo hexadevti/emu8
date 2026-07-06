@@ -3,7 +3,7 @@
 // the only MSX file that pulls in emu.h (Arduino/board), keeping the rest of src/msx/ host-portable.
 //
 // Wired into the platform dispatch by:
-//   emu6502.ino setup()/loop(), src/shared/video.cpp renderLoop(), and src/shared/optionsui.cpp.
+//   emu8.ino setup()/loop(), src/shared/video.cpp renderLoop(), and src/shared/optionsui.cpp.
 
 #include "../../emu.h"
 #include "msx.h"
@@ -42,7 +42,7 @@ static void msxDiskClose() {              // flush everything left + close the w
   g_diskFile.close();
   g_diskFileOpen = false;
 }
-static volatile bool msxResetReq = false;
+volatile bool msxResetReq = false;   // set by the desktop debugger (debug_bridge.cpp) for an in-process reset
 static const int M_W = 256, M_H = 192, M_OX = (320 - 256) / 2;
 
 static uint8_t* msxAllocFast(size_t n) {                 // internal SRAM first (CPU hot path), PSRAM fallback
@@ -165,7 +165,11 @@ void msxLoop() {
     msxDiskFlush(4);                                   // drain a few dirty disk sectors to SD per frame
 
     if (msxFast) {
+#if defined(BOARD_DESKTOP)
+      taskYIELD();                                     // desktop: full host speed (render/input on other threads)
+#else
       vTaskDelay(1);                                   // uncapped: just yield to core 0 / WDT
+#endif
       nextUs = micros();
     } else {                                           // pace to real 3.58 MHz (absolute target = no drift)
       nextUs += FRAME_US;

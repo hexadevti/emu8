@@ -1,4 +1,4 @@
-// tiny386_core.h — thin C bridge over the vendored tiny386 core (pc.h). Lets the emu6502 glue
+// tiny386_core.h — thin C bridge over the vendored tiny386 core (pc.h). Lets the emu8 glue
 // (tiny386.cpp) drive the machine WITHOUT including pc.h, whose `PC` machine type would clash with
 // the Apple II 6502 program-counter global `PC` (proto.h). The core lives in its own translation
 // unit (tiny386_core.cpp) that includes pc.h but NOT emu.h; the glue includes emu.h but talks to

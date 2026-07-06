@@ -1,7 +1,7 @@
 // tiny386.h — public entry points for the PLATFORM_TINY386 emulator (Intel i386 PC + VGA).
-// Wraps the vendored tiny386 C99 core (hchunhui/tiny386, BSD-3) with the emu6502 glue in
+// Wraps the vendored tiny386 C99 core (hchunhui/tiny386, BSD-3) with the emu8 glue in
 // tiny386.cpp. Mirrors the PC-XT platform surface (see proto.h / src/pcxt/pcxt.h) so the
-// shared dispatch (emu6502.ino), render loop (src/shared/video.cpp) and settings UI treat it
+// shared dispatch (emu8.ino), render loop (src/shared/video.cpp) and settings UI treat it
 // like any other platform. The heavy machine is allocated in PSRAM; ROMs are embedded.
 #pragma once
 #include <stdint.h>

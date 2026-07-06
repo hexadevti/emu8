@@ -1,4 +1,4 @@
-// sms.h - Sega Master System machine model (Z80 + 315-5124 VDP + SN76489 PSG) for emu6502.
+// sms.h - Sega Master System machine model (Z80 + 315-5124 VDP + SN76489 PSG) for emu8.
 //
 // The SMS shares the Z80 core (src/z80/) with the MSX1 platform and a VDP that is a SUPERSET of the
 // TMS9918 - the new work versus MSX is Mode 4 (the tile/sprite mode all SMS games use), the SN76489
@@ -8,7 +8,7 @@
 // Like msx.h, this header is deliberately free of Arduino/board headers so the SAME core compiles into
 // host/sms_host.cpp (g++, off-device) and into the board build. Device-only glue (allocation,
 // render/config wiring) lives in src/sms/sms.cpp which DOES include emu.h. The C-linkage entry points
-// at the bottom (smsSetup/smsLoop/...) are what the platform dispatch in emu6502.ino / video.cpp calls.
+// at the bottom (smsSetup/smsLoop/...) are what the platform dispatch in emu8.ino / video.cpp calls.
 
 #pragma once
 #include <stdint.h>
@@ -76,7 +76,7 @@ void    cartSetImage(const uint8_t* data, int len);
 
 } // namespace sms
 
-// ===== platform entry points (called from emu6502.ino / video.cpp / optionsui.cpp) =====
+// ===== platform entry points (called from emu8.ino / video.cpp / optionsui.cpp) =====
 // Plain C++ linkage to match proto.h and the other platform cores (msx/nes/atari/...).
 void smsSetup();
 void smsLoop();

@@ -1,4 +1,7 @@
 #include "../../emu.h"
+#if defined(BOARD_DESKTOP)
+#include "../desktop/debug_bridge.h"   // dbgDiskRead: desktop disk-read heat map (no-op on device)
+#endif
 #include "c64.h"
 #include <dirent.h>   // raw POSIX directory enumeration (fast browser scan; see loadC64FilesSync)
 // SD_VFS_ROOT (the SD mount path) is defined in emu.h.
@@ -192,7 +195,11 @@ static bool d64ReadSector(File &f, int track, int sector, uint8_t *buf256) {
   long off = d64Offset(track, sector);
   if (off < 0) return false;
   if (!f.seek(off)) return false;
-  return f.read(buf256, 256) == 256;
+  bool ok = f.read(buf256, 256) == 256;
+#if defined(BOARD_DESKTOP)
+  if (ok) dbgDiskRead(track - 1, sector);   // disk-read heat map: C64 track 1-35 -> ring 0-34
+#endif
+  return ok;
 }
 
 bool c64DiskMounted() { return d64Path.length() > 0; }

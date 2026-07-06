@@ -5,12 +5,18 @@
 #include "msx.h"
 #include "msx_disk.h"
 #include <string.h>
+#if defined(BOARD_DESKTOP)
+#include "../desktop/debug_bridge.h"   // desktop debugger: pause/step/breakpoints/watchpoints/heat (no-op on device)
+#endif
 
 namespace msx {
 
 // ---- memory: 4 x 16 KB pages, each mapped to one of four primary slots by the PPI ($A8) ---------
 // Standard MSX1 layout: slot 0 = BIOS (pages 0-1), slot 1/2 = cartridge, slot 3 = 64 KB RAM.
 uint8_t memRead8(uint16_t a) {
+#if defined(BOARD_DESKTOP)
+  dbgBusTouch(a, DBG_HEAT_R);              // heat map (reads) + read watchpoints
+#endif
   int slot = ppiPageSlot(a >> 14);
   switch (slot) {
     case 0:  return (a < (uint16_t)biosLen) ? bios[a] : 0xFF;   // BIOS ROM (0xFF above its size)
@@ -20,6 +26,9 @@ uint8_t memRead8(uint16_t a) {
   }
 }
 void memWrite8(uint16_t a, uint8_t v) {
+#if defined(BOARD_DESKTOP)
+  dbgBusTouch(a, DBG_HEAT_W);              // heat map (writes) + write watchpoints
+#endif
   int slot = ppiPageSlot(a >> 14);
   switch (slot) {
     case 0:  break;                       // BIOS ROM: writes ignored
@@ -72,7 +81,23 @@ void machineReset() {
 void runFrame() {
   const uint64_t TPF = 59736;
   uint64_t target = cpu.cycles + TPF;
-  while (cpu.cycles < target) cpu.step();
+  while (cpu.cycles < target) {
+#if defined(BOARD_DESKTOP)
+    // Desktop debugger: break at the upcoming PC (breakpoint / run-to-cursor / step-over / step-out).
+    if (dbgBpShouldBreak(cpu.PC)) paused = true;                                                      // breakpoint
+    if (g_dbgRunToPC >= 0 && cpu.PC == (uint16_t)g_dbgRunToPC) { paused = true; g_dbgRunToPC = -1; }  // run-to / step-over
+    if (g_dbgRunUntilSP >= 0 && cpu.SP > (uint16_t)g_dbgRunUntilSP) { paused = true; g_dbgRunUntilSP = -1; } // step-out
+    if (paused) {
+      g_dbgBreakArmed = true;                       // re-arm so the next Resume passes this PC once
+      if (dbgStepReq > 0) dbgStepReq--;             // single-step: fall through and run exactly one instruction
+      else return;                                  // paused: leave the frame (msxLoop keeps the panel + last frame)
+    } else {
+      g_dbgBreakArmed = true;
+    }
+    dbgBusTouch(cpu.PC, DBG_HEAT_X);                 // heat map (executed opcode byte)
+#endif
+    cpu.step();
+  }
   // Render on THIS core (the CPU core) so the VDP reads the sprite/VRAM tables race-free, at a
   // consistent point - the end of the active frame, before the VBlank ISR updates them for the
   // next one. Only render into the shared framebuffer once core 0 has finished DISPLAYING the

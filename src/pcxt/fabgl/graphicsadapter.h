@@ -1,4 +1,4 @@
-// graphicsadapter.h - minimal CGA adapter STATE for the emu6502 PC-XT port.
+// graphicsadapter.h - minimal CGA adapter STATE for the emu8 PC-XT port.
 //
 // FabGL's GraphicsAdapter rasterized straight to a VGA scanout buffer. We don't
 // have VGA; the LCD render task (pcxtRenderFrame) reads this state and rasterizes

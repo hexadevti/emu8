@@ -1,4 +1,4 @@
-// machine.h - PC-XT machine glue for the emu6502 port.
+// machine.h - PC-XT machine glue for the emu8 port.
 //
 // Trimmed re-implementation of FabGL's PCEmulator Machine: keeps the 8086 + PIC
 // (x2) + PIT + i8042 + MC146818 + CGA wiring and the magic-interrupt BIOS bridge,

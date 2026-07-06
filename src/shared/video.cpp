@@ -440,7 +440,12 @@ void renderLoop(void *pvParameters)
       if (!drew) tft.setBypassCanvas(true);   // nothing changed -> no flush this round (free the bus)
 #endif
       Vertical_blankingOn_Off = true;
+#if defined(BOARD_DESKTOP)
+      vTaskDelay(pdMS_TO_TICKS(4));   // desktop: present is vsync-paced; the device's 16-40ms throttle
+                                      // (shared MSPI bus) just adds input lag here — keep it snappy
+#else
       vTaskDelay(pdMS_TO_TICKS(drew ? 16 : 40));
+#endif
       continue;
     }
 
@@ -471,7 +476,12 @@ void renderLoop(void *pvParameters)
       // Keyboard open: poll touch fast (12ms) so it stays responsive -- an idle frame is cheap (flush is
       // gated above). Otherwise cap the render rate (~22 fps): a full 1024x600 frame costs a lot of PSRAM
       // bandwidth and at 60 fps saturates the bus the i386 (core 1) shares, so throttling frees the CPU.
+#if defined(BOARD_DESKTOP)
+      vTaskDelay(pdMS_TO_TICKS(4));   // desktop: vsync-paced present; skip the device's 45-80ms bus-relief
+                                      // throttle so input + the VGA display stay responsive
+#else
       vTaskDelay(pdMS_TO_TICKS(osk ? 12 : ((vgaDrew || oskChanged) ? 45 : 80)));
+#endif
       continue;
     }
 

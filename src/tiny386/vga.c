@@ -33,7 +33,7 @@
 #include "vga.h"
 #include "pci.h"
 
-#if defined(ESP_PLATFORM)   // emu6502: -O3 for the VGA render (device build is -O2 globally)
+#if defined(ESP_PLATFORM)   // emu8: -O3 for the VGA render (device build is -O2 globally)
 #pragma GCC optimize("O3")
 #endif
 
@@ -141,7 +141,7 @@ struct VGAState {
 #endif
     uint32_t last_width;
     uint32_t last_height;
-    int disp_width, disp_height;   // emu6502: active mode pixel dims (for full-screen scaling)
+    int disp_width, disp_height;   // emu8: active mode pixel dims (for full-screen scaling)
     uint16_t last_line_offset;
     uint16_t last_start_addr;
     uint16_t last_cursor_offset;
@@ -761,7 +761,7 @@ static void vga_text_refresh(VGAState *s,
     
     width1 = width * cwidth;
     height1 = height * cheight;
-    s->disp_width = width1; s->disp_height = height1;   // emu6502: active text-mode pixel dims
+    s->disp_width = width1; s->disp_height = height1;   // emu8: active text-mode pixel dims
 #if defined(SCALE_3_2) || defined(SCALE_2_1) || defined(SWAPXY)
 #if defined(SCALE_3_2)
     if (fb_dev->width * 3 / 2 < width1 || fb_dev->height * 3 / 2 < height1 ||
@@ -1027,7 +1027,7 @@ static void vga_graphic_refresh(VGAState *s,
         }
     }
 
-    s->disp_width = w; s->disp_height = h;   // emu6502: active graphics-mode pixel dims
+    s->disp_width = w; s->disp_height = h;   // emu8: active graphics-mode pixel dims
     int y1 = 0;
     int i0 = 0;
 #if defined(SCALE_3_2) || defined(SCALE_2_1) || defined(SWAPXY)
@@ -2139,7 +2139,7 @@ void vga_set_force_8dm(VGAState *s, int v)
     s->force_8dm = v;
 }
 
-// emu6502: report the active display resolution (pixels) so the host can scale just the live
+// emu8: report the active display resolution (pixels) so the host can scale just the live
 // picture to fill the panel (the mode is centered in the larger framebuffer). 0 until the first
 // refresh; callers fall back to the framebuffer size.
 void vga_get_resolution(VGAState *s, int *w, int *h)

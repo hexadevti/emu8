@@ -27,9 +27,9 @@ extern int     g_dbgWatchHit;         // address that last tripped a watchpoint 
 // ---- memory-access heat map -----------------------------------------------------------------------
 // The cores' bus functions (read8/write8) + the opcode fetch call dbgBusTouch() so the heat panel can
 // show which addresses are read/written/executed. Zero-cost when the heat map is off (one branch).
-enum { DBG_HEAT_R = 0, DBG_HEAT_W = 1, DBG_HEAT_X = 2 };
+enum { DBG_HEAT_R = 0, DBG_HEAT_W = 1, DBG_HEAT_X = 2, DBG_HEAT_V = 3 };  // V = VIC-II DMA read (C64)
 extern bool      g_dbgHeatOn;                  // armed only after the buffers below are allocated
-extern uint32_t *g_dbgHeat[3];                 // [R/W/X] counters, 0x10000 each (CPU-addressable byte)
+extern uint32_t *g_dbgHeat[4];                 // [R/W/X/V] counters, 0x10000 each (CPU-addressable byte)
 // Hot path: called from each core's read8/write8 (R/W) + opcode fetch (X). Records heat AND trips
 // watchpoints. Both gated by a single bool so it costs ~one branch when neither feature is active.
 static inline void dbgBusTouch(uint32_t addr, int kind) {
@@ -48,8 +48,8 @@ const uint32_t *dbgHeatBuf(int kind);          // raw counter buffer for the vis
 // ---- disk-read heat map (Apple II Disk II) --------------------------------------------------------
 // The $C0EC nibble read calls dbgDiskRead(track, pos); the panel shows a track x position-in-track
 // (~sector) grid of read intensity — which tracks the running software is loading.
-#define DBG_DISK_TRACKS 40
-#define DBG_DISK_BINS   16
+#define DBG_DISK_TRACKS 80                      // rings: Apple/C64 use 35-40; MSX 3.5" .dsk uses up to 80 cylinders
+#define DBG_DISK_BINS   21                      // wedges: C64 .d64 outer tracks = 21; Apple 0-15; MSX 2 sides x 9 = 18
 #define DBG_DISK_TRACKLEN 5856                  // trackEncodedSize in src/apple2/disk.cpp
 extern bool     g_dbgDiskHeatOn;
 extern uint32_t g_dbgDiskHeat[];                // reads  [DBG_DISK_TRACKS * DBG_DISK_BINS]
@@ -75,6 +75,27 @@ bool dbgDiskHeatEnabled();
 void dbgDiskHeatClear();
 void dbgDiskHeatDecay(float keep);   // multiply read+write counters by keep (0..1) for a fading view
 bool dbgDiskIsFloppy();    // true = a track/sector FLOPPY is mounted (circular disk view); false = HD/ROM (grid)
+int  dbgDiskTrackCount();  // number of rings to draw (tracks/cylinders) for the current platform's disk
+
+// ---- C64 cartridge (.crt) ROM-access map ----------------------------------------------------------
+// A banked C64 cart is up to 128 x 8K banks (only the current one is in the 64K window), so the regular
+// memory heat map can't show it. read8's cart path calls dbgCartRead(bank, offsetIn16K); the "Disk
+// read" panel draws a bank x 1K-region grid when a cart is mounted. Shares the disk Record toggle.
+#define DBG_CART_BANKS 128
+#define DBG_CART_BINS  16                        // 16 columns = 1K each of the $8000-$BFFF (16K) window
+extern uint32_t g_dbgCartHeat[];                 // [DBG_CART_BANKS * DBG_CART_BINS] read counters
+extern int      g_dbgCartBank;                   // most-recently-read bank (-1 = none)
+extern int      g_dbgCartMaxBank;                // highest bank index actually read (grid row count)
+static inline void dbgCartRead(int bank, int off16k) {
+  if (!g_dbgDiskHeatOn || bank < 0 || bank >= DBG_CART_BANKS) return;
+  g_dbgCartBank = bank;
+  if (bank > g_dbgCartMaxBank) g_dbgCartMaxBank = bank;
+  int bin = (off16k * DBG_CART_BINS) / 0x4000;
+  if (bin < 0) bin = 0; else if (bin >= DBG_CART_BINS) bin = DBG_CART_BINS - 1;
+  g_dbgCartHeat[bank * DBG_CART_BINS + bin]++;
+}
+bool dbgCartActive();     // true when a C64 .crt is mounted -> the Disk-read panel shows the cart map
+int  dbgCartBankCount();  // total 8K banks of the mounted C64 cart (0 = none)
 
 // --- a single CPU register for the state panel (value shown in `bits`/4 hex digits) ---
 struct DbgReg {
@@ -113,6 +134,12 @@ float dbgGetClockMhz();             // target clock when throttled (1.0 = stock)
 void  dbgSetClockMhz(float mhz);
 float dbgClockDefaultMhz();         // the stock/default clock to "reset" to
 float dbgGetMeasuredMhz();          // live measured speed
+// --- full host speed (uncapped) — available on EVERY platform. Most have a "Fast" flag the pacing
+//     loop honors; Atari/PC-XT/tiny386 are inherently uncapped on desktop (dbgFullSpeedFixed = true). ---
+bool  dbgFullSpeedSupported();
+bool  dbgGetFullSpeed();
+void  dbgSetFullSpeed(bool on);
+bool  dbgFullSpeedFixed();          // true = always uncapped, can't be paced (Atari/PC-XT/tiny386)
 
 // --- platform control (native menus, so EMU_PLATFORM env isn't needed) ---
 int         dbgPlatform();              // currentPlatform
@@ -121,6 +148,13 @@ const char *dbgPlatformName(int p);     // "Apple II", "C64", ... (display label
 void        dbgSwitchPlatform(int p);   // reboot (re-exec) straight into platform p
 bool        dbgLoadFile(const char *sdPath);   // mount/load an SD file for the CURRENT platform
 const char *dbgFileExts();              // space-separated lowercase exts to show in the file browser
+// PC platforms (PC-XT, tiny386) have two drive slots — A: (floppy) and C: (hard disk) — so you can
+// mount one image in each. dbgHasDriveSlots() reports that; dbgLoadFileToSlot mounts into a chosen
+// slot (0 = A:, 1 = C:, -1 = auto-by-size). Other platforms ignore the slot (route to dbgLoadFile).
+bool        dbgHasDriveSlots();
+bool        dbgLoadFileToSlot(const char *sdPath, int slot);
+const char *dbgMountedSlotPath(int slot);   // image currently set in slot (0=A:,1=C:), "" if none — for the browser markers
+void        dbgEjectSlot(int slot);         // eject/unmount the image in slot (0=A:,1=C:)
 
 // --- CPU identity + register file ---
 const char *dbgCpuName();    // e.g. "MOS 6502", or "(unsupported)" for not-yet-wired platforms
@@ -129,6 +163,9 @@ uint32_t dbgGetPC();         // linear PC for disasm/heat centering
 // 6502/Z80/x86 status-flag decode for the CPU panel ("N V - B D I Z C" etc.). Returns a static
 // string of single-char flag labels (MSB..LSB) and the matching status byte, or false if N/A.
 bool dbgGetFlags(const char *const **labels, uint32_t *value, int *count);
+// True when SP is a full 16-bit pointer to a downward-growing stack (Z80) rather than the 6502's
+// fixed page-1 stack; the CPU panel uses this to render the stack readout correctly.
+bool dbgStack16();
 
 // --- memory (side-effect-free peek; addresses are CPU-space, size = dbgMemSize bytes) ---
 bool     dbgMemReadable();
@@ -165,5 +202,45 @@ void    dbgWatchClearAll();
 // --- I/O / banking state (per-platform soft switches). For the status panel. ---
 struct DbgFlag { const char *label; const char *value; bool active; };
 int dbgGetIoState(DbgFlag *out, int max);   // fills out[], returns count (0 = none for this platform)
+
+// --- named memory regions (per-platform map): zero page / stack / screen / ROM / I-O / ... For the
+//     heat-map region overlay + the hover tooltip. Ranges are inclusive [start,end]. ---
+struct DbgRegion { uint16_t start, end; const char *name; };
+int dbgMemRegions(const DbgRegion **out);   // points *out at a static table; returns the entry count (0 = none)
+
+// --- VIC-II inspector / control (C64). Registers come from the chip's shadow; writes route through
+//     the normal bus so $D011/$D016/$D018 side effects (raster latch, base-address recompute) apply. ---
+bool     dbgVicSupported();
+int      dbgVicReadRegs(uint8_t *out, int max);   // copy the 47 VIC registers ($D000-$D02E); returns count
+void     dbgVicWriteReg(int reg, uint8_t val);    // write one VIC register (through write8)
+uint16_t dbgVicBankBase();                        // CPU base of the current 16K VIC bank (vicmem)
+void     dbgVicMarkFrame();                        // once/frame: tag the VIC's DMA-read regions in the heat map
+
+// --- SID inspector / control (C64). 25 registers ($D400-$D418); writes go through the synth's
+//     sidWrite() so they're audible immediately. Per-voice envelope + ADSR state are read live. ---
+bool dbgSidSupported();
+int  dbgSidReadRegs(uint8_t *out, int max);
+void dbgSidWriteReg(int reg, uint8_t val);
+void dbgSidVoice(int v, float *env, uint8_t *state);   // state: 0 off, 1 atk, 2 dec, 3 sus, 4 rel
+
+// --- PPU / VRAM inspector (NES). The analog of the VIC-II panel: pattern tables, nametables (VRAM),
+//     palette RAM and OAM. Render helpers fill caller-owned ABGR8888 buffers the UI uploads as textures. ---
+bool     dbgNesPpuSupported();
+int      dbgNesReadPalette(uint8_t *out, int max);   // 32 palette-RAM bytes ($3F00-$3F1F)
+uint32_t dbgNesMasterRGBA(int masterIdx);            // master palette[idx&63] -> ABGR8888 (swatches)
+int      dbgNesReadOam(uint8_t *out, int max);       // 256 OAM bytes (64 sprites x 4: Y,tile,attr,X)
+void     dbgNesRenderPattern(int half, int pal4, uint32_t *out);  // 128x128 ABGR8888 ($0000 / $1000)
+void     dbgNesRenderNametables(uint32_t *out);                   // 512x480 ABGR8888 (2x2 nametables)
+void     dbgNesViewport(int *x, int *y);             // current scroll top-left in the 512x480 NT space
+
+// --- VDP / VRAM inspector (MSX). The TMS9918 VRAM is a SEPARATE 16K bus (ports $98/$99), invisible to
+//     the CPU-space Memory panel — this is its viewer: raw VRAM peek/poke, the fixed 16-colour palette,
+//     the VDP register file (to derive the table bases), and a pattern-generator tile-sheet render. ---
+bool     dbgMsxVdpSupported();
+uint8_t  dbgMsxPeekVram(uint32_t addr);              // side-effect-free VRAM read (addr & 0x3FFF)
+void     dbgMsxPokeVram(uint32_t addr, uint8_t v);   // write a VRAM byte (shows next frame)
+int      dbgMsxVdpRegs(uint8_t *out, int max);       // copy R0-R7 (caller derives the table bases)
+uint32_t dbgMsxPaletteRGBA(int idx);                 // fixed TMS9918 palette[idx&15] -> ABGR8888 (swatches)
+void     dbgMsxRenderPatterns(uint32_t *out, int bank);  // 128x128 ABGR8888: 256 8x8 patterns (bank 0-2 for G2)
 
 #endif // BOARD_DESKTOP

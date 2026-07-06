@@ -1,7 +1,7 @@
-# emu6502
+# emu8
 
-**emu6502** is a multi-platform 6502/65xx retro-console emulator for low-cost ESP32 boards with a
-built-in TFT and microSD. Pick a system on the boot splash and it boots disk/cartridge images
+**emu8** is a multi-platform 8-bit retro-console emulator — 6502-family and Z80 cores — for low-cost
+ESP32 boards with a built-in TFT and microSD. Pick a system on the boot splash and it boots disk/cartridge images
 straight off a microSD card — no PC, no external ROM files.
 
 Seven systems share one firmware, dispatched at runtime from the boot splash — six playable cores plus
@@ -18,14 +18,14 @@ the **Apple IIGS, which is still in development** (experimental):
 | **Apple IIGS** | 65C816 | **In development** — boots ROM 01, 40-col text + HiRes/DHiRes, standard ProDOS 5.25″/800 KB disks, 1-bit speaker. SHR-heavy/protected titles and GS-native (Ensoniq) sound are not done. | `.dsk` `.po` `.2mg` `.hdv` |
 
 > Derived from [hexadevti/Apple2Esp32](https://github.com/hexadevti/Apple2Esp32). The original was a
-> single-system Apple II emulator; emu6502 generalises the renderer, input, audio and SD layers into a
+> single-system Apple II emulator; emu8 generalises the renderer, input, audio and SD layers into a
 > shared core and adds C64, NES and Atari 2600 emulation plus a second hardware target.
 
 ---
 
 ## Supported boards
 
-emu6502 builds for **three boards** from the same source tree — the target is selected at *compile time*
+emu8 builds for **three boards** from the same source tree — the target is selected at *compile time*
 by a single macro (`-DBOARD_JC4827W543` / `-DBOARD_JC1060P470`), defined per build task. The hardware
 abstraction lives in [`board.h`](board.h) as capability macros (display backend, audio path, input
 path, touch bus) that the shared code switches on.
@@ -119,7 +119,7 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
 
 ## Boot & platform selection
 
-On power-up emu6502 shows a boot splash with five buttons — **APPLE**, **C64**, **NES**, **ATARI**,
+On power-up emu8 shows a boot splash with five buttons — **APPLE**, **C64**, **NES**, **ATARI**,
 **IIGS** (the last still in development). Tap one to switch systems (this saves the choice and reboots
 into it); tap elsewhere or wait for the timeout to boot the currently-selected platform. On the CYD a
 joystick button also dismisses the splash.
@@ -324,7 +324,7 @@ emulated system. The top-level sketch wires them together:
 
 | Path | Purpose |
 | --- | --- |
-| [`emu6502.ino`](emu6502.ino) | `setup()` / `loop()` — per-platform init and the main dispatch |
+| [`emu8.ino`](emu8.ino) | `setup()` / `loop()` — per-platform init and the main dispatch |
 | [`board.h`](board.h) | Board selection (CYD vs JC4827W543), capability macros, pin map |
 | [`emu.h`](emu.h) · [`proto.h`](proto.h) · [`globals.cpp`](globals.cpp) | Shared state (`extern`), prototypes, definitions |
 | [`rom.h`](rom.h) | Embedded Apple II/IIe ROMs |

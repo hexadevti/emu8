@@ -1,5 +1,5 @@
 // pcxt.h - public API of the PC-XT (Intel 8086) platform, consumed by the shared
-// dispatch (emu6502.ino, src/shared/video.cpp, optionsui.cpp, usbkeyboard.cpp,
+// dispatch (emu8.ino, src/shared/video.cpp, optionsui.cpp, usbkeyboard.cpp,
 // joystick.cpp). Mirrors sms.h. Implemented in pcxt.cpp (the only PC-XT file that
 // includes emu.h / Arduino); the machine core lives in src/pcxt/fabgl/.
 
@@ -7,7 +7,7 @@
 
 #include <stdint.h>
 
-// platform entry points (called from emu6502.ino setup()/loop())
+// platform entry points (called from emu8.ino setup()/loop())
 void pcxtSetup();
 void pcxtLoop();
 
@@ -26,6 +26,7 @@ void pcxtHardReset();
 void pcxtScanFiles();
 bool pcxtMountA(const char* path);         // mount image into A: (floppy)
 bool pcxtMountC(const char* path);         // mount image into C: (hard disk)
+bool pcxtMountAuto(const char* path);      // route by size: floppy(<=2.88MB)->A:, hard disk->C: (+re-POST)
 
 // SD scan helper (called from setup like loadSmsFilesSync)
 void loadPcxtFilesSync();

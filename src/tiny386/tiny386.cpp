@@ -1,11 +1,11 @@
 #if !defined(BOARD_JC4827W543)  // tiny386 is not built for the S3 board (too big; vendored core not wired for the device toolchain)
-// tiny386.cpp — emu6502 glue for the vendored tiny386 i386 PC emulator (hchunhui/tiny386, BSD-3).
+// tiny386.cpp — emu8 glue for the vendored tiny386 i386 PC emulator (hchunhui/tiny386, BSD-3).
 //
 // This TU includes emu.h (tft / printLog / dispatch surface) and drives the machine through the
 // opaque t386_core_* bridge (tiny386_core.cpp). The split exists because pc.h's `PC` machine type
 // clashes with the Apple II 6502 program-counter global `PC` (proto.h, pulled in by emu.h).
 //
-// Threading mirrors the rest of emu6502: the i386 runs in tiny386Loop() (core 1 on device / the CPU
+// Threading mirrors the rest of emu8: the i386 runs in tiny386Loop() (core 1 on device / the CPU
 // thread on desktop); the framebuffer is pushed to the panel by tiny386RenderFrame() from the core-0
 // render loop (src/shared/video.cpp). The VGA core renders RGB565 directly (vga.h BPP=16); we
 // nearest-scale that framebuffer to the panel, like pcxtRenderFrame() pushes CGA bands.
@@ -62,8 +62,9 @@ extern "C" unsigned char* t386_read_sd(const char* sdPath, int* outLen) {
 #define T386_FB_H  480
 
 #if defined(BOARD_DESKTOP)
-  #define T386_TW 320
-  #define T386_TH 240
+  #define T386_TW 720      // render at native VGA resolution (no 720->320 downscale) so the authentic
+  #define T386_TH 480      // VGA text/graphics font stays crisp; the desktop fb is sized to match
+  void desktopSetEmuResolution(int w, int h);   // display_sdl.cpp — size the fb before begin()
 #elif BOARD_DISPLAY_GFX
   #define T386_TW PANEL_NATIVE_W      // S3 480x272 / P4 1024x600 — render panel-native
   #define T386_TH PANEL_NATIVE_H
@@ -103,6 +104,10 @@ void tiny386Setup()
 
   menuScreen = (unsigned char *)malloc(0x546);
   menuColor  = (unsigned char *)malloc(0x546);
+
+#if defined(BOARD_DESKTOP)
+  desktopSetEmuResolution(T386_TW, T386_TH);   // 720x480 fb so the VGA framebuffer renders ~1:1 (crisp)
+#endif
 
   T386Conf c;
   memset(&c, 0, sizeof(c));
@@ -150,9 +155,15 @@ void tiny386Loop()
   for (;;) {
     if (OptionsWindow) { vTaskDelay(pdMS_TO_TICKS(20)); continue; }
     if (s_resetReq)    { s_resetReq = false; t386_core_request_reset(s_pc); }
+#if defined(BOARD_DESKTOP)
+    for (int i = 0; i < 512; i++) t386_core_step(s_pc);   // desktop: big batch, no per-chunk sleep (the
+    { int f = 0, on = 0; t386_core_speaker(s_pc, &f, &on); g_pcSpkFreq = f; g_pcSpkOn = on; }
+    taskYIELD();             // device's 1ms throttle just slowed the i386 — render/input are other threads
+#else
     for (int i = 0; i < 24; i++) t386_core_step(s_pc);
     { int f = 0, on = 0; t386_core_speaker(s_pc, &f, &on); g_pcSpkFreq = f; g_pcSpkOn = on; }  // PC-speaker -> audio ISR
     vTaskDelay(1);                      // feed WDT (the VGA now steps on core 0, in the render loop)
+#endif
   }
 }
 

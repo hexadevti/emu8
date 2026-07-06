@@ -49,6 +49,10 @@ public:
   void fillRoundRect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint16_t color);
   void drawRoundRect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint16_t color);
 
+  // 8x8 glyph blit (nearest-scaled into a pw x ph cell) — authentic IBM CP437 font for PC-XT, like
+  // the Arduino_GFX backend's drawGlyph8. fg/bg are RGB565; transparentBg leaves the cell bg untouched.
+  void drawGlyph8(int px, int py, int pw, int ph, const uint8_t *g, uint16_t fg, uint16_t bg, bool transparentBg = false);
+
   // blits
   void setSwapBytes(bool s) { _swap = s; }
   void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data);
@@ -98,6 +102,10 @@ private:
 };
 
 void displayFlush();
+// Resize the emulator framebuffer (and the SDL texture if already created). PC-XT / tiny386 call this
+// from their setup() — BEFORE begin() — so the authentic PC fonts render at native resolution instead
+// of being squished into 320x240. Other platforms keep the default 320x240.
+void desktopSetEmuResolution(int w, int h);
 void displaySetUiMode(bool ui);
 void displaySetVideoRect(int topLogical, int hLogical);
 void displaySetVideoFill(int leftLogical, int wLogical, bool stretch);

@@ -264,6 +264,7 @@ void pcxtKeyUp(uint8_t hidUsage);          // USB key -> XT break scancode
 void pcxtHardReset();                      // soft reboot the PC (mapped to F12)
 bool pcxtMountA(const char *path);         // settings: mount image into A: (floppy), no reboot
 bool pcxtMountC(const char *path);         // settings: mount image into C: (hard disk), no reboot
+bool pcxtMountAuto(const char *path);      // route by size: floppy(<=2.88MB)->A:, hard disk->C: (+re-POST)
 void pcxtUnmount(int slot);                // settings: eject the disk in slot 0 (A:) or 2 (C:)
 void pcxtScanFiles();                      // settings: rescan SD root for *.img/.ima/.dsk/.vhd
 bool pcxtRenderLoadWarning();              // startup overlay (always false: BIOS shows its own POST)
@@ -291,6 +292,10 @@ bool tiny386RenderLoadWarning();
 void sidSetup();                       // init the 3-voice synth + I2S DAC output task
 void sidWrite(uint8_t reg, uint8_t val);
 unsigned char sidRead(uint8_t reg);
+#if defined(BOARD_DESKTOP)
+int  sidDebugRegs(uint8_t *out, int max);              // copy the 25 SID registers ($D400-$D418 shadow)
+void sidDebugVoice(int v, float *env, uint8_t *state); // live per-voice envelope (0..255) + ADSR state
+#endif
 
 // C64 program / disk loading (src/c64/c64_disk.cpp)
 void loadC64FilesSync();              // scan the current browse dir -> c64Files (dirs + images)
@@ -306,6 +311,10 @@ void c64CartBankWrite(uint16_t addr, uint8_t val);   // cart banking register ($
 bool c64CartIsEF();                                  // is an EasyFlash cart mounted?
 unsigned char c64CartRamRead(uint16_t addr);         // EasyFlash RAM read  ($DF00-$DFFF)
 void c64CartRamWrite(uint16_t addr, uint8_t val);    // EasyFlash RAM write ($DF00-$DFFF)
+#if defined(BOARD_DESKTOP)
+int c64CartCurBank();    // currently-mapped 8K bank (-1 = no cart) — desktop cart-access map
+int c64CartBankCount();  // total bank count of the mounted cart (0 = none)
+#endif
 // KERNAL LOAD trap helpers (called from c64_cpu.cpp). Return 0 on success, 4 = not found.
 int  c64D64LoadByName(const uint8_t *name, uint8_t len, bool useFileAddr,
                       uint16_t altAddr, uint16_t *startAddr, uint16_t *endAddr);

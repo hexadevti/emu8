@@ -1930,7 +1930,7 @@ void i8086::stepEx(uint8_t const * opcode_stream)
       break;
     }
     case 55: // 80186: BOUND
-      // printf("80186: BOUND - not implemented!\n");   // emu6502: silenced (UART flood)
+      // printf("80186: BOUND - not implemented!\n");   // emu8: silenced (UART flood)
       break;
     case 56: // 80186, NEC V20: PUSH imm16
       //printf("80186, NEC V20: PUSH imm16\n");
@@ -1943,13 +1943,13 @@ void i8086::stepEx(uint8_t const * opcode_stream)
       MEM16(16 * regs16[REG_SS] + regs16[REG_SP]) = (i_data0 & 0xff) | (i_data0 & 0x80 ? 0xff00 : 0); // 8->16 bit with sign extension
       break;
     case 58: // 80186 IMUL
-      // printf("80186 IMUL - not implemented!\n");   // emu6502: silenced (UART flood)
+      // printf("80186 IMUL - not implemented!\n");   // emu8: silenced (UART flood)
       break;
     case 59: // 80186: INSB INSW
-      // printf("80186: INSB INSW - not implemented!\n");   // emu6502: silenced
+      // printf("80186: INSB INSW - not implemented!\n");   // emu8: silenced
       break;
     case 60: // 80186: OUTSB OUTSW
-      // printf("80186: OUTSB OUTSW - not implemented!\n");   // emu6502: silenced
+      // printf("80186: OUTSB OUTSW - not implemented!\n");   // emu8: silenced
       break;
     case 69: // 8087 MATH Coprocessor (no FPU: treat as NOP, IP still advances below)
       // printf("8087 MATH Coprocessor %02X %02X %02X %02X - not implemented!\n", opcode_stream[0], opcode_stream[1], opcode_stream[2], opcode_stream[3]);
@@ -1966,7 +1966,7 @@ void i8086::stepEx(uint8_t const * opcode_stream)
       break;
       */
     default:
-      // printf("Unsupported 8086 opcode %02X %02X\n", opcode_stream[0], opcode_stream[1]);   // emu6502: silenced
+      // printf("Unsupported 8086 opcode %02X %02X\n", opcode_stream[0], opcode_stream[1]);   // emu8: silenced
       break;
   }
 

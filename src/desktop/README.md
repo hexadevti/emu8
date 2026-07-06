@@ -1,4 +1,4 @@
-# emu6502 — Desktop (SDL2) debug build
+# emu8 — Desktop (SDL2) debug build
 
 Run the **same** emulator code the ESP32 devices run, but on a PC, so you can debug it with **gdb,
 sanitizers, and second-by-second iteration**. This is a *debug target*, not a separate emulator: the
@@ -50,14 +50,14 @@ sudo apt install build-essential gcc-multilib g++-multilib cmake libsdl2-dev:i38
 # Windows (MSYS2 MINGW32 shell):
 cmake -G "MinGW Makefiles" -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build -j
-./build/emu6502.exe
+./build/emu8.exe
 
 # WSL/Linux + ThreadSanitizer:
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DEMU_SANITIZE=thread
-cmake --build build -j && ./build/emu6502
+cmake --build build -j && ./build/emu8
 ```
 
-Confirm 32-bit: `file build/emu6502.exe` → **PE32** (not PE32+).
+Confirm 32-bit: `file build/emu8.exe` → **PE32** (not PE32+).
 
 Runtime: put ROM/disk images under `./sdcard` (the emulated SD card; override with `EMU_SD_DIR`).
 Settings persist to `./eeprom.bin`. F10 opens the settings/file-browser menu (mapped in the input
@@ -65,7 +65,7 @@ backend), F11/F12 are platform reset/menu keys (see `src/shared/usbkeyboard.cpp`
 
 ## Status
 
-- **BUILDS & RUNS** (MinGW-w64 i686, g++ 16, SDL2 2.32): `emu6502.exe` = PE32 (32-bit). Smoke-tested
+- **BUILDS & RUNS** (MinGW-w64 i686, g++ 16, SDL2 2.32): `emu8.exe` = PE32 (32-bit). Smoke-tested
   booting **Apple II** (embedded ROM) and **MSX1** (embedded C-BIOS) to `Ready.` — SDL window, PSG
   audio, USB-style keyboard, host SD dir, and a persistent `eeprom.bin` all working.
 - **Done:** board branch, `emu.h` hook, full Arduino/ESP/FreeRTOS shim (+ `dirent.h` over `<io.h>`),

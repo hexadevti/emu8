@@ -152,7 +152,7 @@ void t386_core_mouse(void *pc, int dx, int dy, int dz, int buttons)
 }
 
 // Current PC-speaker tone: it plays the PIT-channel-2 square wave (freq = PIT_FREQ/count, mode 3),
-// gated by port 0x61 (gate & data, exposed as pcspk_get_active_out). The emu6502 audio ISR
+// gated by port 0x61 (gate & data, exposed as pcspk_get_active_out). The emu8 audio ISR
 // (speaker.cpp) turns freq/on into a square wave on the I2S amp.
 void t386_core_speaker(void *pc, int *freq, int *on)
 {

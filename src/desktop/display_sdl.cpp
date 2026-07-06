@@ -32,7 +32,9 @@ extern bool screenFill;           // Settings: SCREEN FILL (zoom video to fill w
 extern bool OptionsWindow;        // settings menu open -> always show ORIG so the menu isn't zoomed
 extern bool DebugWindow;
 
-static const int W = DISP_LOGICAL_W, H = DISP_LOGICAL_H;
+// Emulator framebuffer size. Defaults to 320x240 (like the CYD); PC-XT / tiny386 enlarge it via
+// desktopSetEmuResolution() so their authentic PC fonts render at native resolution (not squished).
+static int W = DISP_LOGICAL_W, H = DISP_LOGICAL_H;
 static int            g_winW   = 1024, g_winH = 768;   // default desktop window (4:3, like 320x240)
 static SDL_Window    *g_win    = nullptr;
 static SDL_Renderer  *g_ren    = nullptr;
@@ -41,6 +43,15 @@ static SDL_Texture   *g_tex    = nullptr;
 // Active emulator-video content rect inside the 320x240 framebuffer (set per frame by the cores via
 // displaySetVideoRect/Fill). FILL mode zooms this rect to the whole window; defaults = the full fb.
 static int g_vidTop = 0, g_vidH = H, g_vidLeft = 0, g_vidW = W;
+
+// Resize the emulator framebuffer. PC-XT / tiny386 setup() call this BEFORE begin(), so begin() just
+// allocates _fb / g_tex at the new size. (No live-resize path is needed: desktop platform switching
+// re-execs, so the size is chosen once per process — at begin() — for the booted platform.)
+void desktopSetEmuResolution(int w, int h) {
+  if (w < 64 || h < 48 || w > 4096 || h > 4096) return;
+  W = w; H = h;
+  g_vidTop = 0; g_vidH = H; g_vidLeft = 0; g_vidW = W;
+}
 
 void DisplayGFX::begin() {
   // Restore the last session's window size (and view prefs / open panels) before creating the window.
@@ -53,7 +64,7 @@ void DisplayGFX::begin() {
   if (const char *s = getenv("EMU_H")) { int v = atoi(s); if (v >= 240) g_winH = v; }
   _fb = (uint16_t *)calloc((size_t)W * H, sizeof(uint16_t));
   SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");   // linear filtering (smooth non-integer upscale)
-  g_win = SDL_CreateWindow("emu6502 (desktop)", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+  g_win = SDL_CreateWindow("emu8 (desktop)", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                            g_winW, g_winH, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
   g_ren = SDL_CreateRenderer(g_win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
   if (!g_ren) g_ren = SDL_CreateRenderer(g_win, -1, 0);
@@ -120,6 +131,24 @@ void DisplayGFX::blit(const uint16_t *data, int32_t x, int32_t y, int32_t w, int
 }
 void DisplayGFX::pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data) { blit(data, x, y, w, h); }
 void DisplayGFX::pushPanelBand(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data) { blit(data, x, y, w, h); }
+
+// 8x8 glyph nearest-scaled into a pw x ph cell (ported from the Arduino_GFX backend, clipped to W x H).
+void DisplayGFX::drawGlyph8(int px, int py, int pw, int ph, const uint8_t *g, uint16_t fg, uint16_t bg, bool transparentBg) {
+  if (!_fb || !g || pw <= 0 || ph <= 0) return;
+  for (int oy = 0; oy < ph; oy++) {
+    int yy = py + oy;
+    if ((unsigned)yy >= (unsigned)H) continue;
+    uint8_t bits = g[(oy * 8) / ph];                 // nearest-neighbour source row
+    uint16_t *row = _fb + (size_t)yy * W;
+    for (int ox = 0; ox < pw; ox++) {
+      int xx = px + ox;
+      if ((unsigned)xx >= (unsigned)W) continue;
+      bool on = bits & (0x80 >> ((ox * 8) / pw));
+      if (on) row[xx] = fg;
+      else if (!transparentBg) row[xx] = bg;
+    }
+  }
+}
 
 // --- Apple II scanline window ---
 void DisplayGFX::setAddrWindow(int32_t x, int32_t y, int32_t w, int32_t h) {

@@ -8,6 +8,9 @@
 
 #include "msx_disk.h"
 #include <string.h>
+#if defined(BOARD_DESKTOP)
+#include "../desktop/debug_bridge.h"   // desktop debugger: dbgDiskRead/Write feed the disk-read heat map (no-op on device)
+#endif
 
 namespace msx {
 
@@ -100,12 +103,18 @@ static void fdcCommand(uint8_t v) {
     if (!g_diskImg || off + 512 > (uint32_t)g_diskImgSize) { fdcStatus = 0x10; fdcDir = 0; return; }  // RNF
     memcpy(fdcBuf, g_diskImg + off, 512);
     fdcIdx = 0; fdcLen = 512; fdcDir = 1; fdcStatus = 0x03;                    // BUSY | DRQ
+#if defined(BOARD_DESKTOP)
+    dbgDiskRead(fdcTrack, fdcSide * g_spt + (fdcSector - 1));                  // heat map: ring=cylinder, wedge=side*spt+sector
+#endif
     return;
   }
   if (hi == 0xA0 || hi == 0xB0) {                                             // Write Sector
     uint32_t off = sectorOffset(fdcTrack, fdcSide, fdcSector);
     if (!g_diskImg || off + 512 > (uint32_t)g_diskImgSize) { fdcStatus = 0x10; fdcDir = 0; return; }
     fdcWriteOff = off; fdcIdx = 0; fdcLen = 512; fdcDir = 2; fdcStatus = 0x03; // BUSY | DRQ
+#if defined(BOARD_DESKTOP)
+    dbgDiskWrite(fdcTrack, fdcSide * g_spt + (fdcSector - 1));                 // heat map (write channel = red)
+#endif
     return;
   }
   if (hi == 0xC0) {                                                           // Read Address (ID field)
@@ -164,5 +173,34 @@ void diskWrite(uint16_t addr, uint8_t v) {
     case 5: fdcCtrl = v; break;                                              // drive/motor
   }
 }
+
+#if defined(BOARD_DESKTOP)
+// Side-effect-free read for the desktop memory viewer/disassembler: returns the disk ROM and the
+// current FDC register values WITHOUT advancing the data transfer, clearing status, or ticking the
+// seek timer (diskRead does all of those, which would corrupt a running disk access).
+uint8_t diskPeek(uint16_t addr) {
+  if (!g_diskRom) return 0xFF;
+  if (addr >= 0x7FF8 && addr <= 0x7FFF) {
+    switch (addr & 7) {
+      case 0: return fdcStatus;
+      case 1: return fdcTrack;
+      case 2: return fdcSector;
+      case 3: return (fdcDir == 1 && fdcIdx < fdcLen) ? fdcBuf[fdcIdx] : fdcData;   // no fdcIdx advance
+      default:                                                                      // interface status, no tick
+        if (fdcDir == 1 || fdcDir == 2) return 0x40;
+        if (fdcSeekTicks > 0) return 0xC0;
+        return 0x00;
+    }
+  }
+  if (addr >= 0x4000 && addr <= 0x7FF7) return g_diskRom[addr - 0x4000];
+  return 0xFF;
+}
+// Cylinder count of the mounted .dsk for the debugger's disk-read heat map (rings = cylinders;
+// wedges = side*spt + sector). 720K = 80, 360K = 40; 0 when nothing is mounted.
+int diskTrackCount() {
+  int per = g_sides * g_spt;
+  return (g_diskImg && per > 0) ? (g_totalSec / per) : 0;
+}
+#endif
 
 } // namespace msx

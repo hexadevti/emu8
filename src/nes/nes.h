@@ -5,7 +5,7 @@
 // so it never collides with the Apple II globals (read8/write8/ram/PC/A/X/Y/SR/cpuLoop).
 // Shared CYD globals (tft, touchRead, running, paused, OptionsWindow, currentPlatform,
 // joystick ADC, sharedBigBuf) are used from global scope. C-linkage entry points (bottom)
-// are called by the platform dispatch (emu6502.ino / video.cpp / joystick.cpp).
+// are called by the platform dispatch (emu8.ino / video.cpp / joystick.cpp).
 //
 // LESSON from the C64 port: any nes:: function used before its definition MUST be declared
 // here, or it silently binds to the Apple global of the same name (read8/write8/push16/...).
@@ -28,6 +28,12 @@ void cpuReset();
 void cpuLoop();
 void cpuNMI();
 void cpuIRQ();
+// CPU registers — exposed as plain namespace globals (like the C64 core's c64::PC) so the desktop
+// debug bridge (src/desktop/debug_bridge.cpp) can read/write them for the register/step/soft-reset
+// panels. Inside namespace nes these are nes::PC etc., distinct from the Apple II globals of the
+// same name (see the linkage note above). Device builds are unaffected (same BSS storage).
+extern unsigned short PC;
+extern unsigned char STP, A, X, Y, SR;
 // Stack ops live in nes_cpu.cpp as file-local always_inline helpers (defined before every use,
 // so they bind to the nes versions, not the Apple core's global push16/push8 from proto.h).
 

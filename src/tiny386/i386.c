@@ -10,7 +10,7 @@
 #include "esp_attr.h"
 #define noinline __attribute__((noinline))
 #else
-// emu6502: no IRAM placement on the device build -- cpu_exec1 is huge and our 9-platform binary has
+// emu8: no IRAM placement on the device build -- cpu_exec1 is huge and our 9-platform binary has
 // no spare internal SRAM for it (the reference esp port is tiny386-only, so it can). Keep empty.
 #define IRAM_ATTR
 #define IRAM_ATTR_CPU_EXEC1
@@ -18,7 +18,7 @@
 #define noinline
 #endif
 
-// emu6502: compile the i386 core at -O3 (the device build is -O2 globally), like the upstream esp port.
+// emu8: compile the i386 core at -O3 (the device build is -O2 globally), like the upstream esp port.
 #if defined(ESP_PLATFORM)
 #pragma GCC optimize("O3")
 #endif

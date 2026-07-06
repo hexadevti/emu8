@@ -57,7 +57,7 @@ static int IsKBHit()
 	return !!byteswaiting;
 }
 #elif defined(ESP_PLATFORM)
-// emu6502: ESP32 device build (no BUILD_ESP32 -> no termios) -> stub the host-TTY serial console.
+// emu8: ESP32 device build (no BUILD_ESP32 -> no termios) -> stub the host-TTY serial console.
 void CaptureKeyboardInput() {}
 static int ReadKBByte() { return -1; }
 static int IsKBHit() { return 0; }

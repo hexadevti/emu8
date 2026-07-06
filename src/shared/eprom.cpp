@@ -141,6 +141,8 @@ void epromSetup() {
 #if defined(BOARD_DESKTOP)
   // EMU_DISK overrides the auto-mounted floppy (debug aid) — AFTER the EEPROM read so it actually wins.
   if (const char *d = getenv("EMU_DISK")) { selectedDiskFileName = d; HdDisk = false; }
+  // EMU_C64=/x.d64 (or .prg) auto-loads + runs it on the C64 once BASIC is ready (debug/boot aid).
+  if (const char *c = getenv("EMU_C64")) { selectedC64FileName = c; c64Autoload = true; }
   // Default the Apple II to THROTTLED 1 MHz on desktop: uncapped runs the 6502 at tens of MHz on a PC,
   // which makes the 1-bit speaker ultrasonic/garbage. (Toggle it off in Control > Clock speed for a
   // speed-up, accepting bad audio.) EMU_FAST=1 forces uncapped instead.

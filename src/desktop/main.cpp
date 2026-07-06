@@ -14,8 +14,8 @@
 #include <thread>
 #include "../../emu.h"
 
-void setup();   // emu6502.ino
-void loop();    // emu6502.ino
+void setup();   // emu8.ino
+void loop();    // emu8.ino
 
 extern char **g_emuArgv;   // hal.cpp: ESP.restart() re-execs this binary for a true reboot
 

@@ -9,10 +9,16 @@
 #ifndef PCXT_HOST_BOOT
 
 #include <stdint.h>
+#include "../../board.h"
 
-// ESP-IDF microsecond clock (declared here to avoid pulling esp_timer.h into the
-// standalone compile-check; provided by the IDF at link time).
+// Microsecond clock. On the ESP32 this is the ESP-IDF C-linkage `esp_timer_get_time`; on the desktop
+// SDL build it's the arduino_shim's C++-linkage version (hal.cpp). Match the linkage of each so the
+// reference resolves (the IDF symbol is C, the shim symbol is C++/mangled).
+#if defined(BOARD_DESKTOP)
+int64_t esp_timer_get_time();
+#else
 extern "C" int64_t esp_timer_get_time(void);
+#endif
 
 extern "C" void FRC1Timer_init(int /*prescaler*/) { }
 

@@ -128,6 +128,22 @@ unsigned char sidRead(uint8_t reg) {
   return 0;
 }
 
+#if defined(BOARD_DESKTOP)
+// Desktop debug facade: snapshot the SID register file ($D400-$D418 shadow) and the live per-voice
+// envelope level + ADSR state, for the SID control window (src/desktop/ui_imgui.cpp). Register edits
+// from the window go through the normal sidWrite() so the synth reflects them immediately.
+int sidDebugRegs(uint8_t *out, int max) {
+  int n = (max < 0x19) ? max : 0x19;          // 25 registers $D400-$D418
+  for (int i = 0; i < n; i++) out[i] = sidreg[i];
+  return n;
+}
+void sidDebugVoice(int v, float *env, uint8_t *state) {
+  if (v < 0 || v >= SID_NVOICES) { if (env) *env = 0; if (state) *state = 0; return; }
+  if (env)   *env   = voice[v].env;
+  if (state) *state = voice[v].state;
+}
+#endif
+
 void sidSetup() {
   memset(sidreg, 0, sizeof(sidreg));
   for (int v = 0; v < SID_NVOICES; v++) {

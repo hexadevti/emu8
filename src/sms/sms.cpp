@@ -4,7 +4,7 @@
 // host-portable. SMS boots the cartridge directly - there is no BIOS to load.
 //
 // Wired into the platform dispatch by:
-//   emu6502.ino setup()/loop(), src/shared/video.cpp renderLoop(), and src/shared/optionsui.cpp.
+//   emu8.ino setup()/loop(), src/shared/video.cpp renderLoop(), and src/shared/optionsui.cpp.
 
 #include "../../emu.h"
 #include "sms.h"
@@ -98,7 +98,11 @@ void smsLoop() {
     sms::runFrame();
 
     if (smsFast) {
+#if defined(BOARD_DESKTOP)
+      taskYIELD();             // desktop: full host speed (render/input on other threads)
+#else
       vTaskDelay(1);
+#endif
       nextUs = micros();
     } else {
       nextUs += FRAME_US;

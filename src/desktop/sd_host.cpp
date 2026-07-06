@@ -22,7 +22,7 @@ SDClass           SD;                     // the emulated card (FSTYPE == SD via
 
 // SD-card root on the host + relative-path mapper (declared in FS.h). Absolute path to the repo's
 // sdcard/ so /roms/<platform>/*.bin resolve regardless of the working directory; EMU_SD_DIR overrides.
-std::string g_sdRoot = "C:/Users/lucia/repos/emu6502/sdcard";
+std::string g_sdRoot = "C:/Users/lucia/repos/emu8/sdcard";
 
 // The host directory backing the emulated SD card (for the native UI's file browser).
 const char *desktopSdRoot() { return g_sdRoot.c_str(); }

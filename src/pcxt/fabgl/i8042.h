@@ -1,4 +1,4 @@
-// i8042.h - minimal 8042 keyboard controller for the emu6502 PC-XT port.
+// i8042.h - minimal 8042 keyboard controller for the emu8 PC-XT port.
 //
 // FabGL's i8042 wrapped a real PS/2 hardware stack (PS2Controller + Keyboard +
 // Mouse + FreeRTOS mutex). We have a USB HID keyboard instead, and the BIOS reads

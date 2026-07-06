@@ -12,7 +12,7 @@ typedef struct VGAState VGAState;
 VGAState *vga_init(char *vga_ram, int vga_ram_size,
                    uint8_t *fb, int width, int height);
 void vga_set_force_8dm(VGAState *s, int v);
-void vga_get_resolution(VGAState *s, int *w, int *h);   // emu6502: active mode pixel dims
+void vga_get_resolution(VGAState *s, int *w, int *h);   // emu8: active mode pixel dims
 
 int vga_step(VGAState *vga);
 void vga_refresh(VGAState *s,
@@ -36,7 +36,7 @@ PCIDevice *vga_pci_init(VGAState *s, PCIBus *bus,
                         void *o, void (*set_bar)(void *, int, uint32_t, bool));
 
 #ifndef BPP
-#define BPP 16   /* emu6502: render straight to RGB565 (was 32); see src/tiny386/tiny386.cpp */
+#define BPP 16   /* emu8: render straight to RGB565 (was 32); see src/tiny386/tiny386.cpp */
 #endif
 
 #endif /* VGA_H */

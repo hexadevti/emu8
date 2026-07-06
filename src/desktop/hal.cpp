@@ -33,7 +33,7 @@
 char **g_emuArgv = nullptr;
 
 // Directory of the running .exe (with trailing slash). All persistence files (eeprom.bin, imgui.ini,
-// emu6502.cfg) are anchored here so the saved session is found no matter what the working directory
+// emu8.cfg) are anchored here so the saved session is found no matter what the working directory
 // is when the app is launched. SDL must be initialised first (main() does SDL_Init before setup()).
 const char *desktopBaseDir() {
   static std::string dir;

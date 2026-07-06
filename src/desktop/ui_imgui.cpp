@@ -37,7 +37,7 @@ int         desktopAudioRate();                            // audio_sdl.cpp — 
 int         desktopAudioSnapshot(float *out, int n);       // audio_sdl.cpp — most-recent N output samples
 const char *desktopBaseDir();                              // hal.cpp — directory of the .exe (trailing slash)
 
-static int g_cfgWinW = 0, g_cfgWinH = 0;  // window size loaded from emu6502.cfg (0 = none stored)
+static int g_cfgWinW = 0, g_cfgWinH = 0;  // window size loaded from emu8.cfg (0 = none stored)
 
 // Persistence files anchored next to the .exe (NOT cwd) so a saved session is found regardless of
 // where the app is launched from. Resolved once, before the window is created.
@@ -45,7 +45,7 @@ static std::string g_cfgPath, g_iniPath;
 static void resolvePersistPaths() {
   if (!g_cfgPath.empty()) return;
   std::string base = desktopBaseDir();
-  g_cfgPath = base + "emu6502.cfg";
+  g_cfgPath = base + "emu8.cfg";
   g_iniPath = base + "imgui.ini";
 }
 
@@ -72,9 +72,20 @@ static bool g_disasmFollow = true;    // disassembly: keep PC in view (persisted
 static bool g_showBp     = false;     // breakpoints + watchpoints manager
 static bool g_showLoad     = false;   // SD file browser (load disk/cart)
 static bool g_showSettings = false;   // native settings window
+static bool g_showVic    = false;     // VIC-II register inspector / control (C64)
+static bool g_showSid    = false;     // SID register inspector / control (C64)
+static bool g_showPpu    = false;     // PPU/VRAM inspector (NES): pattern tables, nametables, palette, OAM
+static bool g_showVdp    = false;     // VDP/VRAM inspector (MSX): palette, table bases, pattern sheet, sprites, raw VRAM
+static bool g_heatVic    = true;      // heat map: overlay the VIC's DMA reads (orange)
+static bool g_heatRegions = true;     // heat map: overlay the named memory-region boundaries + labels
 
 // heat-map render texture (256x256, one pixel per CPU byte; row = 256-byte page)
 static SDL_Texture *g_heatTex = nullptr;
+// NES PPU inspector textures: two 128x128 pattern tables + the 512x480 nametable view
+static SDL_Texture *g_ppuPatTex[2] = {nullptr, nullptr};
+static SDL_Texture *g_ntTex = nullptr;
+// MSX VDP inspector texture: the 128x128 pattern-generator tile sheet
+static SDL_Texture *g_vdpPatTex = nullptr;
 static bool         g_heatFade = false;
 static float        g_heatZoom = 1.0f;   // mouse-wheel zoom of the memory map
 static bool         g_diskFade = false;  // disk heat map: fade old accesses
@@ -84,6 +95,10 @@ static bool         g_diskFade = false;  // disk heat map: fade old accesses
 static MemoryEditor g_memEdit;
 static ImU8  memRead(const ImU8 *, size_t off, void *)        { return dbgPeek((uint32_t)off); }
 static void  memWrite(ImU8 *, size_t off, ImU8 d, void *)     { dbgPoke((uint32_t)off, d); }
+// Second hex editor bound to the MSX VDP's separate 16K VRAM (ports $98/$99), shown in the VDP panel.
+static MemoryEditor g_vramEdit;
+static ImU8  vramRead(const ImU8 *, size_t off, void *)       { return dbgMsxPeekVram((uint32_t)off); }
+static void  vramWrite(ImU8 *, size_t off, ImU8 d, void *)    { dbgMsxPokeVram((uint32_t)off, d); }
 
 // --- last emulator-image placement, for window-pixel -> framebuffer mouse mapping ---
 static SDL_Rect g_srcRect = {0, 0, 0, 0};   // sub-rect of the framebuffer shown (fb coords)
@@ -155,7 +170,7 @@ static void buildSpectrumPanel()
   ImGui::End();
 }
 
-// --- session persistence (emu6502.cfg = window size + view prefs + which panels are open) ---------
+// --- session persistence (emu8.cfg = window size + view prefs + which panels are open) ---------
 void desktopUiLoadConfig()
 {
   resolvePersistPaths();
@@ -174,11 +189,16 @@ void desktopUiLoadConfig()
     CFG("showDisasm", g_showDisasm); CFG("showBp", g_showBp);   CFG("showMem", g_showMem);
     CFG("showHeat", g_showHeat);   CFG("showDisk", g_showDisk);
     CFG("showSettings", g_showSettings); CFG("showSpectrum", g_showSpectrum);
+    CFG("showVic", g_showVic);     CFG("showSid", g_showSid);     CFG("showPpu", g_showPpu);
+    CFG("showVdp", g_showVdp);
+    CFG("heatVic", g_heatVic);
+    CFG("heatRegions", g_heatRegions);
     CFG("heatFade", g_heatFade);   CFG("disasmFollow", g_disasmFollow); CFG("diskFade", g_diskFade);
     CFG("memAscii", g_memEdit.OptShowAscii);   CFG("memOpts", g_memEdit.OptShowOptions);
     CFG("memGrey", g_memEdit.OptGreyOutZeroes); CFG("memPreview", g_memEdit.OptShowDataPreview);
     else if (strcmp(key, "heatRecord") == 0) { if (v) dbgHeatEnable(true); }      // restore Record state
     else if (strcmp(key, "diskRecord") == 0) { if (v) dbgDiskHeatEnable(true); }
+    else if (strcmp(key, "heatZoom") == 0) g_heatZoom = (v >= 100 && v <= 4800) ? (float)v / 100.0f : 1.0f;
     else if (strcmp(key, "clockMilliMhz") == 0) dbgSetClockMhz((float)v / 1000.0f); // restore clock speed
     #undef CFG
   }
@@ -186,7 +206,7 @@ void desktopUiLoadConfig()
 }
 void desktopUiGetWindowSize(int *w, int *h) { if (w) *w = g_cfgWinW; if (h) *h = g_cfgWinH; }
 
-// Write JUST emu6502.cfg (window size + view prefs + open panels + per-panel options). Cheap; called
+// Write JUST emu8.cfg (window size + view prefs + open panels + per-panel options). Cheap; called
 // both on a debounced auto-save (so options persist WITHOUT a clean quit, like ImGui's own ini) and
 // from desktopUiSaveState() on exit.
 static void desktopWriteCfg()
@@ -201,15 +221,18 @@ static void desktopWriteCfg()
           g_showCtrl, g_showCpu, g_showIo, g_showDisasm, g_showBp, g_showMem, g_showHeat, g_showDisk);
   fprintf(f, "showSettings=%d\nshowSpectrum=%d\nheatFade=%d\ndisasmFollow=%d\n",
           g_showSettings, g_showSpectrum, g_heatFade, g_disasmFollow);
+  fprintf(f, "showVic=%d\nshowSid=%d\nshowPpu=%d\nshowVdp=%d\nheatVic=%d\nheatRegions=%d\n",
+          g_showVic, g_showSid, g_showPpu, g_showVdp, g_heatVic, g_heatRegions);
   fprintf(f, "memCols=%d\nmemAscii=%d\nmemOpts=%d\nmemGrey=%d\nmemPreview=%d\n",
           g_memEdit.Cols, g_memEdit.OptShowAscii, g_memEdit.OptShowOptions,
           g_memEdit.OptGreyOutZeroes, g_memEdit.OptShowDataPreview);
   fprintf(f, "heatRecord=%d\ndiskRecord=%d\ndiskFade=%d\n", dbgHeatEnabled(), dbgDiskHeatEnabled(), g_diskFade);
+  fprintf(f, "heatZoom=%d\n", (int)(g_heatZoom * 100.0f + 0.5f));
   fprintf(f, "clockMilliMhz=%d\n", (int)(dbgGetClockMhz() * 1000.0f + 0.5f));
   fclose(f);
 }
 
-// Re-write emu6502.cfg whenever any persisted value changed, debounced ~0.7 s (so a resize-drag or a
+// Re-write emu8.cfg whenever any persisted value changed, debounced ~0.7 s (so a resize-drag or a
 // burst of toggles writes once after it settles). Runs every frame; cheap (a snprintf + strcmp).
 static void desktopUiAutoSaveCfg()
 {
@@ -222,7 +245,9 @@ static void desktopUiAutoSaveCfg()
            g_memEdit.Cols, (int)g_memEdit.OptShowAscii, (int)g_memEdit.OptShowOptions,
            (int)g_memEdit.OptGreyOutZeroes, (int)g_memEdit.OptShowDataPreview,
            (int)dbgHeatEnabled(), (int)dbgDiskHeatEnabled());
-  char sig2[32]; snprintf(sig2, sizeof(sig2), "|c%d|%d", (int)(dbgGetClockMhz() * 1000.0f), (int)g_diskFade);
+  char sig2[64]; snprintf(sig2, sizeof(sig2), "|c%d|%d|%d%d%d%d%d%d|z%d", (int)(dbgGetClockMhz() * 1000.0f),
+                          (int)g_diskFade, (int)g_showVic, (int)g_showSid, (int)g_showPpu, (int)g_showVdp,
+                          (int)g_heatVic, (int)g_heatRegions, (int)(g_heatZoom * 100.0f));
   strncat(sig, sig2, sizeof(sig) - strlen(sig) - 1);
   static char last[256] = {0};
   static int  countdown = -1;
@@ -271,6 +296,10 @@ void desktopUiInit(SDL_Window *win, SDL_Renderer *ren)
   if (getenv("EMU_DBG_DIS"))  { g_showMem = false; g_showHeat = false; }  // disasm capture (sole bottom tab)
   if (getenv("EMU_DBG_LOAD"))     g_showLoad = true;        // open the file browser (offline capture)
   if (getenv("EMU_DBG_SETTINGS")) g_showSettings = true;    // open settings (offline capture)
+  if (getenv("EMU_DBG_VIC"))      g_showVic = true;         // open the VIC-II panel (C64, offline capture)
+  if (getenv("EMU_DBG_SID"))      g_showSid = true;         // open the SID panel (C64, offline capture)
+  if (getenv("EMU_DBG_PPU"))      g_showPpu = true;         // open the PPU/VRAM panel (NES, offline capture)
+  if (getenv("EMU_DBG_VDP"))      g_showVdp = true;         // open the VDP/VRAM panel (MSX, offline capture)
   if (getenv("EMU_DBG_IO"))       g_showCpu = false;        // I/O panel solo in its tab (offline capture)
   if (getenv("EMU_DBG_DISK")) { g_showDisk = true; g_showMem = g_showHeat = g_showDisasm = false; dbgDiskHeatEnable(true); }
   if (getenv("EMU_DBG_SPECTRUM")) { g_showSpectrum = true; g_showMem = g_showHeat = g_showDisasm = g_showDisk = false; }
@@ -355,6 +384,11 @@ static void buildMenuBar()
     ImGui::MenuItem("Heat map (memory)", nullptr, &g_showHeat);
     ImGui::MenuItem("Heat map (disk reads)", nullptr, &g_showDisk);
     ImGui::MenuItem("Audio spectrum", nullptr, &g_showSpectrum);
+    ImGui::Separator();
+    ImGui::MenuItem("VIC-II (C64)", nullptr, &g_showVic, dbgVicSupported());
+    ImGui::MenuItem("SID (C64)",    nullptr, &g_showSid, dbgSidSupported());
+    ImGui::MenuItem("PPU / VRAM (NES)", nullptr, &g_showPpu, dbgNesPpuSupported());
+    ImGui::MenuItem("VDP / VRAM (MSX)", nullptr, &g_showVdp, dbgMsxVdpSupported());
     ImGui::EndMenu();
   }
 
@@ -401,20 +435,27 @@ static void buildControlPanel()
     if (!dbgStepSupported())
       ImGui::TextDisabled("(single-step not wired for this platform)");
 
-    // clock-speed controller
-    if (dbgClockSupported()) {
-      ImGui::SeparatorText("Clock speed");
-      bool thr = dbgGetThrottle();
-      if (ImGui::Checkbox("Throttle", &thr)) dbgSetThrottle(thr);
-      ImGui::SameLine(); ImGui::TextDisabled(thr ? "(paced)" : "(uncapped / Fast)");
-      ImGui::BeginDisabled(!thr);
-      float mhz = dbgGetClockMhz();
-      ImGui::SetNextItemWidth(150);
-      if (ImGui::SliderFloat("##mhz", &mhz, 0.25f, 8.0f, "%.2f MHz")) dbgSetClockMhz(mhz);
+    // speed controller — "Full speed (uncapped host)" on EVERY platform; Apple II also gets a target-MHz
+    // slider when paced. Atari/PC-XT/tiny386 are always uncapped on desktop (the toggle is fixed-on).
+    if (dbgFullSpeedSupported()) {
+      ImGui::SeparatorText("Speed");
+      bool fixed = dbgFullSpeedFixed();
+      bool full  = dbgGetFullSpeed();
+      ImGui::BeginDisabled(fixed);
+      if (ImGui::Checkbox("Full speed (uncapped host)", &full)) dbgSetFullSpeed(full);
       ImGui::EndDisabled();
       ImGui::SameLine();
-      if (ImGui::Button("Default speed")) { dbgSetThrottle(true); dbgSetClockMhz(dbgClockDefaultMhz()); }
-      ImGui::Text("measured: %.2f MHz", dbgGetMeasuredMhz());
+      ImGui::TextDisabled(full ? (fixed ? "(always uncapped)" : "(uncapped)") : "(paced to real HW)");
+      if (dbgClockSupported()) {                 // Apple II: variable target clock when paced
+        ImGui::BeginDisabled(full);
+        float mhz = dbgGetClockMhz();
+        ImGui::SetNextItemWidth(150);
+        if (ImGui::SliderFloat("##mhz", &mhz, 0.25f, 8.0f, "%.2f MHz")) dbgSetClockMhz(mhz);
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button("Stock speed")) { dbgSetFullSpeed(false); dbgSetClockMhz(dbgClockDefaultMhz()); }
+        ImGui::Text("measured: %.2f MHz", dbgGetMeasuredMhz());
+      }
     }
   }
   ImGui::End();
@@ -455,13 +496,19 @@ static void buildCpuPanel()
       }
     }
 
-    // 6502 stack: the bytes most-recently pushed (top of $0100+SP .. $01FF), newest first
-    if (spVal >= 0x0100 && dbgMemReadable()) {
+    // Stack readout: 6502 = the bytes pushed in page 1 ($0100+SP .. $01FF), newest first; Z80 = the
+    // 16-bit downward stack from SP upward (SP points at the most-recently pushed byte), newest first.
+    if (spVal >= 0 && dbgMemReadable()) {
       uint16_t sp = (uint16_t)spVal;
       ImGui::SeparatorText("Stack");
       ImGui::BeginChild("stk", ImVec2(0, 110));
-      if (sp >= 0x01FF) ImGui::TextDisabled("(empty)");
-      else for (uint16_t a = sp + 1; a <= 0x01FF; a++) ImGui::Text("$%04X: $%02X", a, dbgPeek(a));
+      if (dbgStack16()) {
+        for (int k = 0; k < 24; k++) { uint16_t a = (uint16_t)(sp + k); ImGui::Text("$%04X: $%02X", a, dbgPeek(a)); }
+      } else if (sp >= 0x01FF) {
+        ImGui::TextDisabled("(empty)");
+      } else {
+        for (uint16_t a = sp + 1; a <= 0x01FF; a++) ImGui::Text("$%04X: $%02X", a, dbgPeek(a));
+      }
       ImGui::EndChild();
     }
   }
@@ -618,6 +665,13 @@ static void buildBpPanel()
   ImGui::End();
 }
 
+// Name of the memory region containing `addr` (zero page / stack / screen / ROM / ...), or null.
+static const char *heatRegionName(int addr) {
+  const DbgRegion *rg; int n = dbgMemRegions(&rg);
+  for (int i = 0; i < n; i++) if (addr >= rg[i].start && addr <= rg[i].end) return rg[i].name;
+  return nullptr;
+}
+
 // Memory-access heat map: 256x256 texture, 1px = 1 byte of CPU space, row = one 256-byte page.
 // Green = reads, red = writes, blue = executed (opcode fetch); log-scaled so light use still shows.
 static void buildHeatPanel()
@@ -629,9 +683,12 @@ static void buildHeatPanel()
     if (ImGui::Checkbox("Record", &on)) dbgHeatEnable(on);
     ImGui::SameLine(); if (ImGui::Button("Clear")) dbgHeatClear();
     ImGui::SameLine(); ImGui::Checkbox("Fade", &g_heatFade);
+    if (dbgVicSupported()) { ImGui::SameLine(); ImGui::Checkbox("VIC", &g_heatVic); }
+    { const DbgRegion *rg; if (dbgMemRegions(&rg) > 0) { ImGui::SameLine(); ImGui::Checkbox("Regions", &g_heatRegions); } }
     ImGui::SameLine(); if (ImGui::Button("1x")) g_heatZoom = 1.0f;
     ImGui::SameLine(); ImGui::TextDisabled("%.0f%%", g_heatZoom * 100.0f);
-    ImGui::TextDisabled("grayscale = value (00 black .. FF 50%% gray);  +green read +red write +blue exec;  wheel = zoom");
+    ImGui::TextDisabled("value gray  +green read +red write +blue exec%s;  wheel zoom, RMB drag pan, LMB -> Memory",
+                        dbgVicSupported() ? "  +orange VIC" : "");
 
     if (!g_heatTex) {
       g_heatTex = SDL_CreateTexture(g_ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, 256, 256);
@@ -640,23 +697,32 @@ static void buildHeatPanel()
     // build the 256x256 image: base grayscale = byte VALUE (00->black, FF->~50% gray), then add the
     // R/W/X access heat as green/red/blue when Record is on.
     bool heat = on && dbgHeatBuf(DBG_HEAT_R);
-    const uint32_t *R = nullptr, *W = nullptr, *X = nullptr; float lm = 1.0f;
+    const uint32_t *R = nullptr, *W = nullptr, *X = nullptr, *V = nullptr; float lm = 1.0f;
     if (heat) {
       if (g_heatFade) dbgHeatDecay(0.90f);
-      R = dbgHeatBuf(DBG_HEAT_R); W = dbgHeatBuf(DBG_HEAT_W); X = dbgHeatBuf(DBG_HEAT_X);
+      R = dbgHeatBuf(DBG_HEAT_R); W = dbgHeatBuf(DBG_HEAT_W); X = dbgHeatBuf(DBG_HEAT_X); V = dbgHeatBuf(DBG_HEAT_V);
       uint32_t mx = 1;
       for (int i = 0; i < 65536; i++) { if (R[i] > mx) mx = R[i]; if (W[i] > mx) mx = W[i]; if (X[i] > mx) mx = X[i]; }
       lm = logf(1.0f + (float)mx);
     }
     static uint32_t px[256 * 256];
     for (int a = 0; a < 65536; a++) {
-      int base = dbgPeek((uint32_t)a) >> 1;                 // 0x00->0, 0xFF->127 (~50% gray)
+      int val  = dbgPeek((uint32_t)a);                      // live data byte (screen code / bitmap / colour)
+      int base = val >> 1;                                  // 0x00->0, 0xFF->127 (~50% gray)
       int r = base, g = base, b = base;
       if (heat) {
         g += (int)(255.0f * logf(1.0f + (float)R[a]) / lm); // read  -> green
         r += (int)(255.0f * logf(1.0f + (float)W[a]) / lm); // write -> red
         b += (int)(255.0f * logf(1.0f + (float)X[a]) / lm); // exec  -> blue
         if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255;
+        // VIC-II DMA region -> ORANGE, brightness following the live byte VALUE so the actual screen
+        // content (and its changes) shows through. Overlaid with max() so CPU writes (red) still read.
+        if (g_heatVic && V && V[a]) {
+          int oR = 40 + val;        if (oR > 255) oR = 255;
+          int oG = 14 + val / 2;    if (oG > 255) oG = 255;
+          if (oR > r) r = oR;
+          if (oG > g) g = oG;
+        }
       }
       px[a] = 0xFF000000u | ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r;   // ABGR8888
     }
@@ -671,6 +737,20 @@ static void buildHeatPanel()
     float dim = bs * g_heatZoom;
     float relx = (mo.x - p.x) / dim, rely = (mo.y - p.y) / dim;
     bool hov = ImGui::IsWindowHovered();
+
+    // Right-button drag PANS the view (keep panning even if the cursor briefly leaves the child).
+    static bool panning = false;
+    if (hov && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) panning = true;
+    if (panning) {
+      if (ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
+        ImGui::SetScrollX(ImGui::GetScrollX() - io.MouseDelta.x);
+        ImGui::SetScrollY(ImGui::GetScrollY() - io.MouseDelta.y);
+        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+      } else {
+        panning = false;
+      }
+    }
+
     if (hov && io.MouseWheel != 0.0f && relx >= 0 && relx <= 1 && rely >= 0 && rely <= 1) {
       float nz = g_heatZoom * powf(1.2f, io.MouseWheel);
       if (nz < 1.0f) nz = 1.0f; else if (nz > 48.0f) nz = 48.0f;
@@ -681,10 +761,37 @@ static void buildHeatPanel()
       g_heatZoom = nz; dim = nd;
     }
     ImGui::Image((ImTextureID)(intptr_t)g_heatTex, ImVec2(dim, dim));
+
+    // Region overlay: a faint boundary line at each region's start page, with its name (labels are
+    // skipped when too close to the previous one so packed low pages don't overprint). Each region
+    // spans rows [start>>8 .. end>>8] in the 256-byte-per-row map, so a boundary is a horizontal line.
+    if (g_heatRegions) {
+      const DbgRegion *rg; int nrg = dbgMemRegions(&rg);
+      ImDrawList *dl = ImGui::GetWindowDrawList();
+      float lastLabelY = -1e9f;
+      for (int i = 0; i < nrg; i++) {
+        float y = p.y + (rg[i].start >> 8) * dim / 256.0f;
+        dl->AddLine(ImVec2(p.x, y), ImVec2(p.x + dim, y), IM_COL32(255, 255, 255, 55));
+        if (y - lastLabelY > 13.0f) {
+          dl->AddText(ImVec2(p.x + 4, y + 1), IM_COL32(255, 240, 170, 230), rg[i].name);
+          lastLabelY = y;
+        }
+      }
+    }
+
     if (hov && relx >= 0 && relx < 1 && rely >= 0 && rely < 1) {
       int a = ((int)(rely * 256)) * 256 + (int)(relx * 256);
-      if (heat) ImGui::SetTooltip("$%04X = $%02X   R:%u W:%u X:%u", a, dbgPeek(a), R[a], W[a], X[a]);
-      else      ImGui::SetTooltip("$%04X = $%02X", a, dbgPeek(a));
+      const char *rn = heatRegionName(a);
+      if (heat) ImGui::SetTooltip("$%04X = $%02X   [%s]\nR:%u W:%u X:%u\n(left-click -> Memory; right-drag -> pan)",
+                                  a, dbgPeek(a), rn ? rn : "?", R[a], W[a], X[a]);
+      else      ImGui::SetTooltip("$%04X = $%02X   [%s]\n(left-click -> Memory; right-drag -> pan)",
+                                  a, dbgPeek(a), rn ? rn : "?");
+      // Left-click jumps the Memory hex editor to this byte (opens + focuses it, highlights the cell).
+      if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        g_memEdit.GotoAddrAndHighlight((size_t)a, (size_t)a + 1);
+        g_showMem = true;
+        ImGui::SetWindowFocus("Memory");
+      }
     }
     ImGui::EndChild();
   }
@@ -744,6 +851,17 @@ static void uiMaybeCapture()
     SDL_FreeSurface(s);
     fprintf(stderr, "[ui] saved %dx%d window capture -> %s\n", w, h, path);
   }
+  // EMU_DBG_DUMP="addr,len" (hex) — dump a CPU-memory range via the side-effect-free peek, for offline
+  // diagnosis (e.g. inspecting where a hung cart's loader is looping). Also prints PC.
+  if (const char *d = getenv("EMU_DBG_DUMP")) {
+    unsigned addr = 0, len = 64; sscanf(d, "%x,%x", &addr, &len);
+    fprintf(stderr, "[dump] PC=$%04X  $%04X..$%04X:", (unsigned)dbgGetPC(), addr, addr + len - 1);
+    for (unsigned i = 0; i < len; i++) {
+      if (i % 16 == 0) fprintf(stderr, "\n%04X: ", addr + i);
+      fprintf(stderr, "%02X ", dbgPeek(addr + i));
+    }
+    fprintf(stderr, "\n");
+  }
   if (getenv("EMU_UI_QUIT")) {
     if (getenv("EMU_UI_SAVE")) desktopUiSaveState();   // exercise the clean-quit persistence path
     SDL_Quit(); std::exit(0);
@@ -756,11 +874,30 @@ static std::string lc(std::string s) { for (char &c : s) c = (char)tolower((unsi
 static void buildLoadBrowser()
 {
   if (!g_showLoad) return;
-  ImGui::SetNextWindowSize(ImVec2(560, 440), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowSize(ImVec2(560, 460), ImGuiCond_FirstUseEver);
   if (ImGui::Begin("Load disk / cartridge", &g_showLoad)) {
-    ImGui::TextWrapped("SD: %s", desktopSdRoot());
+    namespace fs = std::filesystem;
+    static std::string rel;                          // current dir relative to the SD root ("" = root)
+    std::string root = desktopSdRoot();
+    std::string cur  = rel.empty() ? root : root + "/" + rel;
+
+    ImGui::Text("SD: /%s", rel.c_str());
     ImGui::Text("Platform: %s", dbgPlatformName(dbgPlatform()));
     ImGui::SameLine(); ImGui::TextDisabled("(%s)", dbgFileExts());
+    // PC platforms (PC-XT, tiny386) have A: + C: drives — pick which slot a clicked image mounts into
+    // (so you can put a boot floppy in A: and a hard disk in C:). Other platforms have one slot.
+    static int g_mountSlot = -1;   // -1 = Auto (by size), 0 = A:, 1 = C:
+    if (dbgHasDriveSlots()) {
+      ImGui::TextDisabled("Mount into:");
+      ImGui::SameLine(); ImGui::RadioButton("Auto##slot", &g_mountSlot, -1);
+      ImGui::SameLine(); ImGui::RadioButton("A: floppy##slot", &g_mountSlot, 0);
+      ImGui::SameLine(); ImGui::RadioButton("C: hard disk##slot", &g_mountSlot, 1);
+      // eject buttons — enabled only when that slot holds an image (right-click a green file also ejects)
+      bool hasA = dbgMountedSlotPath(0)[0] != 0, hasC = dbgMountedSlotPath(1)[0] != 0;
+      ImGui::BeginDisabled(!hasA); if (ImGui::SmallButton("Eject A:")) dbgEjectSlot(0); ImGui::EndDisabled();
+      ImGui::SameLine(); ImGui::BeginDisabled(!hasC); if (ImGui::SmallButton("Eject C:")) dbgEjectSlot(1); ImGui::EndDisabled();
+      ImGui::TextDisabled("Tip: load A: first, then C: (C: re-POSTs and boots A: if it's bootable).");
+    }
     static char filter[64] = "";
     ImGui::SetNextItemWidth(-1.0f);
     ImGui::InputTextWithHint("##filt", "filter by name...", filter, sizeof(filter));
@@ -775,26 +912,72 @@ static void buildLoadBrowser()
     std::string flc = lc(filter);
 
     if (ImGui::BeginChild("files")) {
-      namespace fs = std::filesystem;
       std::error_code ec;
-      std::vector<std::string> names;
-      for (fs::directory_iterator it(desktopSdRoot(), ec), end; !ec && it != end; it.increment(ec)) {
-        if (!it->is_regular_file(ec)) continue;
+      std::vector<std::string> dirs, files;
+      for (fs::directory_iterator it(cur, ec), end; !ec && it != end; it.increment(ec)) {
         std::string name = it->path().filename().string();
-        std::string ext  = lc(it->path().extension().string());      // ".dsk"
+        if (it->is_directory(ec)) {
+          if (flc.empty() || lc(name).find(flc) != std::string::npos) dirs.push_back(name);
+          continue;
+        }
+        if (!it->is_regular_file(ec)) continue;
+        std::string ext = lc(it->path().extension().string());       // ".dsk"
         if (!ext.empty() && ext[0] == '.') ext = ext.substr(1);
         bool ok = false; for (auto &x : exts) if (x == ext) { ok = true; break; }
         if (!ok) continue;
         if (!flc.empty() && lc(name).find(flc) == std::string::npos) continue;
-        names.push_back(name);
+        files.push_back(name);
       }
-      std::sort(names.begin(), names.end());
-      for (auto &name : names)
-        if (ImGui::Selectable(name.c_str())) {
-          std::string sd = "/" + name;
-          if (dbgLoadFile(sd.c_str())) g_showLoad = false;   // Apple II / IIGS re-exec here
+      std::sort(dirs.begin(), dirs.end());
+      std::sort(files.begin(), files.end());
+
+      // ".." goes up one level (only when below the root)
+      if (!rel.empty() && ImGui::Selectable("[..]")) {
+        size_t slash = rel.find_last_of('/');
+        rel = (slash == std::string::npos) ? std::string() : rel.substr(0, slash);
+      }
+      // sub-folders first (blue), click to enter
+      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.78f, 1.0f, 1.0f));
+      for (auto &d : dirs) {
+        std::string label = "[" + d + "]";
+        if (ImGui::Selectable(label.c_str())) { rel = rel.empty() ? d : rel + "/" + d; }
+      }
+      ImGui::PopStyleColor();
+      // Same path ignoring a leading "/" and case (mounted names may be stored with or without it).
+      auto pathEq = [](const std::string &a, const char *b) {
+        if (!b || !*b) return false;
+        std::string x = a, y = b;
+        if (!x.empty() && x[0] == '/') x.erase(0, 1);
+        if (!y.empty() && y[0] == '/') y.erase(0, 1);
+        return lc(x) == lc(y);
+      };
+      // then the loadable files, click to mount. PC platforms show which drive (A:/C:) each is set to.
+      for (auto &name : files) {
+        std::string sd = "/" + (rel.empty() ? name : rel + "/" + name);
+        bool inA = dbgHasDriveSlots() && pathEq(sd, dbgMountedSlotPath(0));
+        bool inC = dbgHasDriveSlots() && pathEq(sd, dbgMountedSlotPath(1));
+        std::string label = std::string(inA ? "[A:] " : inC ? "[C:] " : "") + name;
+        if (inA || inC) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 1.0f, 0.5f, 1.0f));  // mounted = green
+        ImGui::PushID(sd.c_str());
+        bool clicked = ImGui::Selectable(label.c_str());
+        if (inA || inC) ImGui::PopStyleColor();
+        if (inA || inC) {                                   // right-click a mounted image -> eject it
+          if (ImGui::BeginPopupContextItem()) {
+            if (inA && ImGui::MenuItem("Eject from A:")) dbgEjectSlot(0);
+            if (inC && ImGui::MenuItem("Eject from C:")) dbgEjectSlot(1);
+            ImGui::EndPopup();
+          }
         }
-      if (names.empty()) ImGui::TextDisabled("(no matching files in the SD root)");
+        ImGui::PopID();
+        if (clicked) {
+          if (dbgHasDriveSlots()) {
+            dbgLoadFileToSlot(sd.c_str(), g_mountSlot);      // PC: mount into A:/C:/auto, keep browser open
+          } else if (dbgLoadFile(sd.c_str())) {
+            g_showLoad = false;                              // single-slot: close on success (Apple II/IIGS re-exec)
+          }
+        }
+      }
+      if (dirs.empty() && files.empty()) ImGui::TextDisabled("(no folders or matching files here)");
     }
     ImGui::EndChild();
   }
@@ -904,26 +1087,75 @@ static void drawDiskHeatCircular(int ROWS, int COLS, float lmR, float lmW)
   }
 }
 
+// C64 cartridge ROM-access grid: rows = 8K banks, cols = 1K region of the $8000-$BFFF window.
+// read intensity -> green (log-scaled); the currently-mapped bank gets a highlighted label.
+static void drawCartHeatGrid()
+{
+  int banks = g_dbgCartMaxBank + 1; if (banks < 1) banks = 1; if (banks > DBG_CART_BANKS) banks = DBG_CART_BANKS;
+  const int COLS = DBG_CART_BINS;
+  uint32_t mx = 1;
+  for (int i = 0; i < banks * COLS; i++) if (g_dbgCartHeat[i] > mx) mx = g_dbgCartHeat[i];
+  float lm = logf(1.0f + (float)mx);
+
+  ImVec2 avail = ImGui::GetContentRegionAvail();
+  const float labelW = 52.0f, ch = 13.0f;
+  float cw = (avail.x - labelW) / COLS; if (cw < 3) cw = 3;
+  ImVec2 p0 = ImGui::GetCursorScreenPos();
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  for (int r = 0; r < banks; r++) {
+    char t[16]; snprintf(t, sizeof(t), "bank %d", r);
+    dl->AddText(ImVec2(p0.x, p0.y + r * ch), r == g_dbgCartBank ? IM_COL32(255, 225, 110, 255)
+                                                                : IM_COL32(150, 150, 150, 255), t);
+    for (int c = 0; c < COLS; c++) {
+      uint32_t rd = g_dbgCartHeat[r * COLS + c];
+      ImU32 col = rd ? IM_COL32(36, (int)(255.0f * logf(1.0f + (float)rd) / lm), 40, 255)
+                     : IM_COL32(24, 24, 32, 255);
+      ImVec2 a(p0.x + labelW + c * cw, p0.y + r * ch);
+      dl->AddRectFilled(a, ImVec2(a.x + cw - 1, a.y + ch - 1), col);
+    }
+  }
+  ImGui::Dummy(ImVec2(avail.x, banks * ch + 4));
+  if (ImGui::IsItemHovered()) {
+    ImVec2 m = ImGui::GetIO().MousePos;
+    int c = (int)((m.x - (p0.x + labelW)) / cw), r = (int)((m.y - p0.y) / ch);
+    if (r >= 0 && r < banks && c >= 0 && c < COLS) {
+      uint16_t lo = (uint16_t)(0x8000 + c * (0x4000 / COLS));
+      ImGui::SetTooltip("bank %d   $%04X..$%04X   reads: %u", r, lo, (uint16_t)(lo + 0x4000 / COLS - 1),
+                        g_dbgCartHeat[r * COLS + c]);
+    }
+  }
+}
+
 static void buildDiskHeatPanel()
 {
   if (!g_showDisk) return;
   if (ImGui::Begin("Disk read", &g_showDisk)) {
     if (!dbgDiskHeatSupported()) {
-      ImGui::TextDisabled("(disk-read heat map only for Apple II)");
+      ImGui::TextDisabled("(disk-read heat map: Apple II / C64, or an MSX with a .dsk mounted)");
       ImGui::End(); return;
     }
     bool on = dbgDiskHeatEnabled();
     if (ImGui::Checkbox("Record", &on)) dbgDiskHeatEnable(on);
     ImGui::SameLine(); if (ImGui::Button("Clear")) dbgDiskHeatClear();
     ImGui::SameLine(); ImGui::Checkbox("Fade", &g_diskFade);
-    ImGui::SameLine(); ImGui::Text("track: %d", g_dbgDiskTrack);
     if (on && g_diskFade) dbgDiskHeatDecay(0.94f);
+
+    // A mounted .crt cartridge -> show the cartridge ROM bank-access map instead of the disk platter.
+    if (dbgCartActive()) {
+      ImGui::SameLine(); ImGui::Text("bank: %d / %d", g_dbgCartBank, dbgCartBankCount());
+      ImGui::TextDisabled("rows = 8K cart banks, cols = 1K of $8000-$BFFF;  green = read (exec/data)");
+      if (!on) { ImGui::TextDisabled("Enable Record, then run the cartridge."); ImGui::End(); return; }
+      drawCartHeatGrid();
+      ImGui::End(); return;
+    }
+
+    ImGui::SameLine(); ImGui::Text("track: %d", g_dbgDiskTrack);
     bool floppy = dbgDiskIsFloppy();
     ImGui::TextDisabled(floppy ? "rings = tracks (0 = edge), wedges = sector;  green = read, red = write"
                                : "rows = tracks, cols = position;  green = read, red = write");
     if (!on) { ImGui::TextDisabled("Enable Record, then boot/load from disk."); ImGui::End(); return; }
 
-    const int ROWS = 35, COLS = DBG_DISK_BINS;
+    const int ROWS = dbgDiskTrackCount(), COLS = DBG_DISK_BINS;
     uint32_t mxR = 1, mxW = 1;
     for (int i = 0; i < ROWS * COLS; i++) { if (g_dbgDiskHeat[i] > mxR) mxR = g_dbgDiskHeat[i];
                                             if (g_dbgDiskHeatW[i] > mxW) mxW = g_dbgDiskHeatW[i]; }
@@ -931,6 +1163,374 @@ static void buildDiskHeatPanel()
 
     if (floppy) drawDiskHeatCircular(ROWS, COLS, lmR, lmW);   // disk image -> circular platter
     else        drawDiskHeatGrid(ROWS, COLS, lmR, lmW);        // HD / block image -> grid
+  }
+  ImGui::End();
+}
+
+// --- VIC-II / SID control windows (C64) ---------------------------------------------------------
+// Approximate C64 (colodore) palette for the colour swatches.
+static const ImU32 kC64Pal[16] = {
+  IM_COL32(0,0,0,255),       IM_COL32(255,255,255,255), IM_COL32(129,51,43,255),   IM_COL32(117,193,201,255),
+  IM_COL32(132,62,153,255),  IM_COL32(85,160,73,255),   IM_COL32(58,42,148,255),   IM_COL32(200,214,137,255),
+  IM_COL32(135,82,30,255),   IM_COL32(86,63,0,255),     IM_COL32(180,103,93,255),  IM_COL32(78,78,78,255),
+  IM_COL32(120,120,120,255), IM_COL32(149,224,138,255), IM_COL32(120,105,209,255), IM_COL32(170,170,170,255) };
+
+// A C64-colour swatch button that opens a 16-colour picker popup; writes the low nibble of *val.
+static bool c64ColorPick(const char *id, uint8_t *val) {
+  bool changed = false;
+  ImGui::PushID(id);
+  ImVec4 col = ImGui::ColorConvertU32ToFloat4(kC64Pal[*val & 0x0F]);
+  if (ImGui::ColorButton("##sw", col, ImGuiColorEditFlags_NoAlpha | ImGuiColorEditFlags_NoTooltip, ImVec2(18, 18)))
+    ImGui::OpenPopup("c64pal");
+  if (ImGui::BeginPopup("c64pal")) {
+    for (int i = 0; i < 16; i++) {
+      ImGui::PushID(i);
+      ImVec4 c = ImGui::ColorConvertU32ToFloat4(kC64Pal[i]);
+      if (ImGui::ColorButton("##c", c, ImGuiColorEditFlags_NoAlpha | ImGuiColorEditFlags_NoTooltip, ImVec2(18, 18))) {
+        *val = (uint8_t)((*val & 0xF0) | i); changed = true; ImGui::CloseCurrentPopup();
+      }
+      ImGui::PopID();
+      if ((i & 7) != 7) ImGui::SameLine();
+    }
+    ImGui::EndPopup();
+  }
+  ImGui::PopID();
+  return changed;
+}
+
+static void buildVicPanel()
+{
+  if (!g_showVic) return;
+  if (ImGui::Begin("VIC-II", &g_showVic)) {
+    if (!dbgVicSupported()) { ImGui::TextDisabled("(VIC-II only on the Commodore 64)"); ImGui::End(); return; }
+    uint8_t r[0x2F];
+    if (dbgVicReadRegs(r, 0x2F) < 0x2F) { ImGui::TextDisabled("(VIC state unavailable)"); ImGui::End(); return; }
+    uint16_t bank = dbgVicBankBase();
+    uint8_t d011 = r[0x11], d016 = r[0x16], d018 = r[0x18];
+    bool ecm = d011 & 0x40, bmm = d011 & 0x20, den = d011 & 0x10, mcm = d016 & 0x10;
+    const char *mode = bmm ? (mcm ? "Multicolour bitmap" : "Hi-res bitmap")
+                           : ecm ? "Extended-BG text" : mcm ? "Multicolour text" : "Standard text";
+    uint16_t screen = (uint16_t)(bank + (((d018 >> 4) & 0x0F) * 0x0400));
+    uint16_t charB  = (uint16_t)(bank + (((d018 >> 1) & 0x07) * 0x0800));
+    uint16_t bmapB  = (uint16_t)(bank + ((d018 & 0x08) ? 0x2000 : 0x0000));
+    unsigned raster = (unsigned)(r[0x12] | ((d011 & 0x80) ? 0x100 : 0));
+
+    ImGui::Text("Mode: %s%s", mode, den ? "" : "  (display OFF)");
+    ImGui::Text("VIC bank: %d   base $%04X", (bank >> 14) & 3, bank);
+    ImGui::Text("Screen RAM: $%04X", screen);
+    if (bmm) ImGui::Text("Bitmap:     $%04X", bmapB);
+    else     ImGui::Text("Charset:    $%04X%s", charB,
+                         (charB == 0x1000 || charB == 0x1800 || charB == 0x9000 || charB == 0x9800) ? "  (char ROM)" : "");
+    ImGui::Text("Raster: %u   Scroll X:%d Y:%d   %s x %s",
+                raster, d016 & 7, d011 & 7, (d016 & 8) ? "40col" : "38col", (d011 & 8) ? "25row" : "24row");
+
+    ImGui::SeparatorText("Colours");
+    static const struct { const char *l; int idx; } cols[] = {
+      {"Border", 0x20}, {"Background 0", 0x21}, {"Background 1", 0x22}, {"Background 2", 0x23}, {"Background 3", 0x24} };
+    for (auto &c : cols) {
+      uint8_t v = r[c.idx];
+      if (c64ColorPick(c.l, &v)) dbgVicWriteReg(c.idx, v);
+      ImGui::SameLine(); ImGui::Text("%s  ($D0%02X = %u)", c.l, c.idx, r[c.idx] & 0x0F);
+    }
+
+    ImGui::SeparatorText("Sprites");
+    uint8_t en = r[0x15], msb = r[0x10], expx = r[0x1D], expy = r[0x17], mcr = r[0x1C], pri = r[0x1B];
+    if (ImGui::BeginTable("spr", 6, ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit)) {
+      ImGui::TableSetupColumn("#"); ImGui::TableSetupColumn("On"); ImGui::TableSetupColumn("X");
+      ImGui::TableSetupColumn("Y"); ImGui::TableSetupColumn("Col"); ImGui::TableSetupColumn("Flags");
+      ImGui::TableHeadersRow();
+      for (int s = 0; s < 8; s++) {
+        int x = r[0x00 + s * 2] | ((msb & (1 << s)) ? 0x100 : 0);
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn(); ImGui::Text("%d", s);
+        ImGui::TableNextColumn();
+        ImGui::TextColored((en & (1 << s)) ? ImVec4(0.4f,1,0.5f,1) : ImVec4(0.5f,0.5f,0.5f,1), "%s", (en & (1 << s)) ? "on" : "-");
+        ImGui::TableNextColumn(); ImGui::Text("%d", x);
+        ImGui::TableNextColumn(); ImGui::Text("%d", r[0x01 + s * 2]);
+        ImGui::TableNextColumn();
+        { uint8_t cv = r[0x27 + s]; ImGui::PushID(s); if (c64ColorPick("sc", &cv)) dbgVicWriteReg(0x27 + s, cv); ImGui::PopID(); }
+        ImGui::TableNextColumn();
+        ImGui::TextDisabled("%s%s%s%s", (mcr & (1 << s)) ? "MC " : "", (expx & (1 << s)) ? "X2 " : "",
+                            (expy & (1 << s)) ? "Y2 " : "", (pri & (1 << s)) ? "bg" : "");
+      }
+      ImGui::EndTable();
+    }
+
+    if (ImGui::CollapsingHeader("Raw registers")) {
+      if (ImGui::BeginTable("vicregs", 4, ImGuiTableFlags_BordersInner | ImGuiTableFlags_RowBg)) {
+        for (int i = 0; i < 0x2F; i++) {
+          ImGui::TableNextColumn();
+          ImGui::PushID(i);
+          ImGui::TextDisabled("D0%02X", i); ImGui::SameLine();
+          ImGui::SetNextItemWidth(40);
+          uint8_t v8 = r[i];
+          if (ImGui::InputScalar("##v", ImGuiDataType_U8, &v8, nullptr, nullptr, "%02X", ImGuiInputTextFlags_CharsHexadecimal))
+            dbgVicWriteReg(i, v8);
+          ImGui::PopID();
+        }
+        ImGui::EndTable();
+      }
+    }
+  }
+  ImGui::End();
+}
+
+static void buildSidPanel()
+{
+  if (!g_showSid) return;
+  if (ImGui::Begin("SID", &g_showSid)) {
+    if (!dbgSidSupported()) { ImGui::TextDisabled("(SID only on the Commodore 64)"); ImGui::End(); return; }
+    uint8_t r[0x19];
+    if (dbgSidReadRegs(r, 0x19) < 0x19) { ImGui::TextDisabled("(SID state unavailable)"); ImGui::End(); return; }
+    static const char *st[5] = {"off", "attack", "decay", "sustain", "release"};
+    for (int v = 0; v < 3; v++) {
+      ImGui::PushID(v);
+      int b = v * 7;
+      uint16_t freq = r[b] | (r[b + 1] << 8);
+      uint16_t pw   = (r[b + 2] | (r[b + 3] << 8)) & 0x0FFF;
+      uint8_t ctrl = r[b + 4], ad = r[b + 5], sr = r[b + 6];
+      float hz = freq * 0.0587f;   // PAL: Freg * 985248 / 16777216
+      char title[16]; snprintf(title, sizeof(title), "Voice %d", v + 1);
+      ImGui::SeparatorText(title);
+      ImGui::Text("Freq $%04X (~%.0f Hz)   PW $%03X (%.0f%%)", freq, hz, pw, pw * 100.0f / 4095.0f);
+      char w[40] = "";
+      if (ctrl & 0x10) strcat(w, "tri ");
+      if (ctrl & 0x20) strcat(w, "saw ");
+      if (ctrl & 0x40) strcat(w, "pulse ");
+      if (ctrl & 0x80) strcat(w, "noise ");
+      ImGui::Text("Wave: %-16s %s%s%s%s", w[0] ? w : "(none) ",
+                  (ctrl & 0x01) ? "GATE " : "", (ctrl & 0x02) ? "SYNC " : "",
+                  (ctrl & 0x04) ? "RING " : "", (ctrl & 0x08) ? "TEST" : "");
+      ImGui::Text("ADSR: A=%u D=%u S=%u R=%u", ad >> 4, ad & 0x0F, sr >> 4, sr & 0x0F);
+      float env = 0; uint8_t state = 0; dbgSidVoice(v, &env, &state);
+      ImGui::Text("Env: %-8s", st[state < 5 ? state : 0]);
+      ImGui::SameLine(); ImGui::ProgressBar(env / 255.0f, ImVec2(-1, 0));
+      ImGui::PopID();
+    }
+    ImGui::SeparatorText("Filter / master");
+    uint16_t cutoff = (r[0x15] & 7) | (r[0x16] << 3);
+    uint8_t froute = r[0x17] & 0x0F, mvol = r[0x18];
+    ImGui::Text("Cutoff $%03X   Resonance %u   Routing %c%c%c%s",
+                cutoff, r[0x17] >> 4, (froute & 1) ? '1' : '-', (froute & 2) ? '2' : '-',
+                (froute & 4) ? '3' : '-', (froute & 8) ? " extIN" : "");
+    ImGui::Text("Volume %u   Filter %s%s%s%s", mvol & 0x0F,
+                (mvol & 0x10) ? "LP " : "", (mvol & 0x20) ? "BP " : "",
+                (mvol & 0x40) ? "HP " : "", (mvol & 0x80) ? "voice3-off" : "");
+    if (ImGui::CollapsingHeader("Raw registers")) {
+      if (ImGui::BeginTable("sidregs", 4, ImGuiTableFlags_BordersInner | ImGuiTableFlags_RowBg)) {
+        for (int i = 0; i < 0x19; i++) {
+          ImGui::TableNextColumn();
+          ImGui::PushID(i);
+          ImGui::TextDisabled("D4%02X", i); ImGui::SameLine();
+          ImGui::SetNextItemWidth(40);
+          uint8_t v8 = r[i];
+          if (ImGui::InputScalar("##v", ImGuiDataType_U8, &v8, nullptr, nullptr, "%02X", ImGuiInputTextFlags_CharsHexadecimal))
+            dbgSidWriteReg(i, v8);
+          ImGui::PopID();
+        }
+        ImGui::EndTable();
+      }
+    }
+  }
+  ImGui::End();
+}
+
+// NES PPU / VRAM inspector — the analog of the C64 VIC-II panel. Shows the palette (live swatches),
+// both pattern tables (CHR), all four nametables (VRAM) with the current scroll viewport, and OAM.
+static void buildPpuPanel()
+{
+  if (!g_showPpu) return;
+  if (ImGui::Begin("PPU / VRAM", &g_showPpu)) {
+    if (!dbgNesPpuSupported()) { ImGui::TextDisabled("(PPU/VRAM only on the NES)"); ImGui::End(); return; }
+
+    // --- Palette RAM ($3F00-$3F1F): 16 BG + 16 sprite entries, each resolved via the master palette ---
+    uint8_t pal[0x20];
+    if (dbgNesReadPalette(pal, 0x20) >= 0x20) {
+      ImGui::SeparatorText("Palette  ($3F00-$3F1F)");
+      auto swatchRow = [&](const char *label, int base) {
+        ImGui::TextDisabled("%s", label); ImGui::SameLine(70);
+        for (int i = 0; i < 16; i++) {
+          ImGui::PushID(base + i);
+          ImVec4 c = ImGui::ColorConvertU32ToFloat4(dbgNesMasterRGBA(pal[base + i]));
+          ImGui::ColorButton("##s", c, ImGuiColorEditFlags_NoAlpha | ImGuiColorEditFlags_NoTooltip, ImVec2(16, 16));
+          if (ImGui::IsItemHovered()) ImGui::SetTooltip("$3F%02X = $%02X", base + i, pal[base + i]);
+          ImGui::PopID();
+          if (i != 15) ImGui::SameLine(0, ((i & 3) == 3) ? 8.0f : 2.0f);   // gap between 4-colour groups
+        }
+      };
+      swatchRow("BG",     0x00);
+      swatchRow("Sprite", 0x10);
+    }
+
+    // --- Pattern tables (CHR): two 128x128 tile sheets ($0000 left, $1000 right), colourised by a
+    //     selectable 4-colour palette. Scaled to fit the panel width (nearest -> crisp pixels). ---
+    ImGui::SeparatorText("Pattern tables (CHR)");
+    static int patPal = 0;
+    ImGui::SetNextItemWidth(140);
+    ImGui::Combo("Palette##pat", &patPal, "BG 0\0BG 1\0BG 2\0BG 3\0SPR 0\0SPR 1\0SPR 2\0SPR 3\0");
+    static uint32_t pbuf[2][128 * 128];
+    float ts = (ImGui::GetContentRegionAvail().x - 8.0f) * 0.5f;
+    if (ts > 256.0f) ts = 256.0f; if (ts < 96.0f) ts = 96.0f;
+    for (int half = 0; half < 2; half++) {
+      if (!g_ppuPatTex[half]) {
+        g_ppuPatTex[half] = SDL_CreateTexture(g_ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, 128, 128);
+        SDL_SetTextureScaleMode(g_ppuPatTex[half], SDL_ScaleModeNearest);
+      }
+      dbgNesRenderPattern(half, patPal, pbuf[half]);
+      SDL_UpdateTexture(g_ppuPatTex[half], nullptr, pbuf[half], 128 * sizeof(uint32_t));
+      ImGui::Image((ImTextureID)(intptr_t)g_ppuPatTex[half], ImVec2(ts, ts));
+      if (half == 0) ImGui::SameLine();
+    }
+    ImGui::TextDisabled("left $0000   right $1000");
+
+    // --- Nametables (VRAM): all four logical tables (512x480), with the live scroll viewport drawn ---
+    ImGui::SeparatorText("Nametables (VRAM)");
+    if (!g_ntTex) {
+      g_ntTex = SDL_CreateTexture(g_ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, 512, 480);
+      SDL_SetTextureScaleMode(g_ntTex, SDL_ScaleModeNearest);
+    }
+    static uint32_t *ntbuf = (uint32_t *)malloc(512 * 480 * sizeof(uint32_t));
+    if (ntbuf) {
+      dbgNesRenderNametables(ntbuf);
+      SDL_UpdateTexture(g_ntTex, nullptr, ntbuf, 512 * sizeof(uint32_t));
+      float w = ImGui::GetContentRegionAvail().x; if (w > 512.0f) w = 512.0f; if (w < 128.0f) w = 128.0f;
+      float scale = w / 512.0f;
+      ImVec2 p = ImGui::GetCursorScreenPos();
+      ImGui::Image((ImTextureID)(intptr_t)g_ntTex, ImVec2(w, 480.0f * scale));
+      int vx = 0, vy = 0; dbgNesViewport(&vx, &vy);   // 256x240 viewport (wraps the 512x480 torus)
+      ImDrawList *dl = ImGui::GetWindowDrawList();
+      ImVec2 a(p.x + vx * scale, p.y + vy * scale);
+      dl->AddRect(a, ImVec2(a.x + 256 * scale, a.y + 240 * scale), IM_COL32(255, 80, 80, 220), 0, 0, 1.5f);
+    }
+
+    // --- OAM (sprite table): 64 entries Y/tile/attr/X, like the VIC-II sprite table ---
+    if (ImGui::CollapsingHeader("OAM (sprites)")) {
+      uint8_t oam[0x100];
+      if (dbgNesReadOam(oam, 0x100) >= 0x100 &&
+          ImGui::BeginTable("oam", 6, ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg |
+                            ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_ScrollY, ImVec2(0, 200))) {
+        ImGui::TableSetupColumn("#"); ImGui::TableSetupColumn("X"); ImGui::TableSetupColumn("Y");
+        ImGui::TableSetupColumn("Tile"); ImGui::TableSetupColumn("Pal"); ImGui::TableSetupColumn("Flags");
+        ImGui::TableHeadersRow();
+        for (int s = 0; s < 64; s++) {
+          uint8_t y = oam[s * 4 + 0], tile = oam[s * 4 + 1], attr = oam[s * 4 + 2], x = oam[s * 4 + 3];
+          bool onScreen = (y < 0xEF);
+          ImGui::TableNextRow();
+          ImGui::TableNextColumn();
+          ImGui::TextColored(onScreen ? ImVec4(1,1,1,1) : ImVec4(0.5f,0.5f,0.5f,1), "%d", s);
+          ImGui::TableNextColumn(); ImGui::Text("%d", x);
+          ImGui::TableNextColumn(); ImGui::Text("%d", y);
+          ImGui::TableNextColumn(); ImGui::Text("$%02X", tile);
+          ImGui::TableNextColumn(); ImGui::Text("%d", 4 + (attr & 3));   // sprite palettes are 4..7
+          ImGui::TableNextColumn();
+          ImGui::TextDisabled("%s%s%s", (attr & 0x20) ? "bg " : "", (attr & 0x40) ? "Hflip " : "",
+                              (attr & 0x80) ? "Vflip" : "");
+        }
+        ImGui::EndTable();
+      }
+    }
+  }
+  ImGui::End();
+}
+
+// MSX TMS9918 VDP / VRAM inspector — the analog of the NES PPU panel. The VDP's 16K VRAM is a separate
+// bus (ports $98/$99), so it can't appear in the CPU Memory panel; this shows the fixed palette, the
+// five table base addresses (derived from R0-R7), a pattern-generator tile sheet, the sprite attribute
+// table, and a raw editable VRAM hex view.
+static void buildVdpPanel()
+{
+  if (!g_showVdp) return;
+  if (ImGui::Begin("VDP / VRAM", &g_showVdp)) {
+    if (!dbgMsxVdpSupported()) { ImGui::TextDisabled("(VDP/VRAM only on the MSX)"); ImGui::End(); return; }
+    uint8_t r[8] = {0}; dbgMsxVdpRegs(r, 8);
+    bool m1 = (r[1] & 0x10), m2 = (r[0] & 0x02), m3 = (r[1] & 0x08);   // mode-select bits
+    const char *mode = m1 ? "Text 1 (40x24)" : m2 ? "Graphic 2 (256x192)" : m3 ? "Multicolor" : "Graphic 1 (32x24)";
+    ImGui::Text("Mode: %s", mode);
+    ImGui::SameLine(); ImGui::TextDisabled(" display %s", (r[1] & 0x40) ? "ON" : "off");
+
+    // --- fixed 16-colour TMS9918 palette ---
+    ImGui::SeparatorText("Palette (TMS9918, fixed)");
+    for (int i = 0; i < 16; i++) {
+      ImGui::PushID(i);
+      ImVec4 c = ImGui::ColorConvertU32ToFloat4(dbgMsxPaletteRGBA(i));
+      ImGui::ColorButton("##s", c, ImGuiColorEditFlags_NoAlpha | ImGuiColorEditFlags_NoTooltip, ImVec2(18, 18));
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("colour %d", i);
+      ImGui::PopID();
+      if (i != 15) ImGui::SameLine(0, (i & 3) == 3 ? 8.0f : 2.0f);
+    }
+
+    // --- VRAM table base addresses (derived from the VDP registers, mode-aware) ---
+    uint16_t nameB = (uint16_t)((r[2] & 0x0F) << 10);
+    uint16_t patB  = m2 ? ((r[4] & 0x04) ? 0x2000 : 0x0000) : (uint16_t)((r[4] & 0x07) << 11);
+    uint16_t colB  = m2 ? ((r[3] & 0x80) ? 0x2000 : 0x0000) : (uint16_t)(r[3] << 6);
+    uint16_t satB  = (uint16_t)((r[5] & 0x7F) << 7);
+    uint16_t sppB  = (uint16_t)((r[6] & 0x07) << 11);
+    ImGui::SeparatorText("VRAM tables");
+    if (ImGui::BeginTable("vtab", 2, ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg)) {
+      auto trow = [&](const char *n, uint16_t a) {
+        ImGui::TableNextRow(); ImGui::TableNextColumn(); ImGui::TextDisabled("%s", n);
+        ImGui::TableNextColumn(); ImGui::Text("$%04X", a);
+      };
+      trow("Name table", nameB); trow("Pattern generator", patB); trow("Colour table", colB);
+      trow("Sprite attributes", satB); trow("Sprite patterns", sppB);
+      ImGui::EndTable();
+    }
+
+    // --- pattern generator as a 16x16 tile sheet (128x128, white = set bit) ---
+    ImGui::SeparatorText("Pattern generator");
+    static int patBank = 0;
+    if (m2) { ImGui::SetNextItemWidth(150); ImGui::Combo("Bank##vdp", &patBank, "0 (rows 0-7)\0001 (rows 8-15)\0002 (rows 16-23)\0"); }
+    else patBank = 0;
+    if (!g_vdpPatTex) {
+      g_vdpPatTex = SDL_CreateTexture(g_ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, 128, 128);
+      SDL_SetTextureScaleMode(g_vdpPatTex, SDL_ScaleModeNearest);
+    }
+    static uint32_t vpbuf[128 * 128];
+    dbgMsxRenderPatterns(vpbuf, patBank);
+    SDL_UpdateTexture(g_vdpPatTex, nullptr, vpbuf, 128 * sizeof(uint32_t));
+    float ts = ImGui::GetContentRegionAvail().x; if (ts > 256.0f) ts = 256.0f; if (ts < 128.0f) ts = 128.0f;
+    ImGui::Image((ImTextureID)(intptr_t)g_vdpPatTex, ImVec2(ts, ts));
+    ImGui::TextDisabled("256 tiles, 16x16 grid");
+
+    // --- sprite attribute table (32 entries: Y, X, pattern, colour + flags); $D0 ends the list ---
+    if (ImGui::CollapsingHeader("Sprites (32)")) {
+      int ssize = (r[1] & 0x02) ? 16 : 8, smag = (r[1] & 0x01) ? 2 : 1;
+      ImGui::TextDisabled("size %dx%d   magnify x%d", ssize, ssize, smag);
+      if (ImGui::BeginTable("vspr", 6, ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg |
+                            ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_ScrollY, ImVec2(0, 200))) {
+        ImGui::TableSetupColumn("#"); ImGui::TableSetupColumn("X"); ImGui::TableSetupColumn("Y");
+        ImGui::TableSetupColumn("Pat"); ImGui::TableSetupColumn("Col"); ImGui::TableSetupColumn("Flags");
+        ImGui::TableHeadersRow();
+        bool ended = false;
+        for (int s = 0; s < 32; s++) {
+          uint8_t y = dbgMsxPeekVram(satB + s * 4 + 0);
+          if (y == 0xD0) ended = true;                       // list terminator: this + rest are inactive
+          uint8_t x = dbgMsxPeekVram(satB + s * 4 + 1);
+          uint8_t pat = dbgMsxPeekVram(satB + s * 4 + 2);
+          uint8_t cb = dbgMsxPeekVram(satB + s * 4 + 3);
+          ImVec4 col = ended ? ImVec4(0.5f, 0.5f, 0.5f, 1) : ImVec4(1, 1, 1, 1);
+          ImGui::TableNextRow();
+          ImGui::TableNextColumn(); ImGui::TextColored(col, "%d", s);
+          ImGui::TableNextColumn(); ImGui::TextColored(col, "%d", (cb & 0x80) ? x - 32 : x);   // early clock
+          ImGui::TableNextColumn(); ImGui::TextColored(col, "%d", y);
+          ImGui::TableNextColumn(); ImGui::TextColored(col, "$%02X", pat);
+          ImGui::TableNextColumn();
+          ImGui::PushID(s);
+          ImVec4 sc = ImGui::ColorConvertU32ToFloat4(dbgMsxPaletteRGBA(cb & 0x0F));
+          ImGui::ColorButton("##sc", sc, ImGuiColorEditFlags_NoAlpha | ImGuiColorEditFlags_NoTooltip, ImVec2(14, 14));
+          ImGui::SameLine(); ImGui::TextColored(col, "%d", cb & 0x0F);
+          ImGui::PopID();
+          ImGui::TableNextColumn();
+          ImGui::TextColored(col, "%s%s", (cb & 0x80) ? "EC " : "", (y == 0xD0) ? "END" : "");
+        }
+        ImGui::EndTable();
+      }
+    }
+
+    // --- raw VRAM hex ($0000-$3FFF), editable (writes show next frame) ---
+    ImGui::SeparatorText("VRAM  ($0000-$3FFF)");
+    g_vramEdit.ReadFn = vramRead; g_vramEdit.WriteFn = vramWrite;
+    g_vramEdit.DrawContents(nullptr, 0x4000, 0);
   }
   ImGui::End();
 }
@@ -966,6 +1566,9 @@ void desktopUiFrame(SDL_Texture *emuTex, int fbW, int fbH)
     ImGui::DockBuilderDockWindow("Heat map", memId);
     ImGui::DockBuilderDockWindow("Disk read", memId);
     ImGui::DockBuilderDockWindow("Audio spectrum", memId);
+    ImGui::DockBuilderDockWindow("VIC-II", memId);
+    ImGui::DockBuilderDockWindow("SID", memId);
+    ImGui::DockBuilderDockWindow("PPU / VRAM", memId);
     ImGui::DockBuilderFinish(dockId);
   }
 
@@ -1000,6 +1603,10 @@ void desktopUiFrame(SDL_Texture *emuTex, int fbW, int fbH)
   buildHeatPanel();
   buildDiskHeatPanel();
   buildSpectrumPanel();
+  buildVicPanel();
+  buildSidPanel();
+  buildPpuPanel();
+  buildVdpPanel();
   buildLoadBrowser();
   buildSettings();
   desktopUiAutoSaveCfg();   // continuously persist view options (debounced), not just on quit

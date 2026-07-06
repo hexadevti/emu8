@@ -20,6 +20,14 @@ static uint8_t* pcVRam  = nullptr;
 static volatile bool pcResetReq = false;
 static bool pcInitDone = false;
 
+#if defined(BOARD_DESKTOP)
+// Desktop emulator framebuffer for PC-XT: 640x400 (VGA-ish 80x25 @ 8x16 cells). Big enough to render
+// the authentic IBM 8x8 font crisply (80 cols x 8px = 640) instead of squishing it into 320 px.
+#define PCXT_DESK_W 640
+#define PCXT_DESK_H 400
+void desktopSetEmuResolution(int w, int h);   // display_sdl.cpp — size the fb before begin()
+#endif
+
 static uint8_t* pcAllocFast(size_t n) {                 // internal SRAM first, PSRAM fallback
   uint8_t* p = (uint8_t*)heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   if (!p) p = (uint8_t*)ps_malloc(n);
@@ -345,6 +353,10 @@ void pcxtSetup() {
   menuScreen = (unsigned char*)malloc(0x546);
   menuColor  = (unsigned char*)malloc(0x546);
 
+#if defined(BOARD_DESKTOP)
+  desktopSetEmuResolution(PCXT_DESK_W, PCXT_DESK_H);     // render CGA text/graphics at native PC res
+#endif
+
   pcRam  = (uint8_t*)ps_malloc(PCXT_RAM_SIZE);            // 1 MB main RAM -> PSRAM
   pcVRam = pcAllocFast(PCXT_VIDEOMEM_SIZE);               // 64 KB video RAM -> internal preferred
   if (!pcRam || !pcVRam) {
@@ -383,6 +395,12 @@ void pcxtSetup() {
                       : "PCXT: disk READ-ONLY (r+ truncates on this SD)");
   }
 
+#if defined(BOARD_DESKTOP)
+  // Desktop: choose the boot image via env (mirrors tiny386's EMU_T386_HDA/FDA) so a fresh run with no
+  // persisted EEPROM selection can still boot straight into a disk. EMU_PCXT_A = A: floppy, EMU_PCXT_C = C:.
+  if (const char* a = getenv("EMU_PCXT_A")) selectedPcFileName   = a;
+  if (const char* c = getenv("EMU_PCXT_C")) selectedPcHdFileName = c;
+#endif
   if (selectedPcFileName.length() > 1 && selectedPcFileName != "/")
     pcMountInto(selectedPcFileName.c_str(), 0);     // A: floppy
   if (selectedPcHdFileName.length() > 1 && selectedPcHdFileName != "/")
@@ -420,7 +438,12 @@ void pcxtLoop() {
   for (;;) {
     if (OptionsWindow) { vTaskDelay(pdMS_TO_TICKS(20)); continue; }
     if (pcResetReq)    { pcResetReq = false; g_pcxtMachine.trigReset(); }
+#if defined(BOARD_DESKTOP)
+    g_pcxtMachine.run(400000);   // desktop: bigger batch — the device's 1ms-per-40k throttle (for WDT/
+                                 // bus sharing) just slows the 8086 here (render/input are other threads)
+#else
     g_pcxtMachine.run(40000);
+#endif
     // Give INT 33h a non-null vector so DOS programs (e.g. QBASIC) detect a mouse. The emulator
     // intercepts the actual INT 33h, so this target is never executed. Set only when null (the POST
     // clears the IVT at boot); leave a real driver's vector alone if one is ever installed.
@@ -428,7 +451,11 @@ void pcxtLoop() {
     if (mem && mem[0xCC] == 0 && mem[0xCD] == 0 && mem[0xCE] == 0 && mem[0xCF] == 0) {
       mem[0xCC] = 0x33; mem[0xCD] = 0x00; mem[0xCE] = 0x00; mem[0xCF] = 0xF0;   // IVT[0x33] = F000:0033
     }
+#if defined(BOARD_DESKTOP)
+    taskYIELD();             // desktop: cooperative yield (separate render/input threads) — run near full speed
+#else
     vTaskDelay(1);          // feed WDT, let core 0 render
+#endif
   }
 }
 
@@ -557,13 +584,14 @@ static void pcDrawCgaGraphic(uint8_t ch, uint16_t fg, uint16_t bg, int x, int y,
   }
 }
 
-#if BOARD_PANEL_DSI
+#if BOARD_PANEL_DSI || defined(BOARD_DESKTOP)
 const uint8_t *pcBiosFont8x8();   // the authentic IBM CP437 8x8 font, pulled from the BIOS (bios.cpp)
 
-// JC1060P470: render CGA text with the ORIGINAL IBM 8x8 font straight onto the 1024x600 canvas (each
-// cell = one glyph scaled to fill it). Authentic look + real box-drawing/shading glyphs (no GFX-font
-// approximation or connect-the-borders hack). Returns false if the BIOS font isn't found -> GFX path.
-static bool pcxtRenderTextP4() {
+// Render CGA text with the ORIGINAL IBM 8x8 font, each cell = one glyph scaled to fill it, into a
+// PW x PH target. Authentic look + real box-drawing/shading glyphs (no GFX-font approximation or
+// connect-the-borders hack). Used on the JC1060P470 panel (1024x600 canvas) AND the desktop SDL
+// framebuffer (640x400) — both have a real drawGlyph8. Returns false if the BIOS font isn't found.
+static bool pcxtRenderTextGlyph(int PW, int PH) {
   const uint8_t *font = pcBiosFont8x8();
   if (!font) return false;
   bool text80 = (g_pcxtMachine.graphicsAdapter()->emulation()
@@ -572,11 +600,11 @@ static bool pcxtRenderTextP4() {
   const uint8_t* vbuf = g_pcxtMachine.videoMemory() + 0x8000 + g_pcxtMachine.cgaMemOffset();
 
   for (int r = 0; r < 25; r++) {
-    int y0 = r * PANEL_NATIVE_H / 25, y1 = (r + 1) * PANEL_NATIVE_H / 25;
+    int y0 = r * PH / 25, y1 = (r + 1) * PH / 25;
     for (int c = 0; c < cols; c++) {
       uint8_t ch   = vbuf[(r * cols + c) * 2];
       uint8_t attr = vbuf[(r * cols + c) * 2 + 1];
-      int x0 = c * PANEL_NATIVE_W / cols, x1 = (c + 1) * PANEL_NATIVE_W / cols;
+      int x0 = c * PW / cols, x1 = (c + 1) * PW / cols;
       tft.drawGlyph8(x0, y0, x1 - x0, y1 - y0, font + ch * 8,
                      kCgaRgb565[attr & 0x0F], kCgaRgb565[(attr >> 4) & 0x07]);
     }
@@ -586,34 +614,35 @@ static bool pcxtRenderTextP4() {
   if (ga->cursorVisible() && ((millis() / 400) & 1) == 0) {
     int cr = ga->cursorRow(), cc = ga->cursorCol();
     if (cr >= 0 && cr < 25 && cc >= 0 && cc < cols) {
-      int x0 = cc * PANEL_NATIVE_W / cols, x1 = (cc + 1) * PANEL_NATIVE_W / cols;
-      int y0 = cr * PANEL_NATIVE_H / 25,   y1 = (cr + 1) * PANEL_NATIVE_H / 25;
+      int x0 = cc * PW / cols, x1 = (cc + 1) * PW / cols;
+      int y0 = cr * PH / 25,   y1 = (cr + 1) * PH / 25;
       tft.drawGlyph8(x0, y0, x1 - x0, y1 - y0, font + 0x5F * 8, kCgaRgb565[15], 0, true);
     }
   }
-  // mouse cursor: reverse-video block at the mouse cell (INT 33h served from the USB mouse). The S3
-  // path (pcxtRenderText below) draws this too; replicate it here or the P4 cursor is invisible even
-  // though INT 33h tracks position correctly. Reverse video = draw the cell glyph with fg/bg swapped
-  // (opaque bg paints the whole cell), matching the standard text-mode mouse driver block.
+  // mouse cursor: reverse-video block at the mouse cell (INT 33h served from the USB mouse). Reverse
+  // video = draw the cell glyph with fg/bg swapped (opaque bg paints the whole cell), matching the
+  // standard text-mode mouse driver block.
   if (pcMouseShown) {
     int mc = pcMouseX / 8, mr = pcMouseY / 8;
     if (mc >= 0 && mc < cols && mr >= 0 && mr < 25) {
       uint8_t ch = vbuf[(mr * cols + mc) * 2];
       uint8_t a  = vbuf[(mr * cols + mc) * 2 + 1];
-      int x0 = mc * PANEL_NATIVE_W / cols, x1 = (mc + 1) * PANEL_NATIVE_W / cols;
-      int y0 = mr * PANEL_NATIVE_H / 25,   y1 = (mr + 1) * PANEL_NATIVE_H / 25;
+      int x0 = mc * PW / cols, x1 = (mc + 1) * PW / cols;
+      int y0 = mr * PH / 25,   y1 = (mr + 1) * PH / 25;
       tft.drawGlyph8(x0, y0, x1 - x0, y1 - y0, font + ch * 8,
                      kCgaRgb565[(a >> 4) & 0x07], kCgaRgb565[a & 0x0F]);   // fg<->bg (reverse)
     }
   }
-  return true;   // flushDSI pushes the canvas 1:1 (no displaySetVideoRect this frame)
+  return true;   // the target is pushed 1:1 (P4 canvas / desktop fb)
 }
 #endif
 
 // ---- CGA text render: 80x25 / 40x25 with the built-in 6x8 font (like iigsRenderText) ----
 static void pcxtRenderText() {
 #if BOARD_PANEL_DSI
-  if (pcxtRenderTextP4()) return;            // P4: original IBM 8x8 font, full-screen
+  if (pcxtRenderTextGlyph(PANEL_NATIVE_W, PANEL_NATIVE_H)) return;   // P4: original IBM 8x8 font, full-screen
+#elif defined(BOARD_DESKTOP)
+  if (pcxtRenderTextGlyph(PCXT_DESK_W, PCXT_DESK_H)) return;          // desktop: same authentic font, 640x400 fb
 #endif
   tft.setUiMode(true);
   bool osk = oskActive();
@@ -700,6 +729,41 @@ static void pcxtRenderText() {
   }
 }
 
+#if defined(BOARD_DESKTOP)
+// Desktop CGA graphics into the 640x400 fb: 320x200x4 -> 2x both; 640x200x2 -> 1x wide, 2x tall.
+// Native resolution (no 640->320 downscale like the device path), pushed as 2-row bands.
+static void pcxtRenderGraphicsDesktop(fabgl::GraphicsAdapter::Emulation emu) {
+  static uint16_t* band = nullptr;
+  if (!band) band = (uint16_t*)malloc(PCXT_DESK_W * 2 * sizeof(uint16_t));
+  if (!band) return;
+  fabgl::GraphicsAdapter* ga = g_pcxtMachine.graphicsAdapter();
+  const uint8_t* vm = g_pcxtMachine.videoMemory() + 0x8000;
+  bool mode640 = (emu == fabgl::GraphicsAdapter::Emulation::PC_Graphics_640x200_2Colors);
+
+  uint16_t pal[4];
+  if (!mode640) {
+    static const uint8_t PC[4][3] = {{2,4,6},{10,12,14},{3,5,7},{11,13,15}};
+    int pi = ga->graphPalette() & 3;
+    pal[0] = kCgaRgb565[ga->graphBackgroundIndex() & 0x0F];
+    pal[1] = kCgaRgb565[PC[pi][0]]; pal[2] = kCgaRgb565[PC[pi][1]]; pal[3] = kCgaRgb565[PC[pi][2]];
+  } else {
+    int fg = ga->graphForegroundIndex() & 0x0F;
+    pal[0] = kCgaRgb565[0]; pal[1] = kCgaRgb565[fg ? fg : 15];
+  }
+  tft.setSwapBytes(true);
+  for (int sy = 0; sy < 200; sy++) {                       // 200 CGA lines -> rows 2*sy, 2*sy+1
+    const uint8_t* srow = vm + (sy & 1) * 0x2000 + (sy >> 1) * 80;
+    for (int x = 0; x < PCXT_DESK_W; x++) {
+      if (!mode640) { int sx = x >> 1; band[x] = pal[(srow[sx >> 2] >> (6 - (sx & 3) * 2)) & 3]; }      // 640->320 (2x)
+      else          { band[x] = pal[(srow[x >> 3] >> (7 - (x & 7))) & 1]; }                              // 1:1
+    }
+    memcpy(band + PCXT_DESK_W, band, PCXT_DESK_W * sizeof(uint16_t));   // duplicate -> 2x vertical
+    tft.pushImage(0, sy * 2, PCXT_DESK_W, 2, band);
+  }
+  tft.setSwapBytes(false);
+}
+#endif
+
 // Dispatch by CGA mode (text vs graphics). Returns true if it (re)drew, false if the picture was
 // unchanged and rendering was skipped. The render loop uses that to SKIP the QSPI flush when nothing
 // changed, freeing the shared MSPI bus for the core-1 8086 -> big speedup when the screen is static.
@@ -739,8 +803,13 @@ bool pcxtRenderFrame() {
     tft.fillPanelBlack();
 #endif
   }
-  if (gfx) pcxtRenderGraphics(emu);
-  else     pcxtRenderText();
+  if (gfx) {
+#if defined(BOARD_DESKTOP)
+    pcxtRenderGraphicsDesktop(emu);          // native 640x400 (no 640->320 downscale)
+#else
+    pcxtRenderGraphics(emu);
+#endif
+  } else   pcxtRenderText();
   return true;
 }
 
@@ -834,6 +903,26 @@ void pcxtScanFiles() { loadPcxtFilesSync(); }
 // No reboot: an A: change is seen live by DOS; a new C: needs a reboot to be recognised.
 bool pcxtMountA(const char* path) { return pcMountInto(path, 0); }
 bool pcxtMountC(const char* path) { return pcMountInto(path, 2); }
+
+// Route a PC disk image by SIZE: a floppy (<= 2.88MB) -> A:, a larger image -> C: (hard disk). The
+// desktop "Load" menu (and the device disk browser) use this so a hard-disk image like DOSHDD.IMG
+// lands on C:, not A:. A new C: needs a re-POST for the BIOS to detect it, so request one.
+bool pcxtMountAuto(const char* path) {
+  if (!pcInitDone || !path) return false;
+  uint32_t sz = 0;
+  busTake();
+  File f = FSTYPE.open(path, FILE_READ);
+  if (f) { sz = (uint32_t)f.size(); f.close(); }
+  busGive();
+  if (sz > 2949120u) {                    // > 2.88MB (largest floppy) -> hard disk C:
+    if (selectedPcFileName == path) pcxtUnmount(0);   // same image stuck on A: (old mis-route) -> clear it
+    bool ok = pcxtMountC(path);
+    if (ok) pcResetReq = true;            // re-POST so the BIOS scans the new C: (and boots it if no A:)
+    return ok;
+  }
+  if (selectedPcHdFileName == path) pcxtUnmount(2);    // same image stuck on C: -> clear it
+  return pcxtMountA(path);                 // floppy -> A: (live media change)
+}
 
 // Eject the disk in a slot (0 = A:, 2 = C:): close the image and clear the saved name.
 void pcxtUnmount(int slot) {

@@ -13,6 +13,10 @@ bool    diskPresent();                             // is a .dsk mounted?
 bool    diskRomInstalled();                        // is the disk ROM present in slot 2?
 uint8_t diskRead(uint16_t addr);                   // slot-2 read  (disk ROM + WD2793 registers)
 void    diskWrite(uint16_t addr, uint8_t v);       // slot-2 write (disk ROM region ignored; FDC at $7FF8+)
+#if defined(BOARD_DESKTOP)
+uint8_t diskPeek(uint16_t addr);                   // desktop debugger: side-effect-free slot-2 read (no FDC advance)
+int     diskTrackCount();                          // desktop debugger: cylinders in the mounted .dsk (rings for the heat map)
+#endif
 // SD write-back: the FDC marks written sectors dirty; the device layer drains them to the .dsk file.
 bool    diskHasDirty();
 int     diskTakeDirtySector(const uint8_t** data, uint32_t* offset);   // next dirty sector (clears it); -1 = none

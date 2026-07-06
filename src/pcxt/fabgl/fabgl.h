@@ -1,4 +1,4 @@
-// fabgl.h - SHIM for the emu6502 PC-XT (8086) port.
+// fabgl.h - SHIM for the emu8 PC-XT (8086) port.
 //
 // The vendored fabgl sources (i8086, PIC8259, PIT8253, bios, ...) do
 // #include "fabgl.h". A quote-include resolves to THIS file first (it lives in

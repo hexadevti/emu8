@@ -790,7 +790,7 @@ static void ouiMount()
     if (shownFile >= files.size()) return;
     if (ouiIsDir(files[shownFile])) { ouiBrowse(files[shownFile]); return; }
     if (HdDisk) setHdFile(); else setDiskFile();   // selectedHd/DiskFileName = highlighted image
-    saveConfig();         // persist so the boot auto-load (emu6502.ino) mounts it
+    saveConfig();         // persist so the boot auto-load (emu8.ino) mounts it
     ESP.restart();        // reboot -> iigsSetup loads it -> firmware boots (slot 7 HD / slot 6 disk)
     return;
   }

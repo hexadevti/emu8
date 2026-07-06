@@ -1,9 +1,9 @@
-// msx.h - MSX1 machine model (Z80 + TMS9918 VDP + AY-3-8910 PSG + 8255 PPI) for emu6502.
+// msx.h - MSX1 machine model (Z80 + TMS9918 VDP + AY-3-8910 PSG + 8255 PPI) for emu8.
 //
 // Deliberately free of Arduino/board headers so the SAME core compiles into host/msx_host.cpp
 // (g++, off-device) and into the board build. Device-only glue (allocation, splash/render/config
 // wiring) lives in src/msx/msx.cpp which DOES include emu.h. The C-linkage entry points at the
-// bottom (msxSetup/msxLoop/...) are what the platform dispatch in emu6502.ino / video.cpp calls.
+// bottom (msxSetup/msxLoop/...) are what the platform dispatch in emu8.ino / video.cpp calls.
 
 #pragma once
 #include <stdint.h>
@@ -71,7 +71,7 @@ bool    cartPresent(int slot);
 
 } // namespace msx
 
-// ===== platform entry points (called from emu6502.ino / video.cpp / optionsui.cpp) =====
+// ===== platform entry points (called from emu8.ino / video.cpp / optionsui.cpp) =====
 // Plain C++ linkage to match proto.h and the other platform cores (atari/nes/...).
 void msxSetup();
 void msxLoop();

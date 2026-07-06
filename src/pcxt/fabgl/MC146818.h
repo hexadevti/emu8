@@ -1,4 +1,4 @@
-// MC146818.h - minimal RTC/CMOS for the emu6502 PC-XT port.
+// MC146818.h - minimal RTC/CMOS for the emu8 PC-XT port.
 //
 // FabGL's MC146818 persisted CMOS in ESP-IDF NVS and drove a periodic interrupt
 // via esp_timer. We only need the register file + the 0x70/0x71 index/data port

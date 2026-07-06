@@ -50,6 +50,11 @@ extern uint8_t cntRefreshs;
 extern const uint16_t c64Colors[16];
 
 // ---- CPU (c64_cpu.cpp) ----
+// 6510 register file (defined in c64_cpu.cpp). Declared here so the desktop debug facade
+// (src/desktop/debug_bridge.cpp) can read them for the CPU/disasm panels, exactly like the
+// Apple II core exposes its 6502 globals. Harmless on the device (just declarations).
+extern unsigned short PC, lastPC;
+extern unsigned char STP, A, X, Y, SR;
 void cpuReset();
 void cpuLoop();
 void cpuIRQ();

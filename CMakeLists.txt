@@ -1,4 +1,4 @@
-# CMakeLists.txt — DESKTOP (SDL2) debug build of emu6502. Does NOT touch the arduino-cli device
+# CMakeLists.txt — DESKTOP (SDL2) debug build of emu8. Does NOT touch the arduino-cli device
 # build (that path never invokes CMake and never defines BOARD_DESKTOP). See desktop/README.md.
 #
 #   Windows (native .exe, gdb):   MSYS2 MinGW32 shell ->
@@ -6,7 +6,7 @@
 #   WSL/Linux (sanitizers rail):
 #     cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DEMU_SANITIZE=thread && cmake --build build
 cmake_minimum_required(VERSION 3.16)
-project(emu6502_desktop C CXX)
+project(emu8_desktop C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -55,6 +55,14 @@ list(REMOVE_ITEM CORE_SRC
   ${REPO}/src/iigs/cpu65816_test.cpp)   # bring-up harness
 
 file(GLOB DESKTOP_SRC CONFIGURE_DEPENDS ${REPO}/src/desktop/*.cpp)
+# PC-XT is now built for real on desktop (see PCXT_SRC below), so drop the empty stub that used to
+# satisfy the linker. pcxt_stub.cpp defines pcxtSetup()/pcxtLoop()/... — keeping it would clash.
+list(REMOVE_ITEM DESKTOP_SRC ${REPO}/src/desktop/pcxt_stub.cpp)
+
+# PC-XT (Intel 8086): the machine core in src/pcxt/fabgl/ is a host-portable vendored fabgl subset
+# (i8086 + PIC/PIT/i8042/RTC/BIOS + a state-only GraphicsAdapter); src/pcxt/*.cpp is the emu8 glue
+# (allocation, run loop, CGA render push, disk mount). All ESP-isms resolve through the arduino_shim.
+file(GLOB PCXT_SRC CONFIGURE_DEPENDS ${REPO}/src/pcxt/*.cpp ${REPO}/src/pcxt/fabgl/*.cpp)
 
 # --- Dear ImGui (docking branch) — the desktop-only native UI shell (resizable window, menu bar,
 #     settings dialog, debug panels). Vendored in third_party/imgui, DELIBERATELY OUTSIDE src/ so the
@@ -76,53 +84,54 @@ set(IMGUI_SRC
 file(GLOB TINY386_SRC CONFIGURE_DEPENDS ${REPO}/src/tiny386/*.c ${REPO}/src/tiny386/*.cpp)
 
 # Compile the Arduino sketch as a C++ translation unit (copied so the compiler accepts the name).
-configure_file(${REPO}/emu6502.ino ${CMAKE_BINARY_DIR}/emu6502_ino.cpp COPYONLY)
+configure_file(${REPO}/emu8.ino ${CMAKE_BINARY_DIR}/emu8_ino.cpp COPYONLY)
 
-add_executable(emu6502
-  ${CMAKE_BINARY_DIR}/emu6502_ino.cpp
+add_executable(emu8
+  ${CMAKE_BINARY_DIR}/emu8_ino.cpp
   ${REPO}/globals.cpp
   ${CORE_SRC}
   ${DESKTOP_SRC}
   ${IMGUI_SRC}
-  ${TINY386_SRC})
+  ${TINY386_SRC}
+  ${PCXT_SRC})
 
 # ImGui headers (imgui.h) + its SDL backends. PRIVATE: only the desktop target uses them.
-target_include_directories(emu6502 PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+target_include_directories(emu8 PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 
 # arduino_shim MUST come first so #include <Arduino.h>/SD.h/EEPROM.h/SPI.h/FS.h/BLEDevice.h and
 # "driver/i2s.h" etc. resolve to the shim instead of the real (absent) libraries.
-target_include_directories(emu6502 BEFORE PRIVATE
+target_include_directories(emu8 BEFORE PRIVATE
   ${REPO}/src/desktop/arduino_shim
   ${REPO})
 # tiny386 vendored sources include their own headers by bare name ("pc.h", ...) -> put their dir on
 # the include path. AFTER the shim/repo dirs so e.g. emu.h still resolves to the project's, not here.
-target_include_directories(emu6502 PRIVATE ${REPO}/src/tiny386)
+target_include_directories(emu8 PRIVATE ${REPO}/src/tiny386)
 
-target_compile_definitions(emu6502 PRIVATE BOARD_DESKTOP)
+target_compile_definitions(emu8 PRIVATE BOARD_DESKTOP)
 # The codebase is full of Arduino-isms; keep it building (warnings on, not fatal).
-target_compile_options(emu6502 PRIVATE -Wno-write-strings -Wno-narrowing)
+target_compile_options(emu8 PRIVATE -Wno-write-strings -Wno-narrowing)
 
 # --- SDL2 + threads. We use SDL_MAIN_HANDLED (main.cpp), so SDL2main is NOT needed (avoids the
 #     MinGW SDL2main/SDL2 link-order trap). ---
 find_package(SDL2 REQUIRED)
 find_package(Threads REQUIRED)
-target_link_libraries(emu6502 PRIVATE Threads::Threads)
+target_link_libraries(emu8 PRIVATE Threads::Threads)
 if(TARGET SDL2::SDL2)
-  target_link_libraries(emu6502 PRIVATE SDL2::SDL2)
+  target_link_libraries(emu8 PRIVATE SDL2::SDL2)
 else()
-  target_include_directories(emu6502 PRIVATE ${SDL2_INCLUDE_DIRS})
-  target_link_libraries(emu6502 PRIVATE ${SDL2_LIBRARIES})
+  target_include_directories(emu8 PRIVATE ${SDL2_INCLUDE_DIRS})
+  target_link_libraries(emu8 PRIVATE ${SDL2_LIBRARIES})
 endif()
 
-# Copy the MinGW + SDL2 runtime DLLs next to emu6502.exe so it runs standalone (double-click / F5)
+# Copy the MinGW + SDL2 runtime DLLs next to emu8.exe so it runs standalone (double-click / F5)
 # WITHOUT needing C:\msys64\mingw32\bin on PATH. (libgcc may be _dw2 or _sjlj depending on the build.)
 if(WIN32)
   get_filename_component(MINGW_BIN "${CMAKE_CXX_COMPILER}" DIRECTORY)
   foreach(dll SDL2.dll libstdc++-6.dll libwinpthread-1.dll
               libgcc_s_dw2-1.dll libgcc_s_sjlj-1.dll libgcc_s_seh-1.dll)
     if(EXISTS "${MINGW_BIN}/${dll}")
-      add_custom_command(TARGET emu6502 POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${MINGW_BIN}/${dll}" "$<TARGET_FILE_DIR:emu6502>"
+      add_custom_command(TARGET emu8 POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${MINGW_BIN}/${dll}" "$<TARGET_FILE_DIR:emu8>"
         VERBATIM)
     endif()
   endforeach()

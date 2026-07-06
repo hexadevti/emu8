@@ -168,13 +168,13 @@
     },
     {
       // DESKTOP (SDL2) debug build via MSYS2 MinGW32. Used as the preLaunchTask for F5
-      // (.vscode/launch.json). Configures CMake on first run, then builds build/emu6502.exe.
+      // (.vscode/launch.json). Configures CMake on first run, then builds build/emu8.exe.
       "label": "desktop: build",
       "type": "process",
       "command": "C:\\msys64\\usr\\bin\\bash.exe",
       "args": [
         "-lc",
-        "cd /c/Users/lucia/repos/emu6502 && cmake -G 'Unix Makefiles' -S . -B build -DEMU_M32=OFF -DCMAKE_BUILD_TYPE=Debug && make -C build -j4"
+        "cd /c/Users/lucia/repos/emu8 && cmake -G 'Unix Makefiles' -S . -B build -DEMU_M32=OFF -DCMAKE_BUILD_TYPE=Debug && make -C build -j4"
       ],
       "options": { "env": { "MSYSTEM": "MINGW32", "CHERE_INVOKING": "1" } },
       "group": "build",

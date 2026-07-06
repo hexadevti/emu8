@@ -7,7 +7,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#if defined(ESP_PLATFORM)   // emu6502: -O3 for the I/O dispatch (device build is -O2 globally)
+#if defined(ESP_PLATFORM)   // emu8: -O3 for the I/O dispatch (device build is -O2 globally)
 #pragma GCC optimize("O3")
 #endif
 
