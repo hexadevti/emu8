@@ -1,9 +1,24 @@
 #include "../../emu.h"
 #include "nes.h"
+#include "esp_heap_caps.h"   // heap_caps_malloc / MALLOC_CAP_INTERNAL (force NES hot RAM internal)
 
 // Definitions for the NES state shared across the NES translation units (cpu/memory/ppu/cart).
 // CPU registers + decode tables stay file-local in nes_cpu.cpp; PPU scratch stays in
 // nes_ppu.cpp. This file holds the cross-file state + the master palette.
+
+// Allocate from INTERNAL DRAM when it fits, falling back to the default heap (PSRAM on the S3)
+// only when internal is exhausted. The NES hot path is brutally latency-sensitive — every opcode
+// fetch reads prgRom, every rendered pixel reads chrData — and on the ESP32-S3 the default malloc
+// steers allocations >=16K (e.g. a 32K PRG) into slow PSRAM, stalling the core-1 interpreter on
+// the external-memory bus. Forcing them internal keeps the emulation off PSRAM. (The CYD has no
+// PSRAM, so this is identical to malloc there.) Big ROMs that don't fit internal fall back to PSRAM.
+void *nesAllocFast(size_t n) {
+  void *p = heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);  // non-null => guaranteed internal
+  sprintf(buf, "NES alloc %6uB -> %s", (unsigned)n,
+          p ? "INTERNAL DRAM (fast)" : "PSRAM (internal full, fallback)");
+  printLog(buf);
+  return p ? p : malloc(n);
+}
 
 namespace nes {
 

@@ -1,7 +1,9 @@
 #include "../../emu.h"
+#if BOARD_INPUT_ANALOG
 #include "driver/adc.h"   // adc1_config_*: re-assert the ADC config so analogRead doesn't freeze
 
 static void analogJoystickTask(void *pvParameters);   // defined below; used by joystickSetup
+#endif
 
 void processJoystick(float speedAdjust)
 {
@@ -51,6 +53,120 @@ void processJoystick(float speedAdjust)
     }
 }
 
+// Per-platform gameplay mapping, shared by BOTH input backends (ADC analog joystick on the
+// CYD, USB SNES gamepad on the JC4827W543). Reads the direction state (joyX = vertical: 0=up,
+// 2=down; joyY = horizontal: 0=left, 2=right) and buttons (Pb0-3), and pushes them to the
+// active console core. Apple II reads Pb0-3 / paddle timers directly, so it needs nothing here.
+void applyPlatformInput()
+{
+    // C64: 8-way stick + fire onto joystick port 2 (CIA1 $DC00). Active-low:
+    // bit0=up, bit1=down, bit2=left, bit3=right, bit4=fire. Released (0xff) when JOYSTICK
+    // is off or the menu is open.
+    if (currentPlatform == PLATFORM_C64)
+    {
+        uint8_t m = 0xff;
+        if (joystick && !OptionsWindow)
+        {
+            if (joyX == 0) m &= ~0x01;   // up
+            if (joyX == 2) m &= ~0x02;   // down
+            if (joyY == 0) m &= ~0x04;   // left
+            if (joyY == 2) m &= ~0x08;   // right
+            if (Pb0)       m &= ~0x10;   // fire (button 0)
+        }
+        c64SetJoystick(m);
+    }
+
+    // NES: 8-way stick + buttons onto controller 1. Active-HIGH bits:
+    // bit0=A, bit1=B, bit2=Select, bit3=Start, bit4=Up, bit5=Down, bit6=Left, bit7=Right.
+    if (currentPlatform == PLATFORM_NES)
+    {
+        uint8_t b = 0;
+        if (joystick && !OptionsWindow)
+        {
+            if (joyX == 0) b |= 0x10;   // up
+            if (joyX == 2) b |= 0x20;   // down
+            if (joyY == 0) b |= 0x40;   // left
+            if (joyY == 2) b |= 0x80;   // right
+            if (Pb0)       b |= 0x01;   // A
+            if (Pb1)       b |= 0x02;   // B
+            if (Pb2)       b |= 0x04;   // Select
+            if (Pb3)       b |= 0x08;   // Start
+        }
+        nesSetController(b);
+    }
+
+    // Atari 2600: 8-way stick -> directions, Pb0 = Fire, Pb1 = Select, Pb2/Pb3 = Reset.
+    // dirBits to atariSetInput: bit0=Up, bit1=Down, bit2=Left, bit3=Right.
+    if (currentPlatform == PLATFORM_ATARI)
+    {
+        uint8_t d = 0;
+        bool fire = false, select = false, reset = false;
+        if (joystick && !OptionsWindow)
+        {
+            if (joyX == 0) d |= 0x01;   // up
+            if (joyX == 2) d |= 0x02;   // down
+            if (joyY == 0) d |= 0x04;   // left
+            if (joyY == 2) d |= 0x08;   // right
+            fire   = Pb0;
+            select = Pb1;
+            reset  = Pb2 || Pb3;
+        }
+        atariSetInput(d, fire, select, reset);
+    }
+
+    // MSX: 8-way stick + 2 triggers onto the general-purpose joystick port (PSG port A, register 14).
+    // Active-LOW: bit0=up, bit1=down, bit2=left, bit3=right, bit4=trigger A, bit5=trigger B.
+    if (currentPlatform == PLATFORM_MSX)
+    {
+        uint8_t m = 0xFF;
+        if (joystick && !OptionsWindow)
+        {
+            if (joyX == 0) m &= ~0x01;   // up
+            if (joyX == 2) m &= ~0x02;   // down
+            if (joyY == 0) m &= ~0x04;   // left
+            if (joyY == 2) m &= ~0x08;   // right
+            if (Pb0)       m &= ~0x10;   // trigger A
+            if (Pb1)       m &= ~0x20;   // trigger B
+        }
+        msxSetInput(m);
+    }
+
+    // SMS: 8-way d-pad + 2 buttons onto controller port 1 ($DC). Active-LOW, same bit order as MSX:
+    // bit0=up, bit1=down, bit2=left, bit3=right, bit4=button 1 (TL), bit5=button 2 (TR).
+    if (currentPlatform == PLATFORM_SMS)
+    {
+        uint8_t m = 0xFF;
+        if (joystick && !OptionsWindow)
+        {
+            if (joyX == 0) m &= ~0x01;   // up
+            if (joyX == 2) m &= ~0x02;   // down
+            if (joyY == 0) m &= ~0x04;   // left
+            if (joyY == 2) m &= ~0x08;   // right
+            if (Pb0)       m &= ~0x10;   // button 1
+            if (Pb1)       m &= ~0x20;   // button 2
+        }
+        smsSetInput(m);
+    }
+
+    // PC-XT: gamepad -> arrow keys + Enter/Esc (active-LOW mask, same bit order as SMS:
+    // bit0=up, bit1=down, bit2=left, bit3=right, bit4=A (Enter), bit5=B (Esc)).
+    if (currentPlatform == PLATFORM_PCXT)
+    {
+        uint8_t m = 0xFF;
+        if (!OptionsWindow)
+        {
+            if (joyX == 0) m &= ~0x01;   // up
+            if (joyX == 2) m &= ~0x02;   // down
+            if (joyY == 0) m &= ~0x04;   // left
+            if (joyY == 2) m &= ~0x08;   // right
+            if (Pb0)       m &= ~0x10;   // A -> Enter
+            if (Pb1)       m &= ~0x20;   // B -> Esc
+        }
+        pcxtSetInput(m);
+    }
+}
+
+#if BOARD_INPUT_ANALOG
 int joyCenterX = 0;
 int joyCenterY = 0;
 
@@ -382,63 +498,7 @@ static void analogJoystickTask(void *pvParameters)
 
         (void)joyRawX; (void)joyRawY;   // (joystick raw-value diagnostic removed)
 
-        // C64: map the 8-way stick + fire onto joystick port 2 (CIA1 $DC00). Active-low:
-        // bit0=up, bit1=down, bit2=left, bit3=right, bit4=fire. Only while JOYSTICK is on
-        // and the menu is closed; otherwise release all (0xff).
-        if (currentPlatform == PLATFORM_C64)
-        {
-            uint8_t m = 0xff;
-            if (joystick && !OptionsWindow)
-            {
-                if (joyX == 0) m &= ~0x01;   // up
-                if (joyX == 2) m &= ~0x02;   // down
-                if (joyY == 0) m &= ~0x04;   // left
-                if (joyY == 2) m &= ~0x08;   // right
-                if (Pb0)       m &= ~0x10;   // fire (button 0)
-            }
-            c64SetJoystick(m);
-        }
-
-        // NES: map the 8-way stick + buttons onto controller 1. Active-HIGH bits:
-        // bit0=A, bit1=B, bit2=Select, bit3=Start, bit4=Up, bit5=Down, bit6=Left, bit7=Right.
-        // Pb3 = Start here (the settings menu is opened by a screen tap on NES, see oskPoll).
-        if (currentPlatform == PLATFORM_NES)
-        {
-            uint8_t b = 0;
-            if (joystick && !OptionsWindow)
-            {
-                if (joyX == 0) b |= 0x10;   // up
-                if (joyX == 2) b |= 0x20;   // down
-                if (joyY == 0) b |= 0x40;   // left
-                if (joyY == 2) b |= 0x80;   // right
-                if (Pb0)       b |= 0x01;   // A
-                if (Pb1)       b |= 0x02;   // B
-                if (Pb2)       b |= 0x04;   // Select
-                if (Pb3)       b |= 0x08;   // Start
-            }
-            nesSetController(b);
-        }
-
-        // Atari 2600: 8-way stick -> joystick directions, Pb0 = Fire, Pb1 = Select,
-        // Pb3 = Reset (= "Start" on most 2600 games — placed on Pb3 to match the NES Start button;
-        // Pb2 also triggers Reset). The settings menu is opened by a screen tap (see oskPoll).
-        // dirBits to atariSetInput: bit0=Up, bit1=Down, bit2=Left, bit3=Right.
-        if (currentPlatform == PLATFORM_ATARI)
-        {
-            uint8_t d = 0;
-            bool fire = false, select = false, reset = false;
-            if (joystick && !OptionsWindow)
-            {
-                if (joyX == 0) d |= 0x01;   // up
-                if (joyX == 2) d |= 0x02;   // down
-                if (joyY == 0) d |= 0x04;   // left
-                if (joyY == 2) d |= 0x08;   // right
-                fire   = Pb0;
-                select = Pb1;
-                reset  = Pb2 || Pb3;        // Pb3 = Start (Reset switch), like the NES Start button
-            }
-            atariSetInput(d, fire, select, reset);
-        }
+        applyPlatformInput();   // push joyX/joyY/Pb0-3 to the active console core (shared w/ USB)
 
         if (pJoyX != joyX)
             changeDirection(0, joyX);
@@ -451,3 +511,14 @@ static void analogJoystickTask(void *pvParameters)
         vTaskDelay(pdMS_TO_TICKS(30)); // ~33 Hz for responsive mouse/joystick polling
     }
 }
+
+#else
+// No ADC analog joystick on this board: the USB SNES gamepad (usbgamepad.cpp) populates the
+// same globals (joyX/joyY/Pb0-3) and drives applyPlatformInput(). Boards with neither ADC nor a
+// USB host (e.g. the JC1060P470, where USB host is deferred) get input from touch/OSK only.
+void joystickSetup() {
+#if BOARD_INPUT_USB
+  usbGamepadSetup();
+#endif
+}
+#endif // BOARD_INPUT_ANALOG

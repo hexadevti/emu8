@@ -1,4 +1,7 @@
 #include "../../emu.h"
+#if defined(BOARD_DESKTOP)
+#include "../desktop/debug_bridge.h"   // dbgStepReq: desktop debugger single-step (no-op on device)
+#endif
 
 // μ6502 - Barebones 6502 Emulator By Damian Peckett
 // dpeckett.com, <damian@pecke.tt>
@@ -194,15 +197,29 @@ void cpuLoop() {
   while (running)
   {
     lastPC = PC;
+#if defined(BOARD_DESKTOP)
+    if (dbgBpShouldBreak(PC)) paused = true;          // breakpoint hit -> drop into the pause spin
+    if (g_dbgRunToPC >= 0 && PC == (uint16_t)g_dbgRunToPC) { paused = true; g_dbgRunToPC = -1; }      // run-to-cursor / step-over
+    if (g_dbgRunUntilSP >= 0 && STP > (uint8_t)g_dbgRunUntilSP) { paused = true; g_dbgRunUntilSP = -1; } // step-out
+#endif
     while (paused)
     {
+#if defined(BOARD_DESKTOP)
+      if (dbgStepReq > 0) { dbgStepReq--; break; }   // debugger single-step: run exactly one instruction
+#endif
       delay(100);
     }
+#if defined(BOARD_DESKTOP)
+    g_dbgBreakArmed = true;                           // re-arm after passing the breakpoint check once
+#endif
 
     opcode = read8(PC++);
+#if defined(BOARD_DESKTOP)
+    dbgBusTouch(lastPC, DBG_HEAT_X);   // heat map: this instruction was fetched/executed at lastPC
+#endif
 
-    // Throughput meter: report effective MHz / instr-per-sec every ~256K instructions.
-    if (perfMeter)
+    // Throughput meter: update the live measured 6502 speed (appleMeasuredMhz, shown read-only in
+    // Settings as "6502 / X.XMHz") every ~256K instructions. Also prints to Serial when perfMeter is on.
     {
       static uint32_t mInstr = 0;
       static uint64_t mCyc = 0;
@@ -216,7 +233,11 @@ void cpuLoop() {
         {
           float secs = (now - mLast) / 1000.0f;
           if (secs > 0)
-            Serial.printf("PERF: %.2f MHz, %lu instr/s\n", (mCyc / 1e6) / secs, (unsigned long)(mInstr / secs));
+          {
+            appleMeasuredMhz = (float)((mCyc / 1e6) / secs);
+            if (perfMeter)
+              Serial.printf("PERF: %.2f MHz, %lu instr/s\n", appleMeasuredMhz, (unsigned long)(mInstr / secs));
+          }
         }
         mLast = now;
         mInstr = 0;
@@ -226,18 +247,40 @@ void cpuLoop() {
 
     if (!Fast1MhzSpeed)
     {
+#if defined(BOARD_DESKTOP)
+      // Desktop: pace to a true 1.000 MHz by locking emulated cycles to real microseconds
+      // (1 emulated cycle == 1 us), self-correcting regardless of host emulation overhead. The ESP
+      // cycle-count tuning below (expectedDiff=300 @ 240 MHz) gives only ~0.8 MHz on a PC because the
+      // host getCycleCount() is microsecond-derived, not a real 240 MHz counter.
+      // appleClockMhz scales the target rate (1.0 = stock 1 MHz). We accumulate the real microseconds
+      // the emulated cycles SHOULD take as an INTEGER (paceTargetUs) + a sub-microsecond float
+      // remainder — never dividing the large running cycle count by a float (that lost precision past
+      // ~16M cycles and made the busy-wait jitter -> speaker clicks / apparent CPU freeze). At
+      // mhz=1.0 this is bit-identical to the stock integer pacing.
+      static uint32_t paceBaseUs = 0, paceTargetUs = 0;
+      static float    paceFrac = 0.0f;
+      float mhz = appleClockMhz; if (mhz < 0.05f) mhz = 0.05f;
+      paceFrac += (float)cycles[opcode] / mhz;             // small, always-precise float
+      uint32_t whole = (uint32_t)paceFrac; paceFrac -= (float)whole;
+      paceTargetUs += whole;
+      uint32_t elapsed = (uint32_t)micros() - paceBaseUs;
+      if ((int32_t)(elapsed - paceTargetUs) > 100000)      // re-anchor at boot / after a FAST burst
+        { paceBaseUs = (uint32_t)micros(); paceTargetUs = 0; paceFrac = 0.0f; }
+      while ((uint32_t)((uint32_t)micros() - paceBaseUs) < paceTargetUs) { }   // spin until real time catches up
+#else
       int cycleCount = cycles[opcode];
       cpuCycleCount = ESP.getCycleCount();
       uint32_t expectedDiff = 300;
 
       diffCpuCycleCount = cpuCycleCount - lastCpuCycleCount;
-      while (diffCpuCycleCount < expectedDiff * cycleCount)  
+      while (diffCpuCycleCount < expectedDiff * cycleCount)
       {
         cpuCycleCount = ESP.getCycleCount();
         diffCpuCycleCount = cpuCycleCount - lastCpuCycleCount;
       }
 
       lastCpuCycleCount = cpuCycleCount;
+#endif
     }
     
     // // if (joystick) 

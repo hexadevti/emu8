@@ -108,7 +108,11 @@ void sidTask(void *) {
   size_t wrote;
   while (running) {
     for (int i = 0; i < 128; i++) buf[i] = (uint16_t)(genSample() << 8);  // DAC uses high byte
+#if BOARD_AUDIO_DAC
     i2s_write(I2S_NUM_0, buf, sizeof(buf), &wrote, portMAX_DELAY);
+#else
+    ampWriteDac8(buf, 128);                                              // S3: 8-bit DAC -> I2S amp
+#endif
   }
   vTaskDelete(NULL);
 }
@@ -124,6 +128,22 @@ unsigned char sidRead(uint8_t reg) {
   return 0;
 }
 
+#if defined(BOARD_DESKTOP)
+// Desktop debug facade: snapshot the SID register file ($D400-$D418 shadow) and the live per-voice
+// envelope level + ADSR state, for the SID control window (src/desktop/ui_imgui.cpp). Register edits
+// from the window go through the normal sidWrite() so the synth reflects them immediately.
+int sidDebugRegs(uint8_t *out, int max) {
+  int n = (max < 0x19) ? max : 0x19;          // 25 registers $D400-$D418
+  for (int i = 0; i < n; i++) out[i] = sidreg[i];
+  return n;
+}
+void sidDebugVoice(int v, float *env, uint8_t *state) {
+  if (v < 0 || v >= SID_NVOICES) { if (env) *env = 0; if (state) *state = 0; return; }
+  if (env)   *env   = voice[v].env;
+  if (state) *state = voice[v].state;
+}
+#endif
+
 void sidSetup() {
   memset(sidreg, 0, sizeof(sidreg));
   for (int v = 0; v < SID_NVOICES; v++) {
@@ -135,6 +155,7 @@ void sidSetup() {
     decInc[r] = 255.0f / (adsrMs[r] * 3 * 0.001f * SID_FS);
   }
 
+#if BOARD_AUDIO_DAC
   i2s_config_t cfg = {};
   cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_DAC_BUILT_IN);
   cfg.sample_rate = SID_FS;
@@ -153,4 +174,10 @@ void sidSetup() {
   i2s_zero_dma_buffer(I2S_NUM_0);
   xTaskCreatePinnedToCore(sidTask, "sidTask", 4096, NULL, 2, NULL, 0);  // core 0
   printLog("SID: 3-voice synth on (I2S DAC GPIO26)");
+#else
+  // ESP32-S3: external I2S amp (no internal DAC).
+  ampBegin(SID_FS);
+  xTaskCreatePinnedToCore(sidTask, "sidTask", 4096, NULL, 2, NULL, 0);  // core 0
+  printLog("SID: 3-voice synth on (I2S amp)");
+#endif
 }

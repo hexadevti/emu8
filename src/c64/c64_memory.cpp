@@ -1,4 +1,7 @@
 #include "../../emu.h"
+#if defined(BOARD_DESKTOP)
+#include "../desktop/debug_bridge.h"   // dbgBusTouch: desktop heat map + watchpoints (no-op on device)
+#endif
 #include "c64.h"
 
 // C64 memory map + $01 banking, ported from C64Esp32 memory.ino. I/O ($D000-$DFFF)
@@ -6,26 +9,37 @@
 
 namespace c64 {
 
+#if defined(BOARD_DESKTOP)
+// Cartridge ROM-access map: record a read of the current 8K bank at `off16k` (0..0x3FFF within the
+// $8000-$BFFF window). Gated on the disk Record toggle so it costs nothing while off.
+static inline void cartHeat(uint16_t off16k) { if (::g_dbgDiskHeatOn) ::dbgCartRead(::c64CartCurBank(), off16k); }
+#else
+static inline void cartHeat(uint16_t) {}
+#endif
+
 void memoryAlloc() {
   ram = (unsigned char *)malloc(0x10000 * sizeof(unsigned char));
   if (ram) memset(ram, 0, 0x10000 * sizeof(unsigned char));   // null-guard (don't crash on OOM)
 }
 
 unsigned char read8(unsigned short addr) {
+#if defined(BOARD_DESKTOP)
+  dbgBusTouch(addr, DBG_HEAT_R);
+#endif
   // Cartridge ROM overrides (generic carts via EXROM/GAME). Checked first so cart ROM
   // takes precedence over BASIC/KERNAL/RAM in the mapped regions.
   if (cartActive && addr >= 0x8000) {
     bool ultimax = cartExrom && !cartGame;       // EXROM=1, GAME=0
     if (ultimax) {
-      if (cartROML && addr <= 0x9fff) return cartROML[addr - 0x8000];
-      if (cartROMH && addr >= 0xe000) return cartROMH[addr - 0xe000];
+      if (cartROML && addr <= 0x9fff)            { cartHeat(addr - 0x8000);          return cartROML[addr - 0x8000]; }
+      if (cartROMH && addr >= 0xe000)            { cartHeat((addr - 0xe000) + 0x2000); return cartROMH[addr - 0xe000]; }
       if (addr >= 0xa000 && addr <= 0xcfff) return ram[addr];   // open bus (no BASIC)
     } else {
       bool loram = register1 & 1, hiram = register1 & 2;
       if (cartROML && !cartExrom && loram && hiram && addr <= 0x9fff)
-        return cartROML[addr - 0x8000];                          // ROML $8000-$9FFF
+        { cartHeat(addr - 0x8000);          return cartROML[addr - 0x8000]; }        // ROML $8000-$9FFF
       if (cartROMH && !cartGame && hiram && addr >= 0xa000 && addr <= 0xbfff)
-        return cartROMH[addr - 0xa000];                          // ROMH $A000-$BFFF (16K)
+        { cartHeat((addr - 0xa000) + 0x2000); return cartROMH[addr - 0xa000]; }       // ROMH $A000-$BFFF (16K)
     }
   }
   if ((!bankARAM) && (addr >= 0xa000) && (addr <= 0xbfff)) {
@@ -65,6 +79,9 @@ unsigned char read8(unsigned short addr) {
 }
 
 void write8(unsigned short addr, unsigned char val) {
+#if defined(BOARD_DESKTOP)
+  dbgBusTouch(addr, DBG_HEAT_W);
+#endif
   if (bankDIO && (addr >= 0xd000) && (addr <= 0xdfff)) {
     if (addr <= 0xd3ff) { // VIC
       uint8_t vicidx = (addr - 0xd000) % 0x40;

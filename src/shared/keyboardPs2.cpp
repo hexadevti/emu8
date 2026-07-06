@@ -38,6 +38,9 @@ void keyboardStrobe()
 
 void keyboardSetup()
 {
+  // Boards without a PS/2 keyboard header (e.g. JC4827W543) define KEYBOARD_*_PIN as -1;
+  // skip the interrupt wiring there (Apple II keyboard input comes from USB + the touch OSK).
+  if (KEYBOARD_DATA_PIN < 0 || KEYBOARD_IRQ_PIN < 0) return;
   pinMode(KEYBOARD_DATA_PIN, INPUT_PULLUP);
   attachInterrupt(KEYBOARD_IRQ_PIN, keyboard_bit, FALLING);
 }
@@ -89,6 +92,7 @@ void keyboard_bit()
               }
               else if (keyboard_data[2] == 0x03) // CTRL-F5
               {
+                requestSplashOnNextBoot();   // explicit reboot -> show the boot splash
                 ESP.restart();
               }
               else if (keyboard_data[2] == 0x76) // CTRL-ESC

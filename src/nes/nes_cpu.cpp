@@ -9,6 +9,9 @@
 
 #include "../../emu.h"
 #include "nes.h"
+#if defined(BOARD_DESKTOP)
+#include "../desktop/debug_bridge.h"   // dbgBusTouch + breakpoint/step hooks (compiled out on device)
+#endif
 
 namespace nes {
 
@@ -94,10 +97,13 @@ static const DRAM_ATTR uint8_t cycles[] = { 7, 6, 1, 0, 0, 3, 5, 0, 3, 2, 2, 0, 
                        2, 6, 0, 0, 3, 3, 5, 0, 2, 2, 2, 0, 4, 4, 6, 0,
                        2, 5, 1, 0, 0, 4, 6, 0, 2, 4, 0, 0, 0, 4, 7, 0 };
 
-// CPU registers
-static unsigned short PC, lastPC, argument_addr;
-static unsigned char STP = 0xFD, A = 0, X = 0, Y = 0, SR = SR_FIXED_BITS | SR_INT, opcode, opflags;
-static unsigned char value8;
+// CPU registers. PC/A/X/Y/STP/SR are exposed (non-static; declared in nes.h) so the desktop debug
+// bridge can read/write them — inside namespace nes they're nes::PC etc., distinct from the Apple
+// globals. The remaining instruction-decode scratch stays file-local.
+unsigned short PC;
+unsigned char STP = 0xFD, A = 0, X = 0, Y = 0, SR = SR_FIXED_BITS | SR_INT;
+static unsigned short lastPC, argument_addr;
+static unsigned char opcode, opflags, value8;
 static unsigned short value16, value16_2, result;
 
 // Fast inline bus access for the CPU hot path: the common RAM ($0000-$1FFF, mirrored) and PRG
@@ -105,6 +111,9 @@ static unsigned short value16, value16_2, result;
 // that dominated per-instruction cost. PPU/APU/controller/mapper I/O still routes through the full
 // bus. Safe because cpuLoop refuses to run without a loaded ROM, so prgMap[] is always non-null.
 static inline __attribute__((always_inline)) uint8_t cpuRead(uint16_t a) {
+#if defined(BOARD_DESKTOP)
+  dbgBusTouch(a, DBG_HEAT_R);   // heat map + read watchpoints (one branch when off; no-op on device)
+#endif
   if (a < 0x2000)  return cpuRam[a & 0x07FF];
   if (a >= 0x8000) return prgMap[(a >> 13) & 3][a & 0x1FFF];
   return read8(a);
@@ -113,6 +122,9 @@ static inline __attribute__((always_inline)) uint16_t cpuRead16(uint16_t a) {
   return (uint16_t)cpuRead(a) | ((uint16_t)cpuRead((uint16_t)(a + 1)) << 8);
 }
 static inline __attribute__((always_inline)) void cpuWrite(uint16_t a, uint8_t v) {
+#if defined(BOARD_DESKTOP)
+  dbgBusTouch(a, DBG_HEAT_W);   // heat map + write watchpoints (one branch when off; no-op on device)
+#endif
   if (a < 0x2000) { cpuRam[a & 0x07FF] = v; return; }
   write8(a, v);
 }
@@ -172,21 +184,54 @@ void cpuLoop() {
   cpuReset();
   lastPC = PC;
 
-  // Lightweight FPS readout: gated on the frame counter changing (≤60 checks/sec), so it adds no
-  // per-instruction cost. 60 = full speed.
+  // Frame pacing + FPS/MHz readout, gated on the frame counter changing (≤speed checks/sec) so it
+  // adds no per-instruction cost. NORMAL mode (default) paces to the real ~60.0988 fps; FAST runs
+  // uncapped. nesMeasuredMhz is derived from fps x the NES's fixed CPU cycles/frame.
+  const uint32_t NES_FRAME_US = 16639;        // 1e6 / 60.0988 fps (NTSC)
   uint32_t fpsLastMs = millis(), fpsLastFrames = nesFrameCount, fpsSeenFrame = nesFrameCount;
+  uint32_t nextFrameUs = micros();
 
   while (running) {
-    while (paused) { delay(100); fpsLastMs = millis(); fpsLastFrames = nesFrameCount; }
+#if defined(BOARD_DESKTOP)
+    // Desktop debugger: break at the upcoming PC (breakpoint / run-to-cursor / step-over / step-out).
+    if (dbgBpShouldBreak(PC)) paused = true;                                                      // breakpoint
+    if (g_dbgRunToPC >= 0 && PC == (uint16_t)g_dbgRunToPC) { paused = true; g_dbgRunToPC = -1; }  // run-to / step-over
+    if (g_dbgRunUntilSP >= 0 && STP > (uint8_t)g_dbgRunUntilSP) { paused = true; g_dbgRunUntilSP = -1; } // step-out
+#endif
+    while (paused) {
+#if defined(BOARD_DESKTOP)
+      if (dbgStepReq > 0) { dbgStepReq--; break; }   // debugger single-step: run exactly one instruction
+#endif
+      delay(100); fpsLastMs = millis(); fpsLastFrames = nesFrameCount; nextFrameUs = micros();
+    }
+#if defined(BOARD_DESKTOP)
+    g_dbgBreakArmed = true;                           // re-arm after passing the breakpoint check once
+#endif
 
     // A new ROM was loaded from the settings window -> reset CPU+PPU to start it cleanly.
-    if (nesResetReq) { nesResetReq = false; ppuReset(); cpuReset(); lastPC = PC; }
+    if (nesResetReq) { nesResetReq = false; ppuReset(); cpuReset(); lastPC = PC; nextFrameUs = micros(); }
 
     if (nesFrameCount != fpsSeenFrame) {        // a frame just completed
       fpsSeenFrame = nesFrameCount;
+
+      // Pace to ~60 fps in NORMAL mode (FAST = uncapped). Sleep the bulk, spin the last ~1.5ms for
+      // a steady cadence; resync if we ever fall far behind.
+      if (!nesFast) {
+        nextFrameUs += NES_FRAME_US;
+        int32_t wait = (int32_t)(nextFrameUs - micros());
+        if (wait > 2000) vTaskDelay(pdMS_TO_TICKS((uint32_t)(wait - 1500) / 1000));
+        while ((int32_t)(nextFrameUs - micros()) > 0) { /* spin to the frame boundary */ }
+        if ((int32_t)(micros() - nextFrameUs) > (int32_t)(4 * NES_FRAME_US)) nextFrameUs = micros();
+      } else {
+        nextFrameUs = micros();
+      }
+
       uint32_t nowMs = millis();
       if (nowMs - fpsLastMs >= 1000) {
-        sprintf(buf, "NES fps=%u heap=%u", (unsigned)(nesFrameCount - fpsLastFrames),
+        uint32_t frames = nesFrameCount - fpsLastFrames;
+        float secs = (nowMs - fpsLastMs) / 1000.0f;
+        if (secs > 0) nesMeasuredMhz = (frames / secs) * (29780.5f / 1.0e6f);   // fps x CPU cycles/frame
+        sprintf(buf, "NES fps=%u %.2fMHz heap=%u", (unsigned)frames, nesMeasuredMhz,
                 (unsigned)ESP.getFreeHeap());
         printLog(buf);
         fpsLastMs = nowMs; fpsLastFrames = nesFrameCount;
@@ -200,6 +245,9 @@ void cpuLoop() {
 
     lastPC = PC;
     opcode = cpuRead(PC++);
+#if defined(BOARD_DESKTOP)
+    dbgBusTouch(lastPC, DBG_HEAT_X);   // heat map: this instruction was fetched/executed at lastPC
+#endif
     int instrCycles = cycles[opcode];
     if (instrCycles < 1) instrCycles = 2;
     opflags = flags6502[opcode];

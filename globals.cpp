@@ -5,7 +5,11 @@
 #include "emu.h"
 
 // Video (tft first!)
+#if BOARD_HAS_TFT_ESPI
 TFT_eSPI tft = TFT_eSPI();
+#else
+DisplayGFX tft;                 // Arduino_GFX backend (JC4827W543); color565() is pure math
+#endif
 const uint16_t colors[8] = {TFT_BLACK, TFT_GREEN, TFT_PURPLE, TFT_WHITE, TFT_BLACK, tft.color565(255, 20, 0), TFT_SKYBLUE, TFT_WHITE};
 const uint16_t colors16[16] = {tft.color565(0, 0, 0), tft.color565(147, 11, 124), tft.color565(98, 76, 0), tft.color565(249, 86, 29),
                                tft.color565(0, 118, 12), tft.color565(126, 126, 126), tft.color565(67, 200, 0), tft.color565(220, 205, 22),
@@ -27,6 +31,10 @@ std::vector<std::string> diskFiles;
 std::vector<std::string> c64Files;     // C64 .prg/.d64 images on SD
 std::vector<std::string> nesFiles;     // NES .nes ROMs on SD
 std::vector<std::string> atariFiles;   // Atari 2600 .a26/.bin ROMs on SD
+std::vector<std::string> msxFiles;     // MSX1 .rom/.mx1/.dsk images on SD
+std::vector<std::string> smsFiles;     // SMS .sms/.bin ROM images on SD
+std::vector<std::string> pcFiles;      // PCXT .img/.ima/.dsk/.vhd disk images on SD
+std::vector<std::string> tiny386Files; // tiny386 .img/.ima/.vhd/.hdd disk images on SD
 
 // keyboard
 unsigned short keyboard_data[3] = {0, 0, 0};
@@ -60,6 +68,10 @@ bool sound = true;
 bool dacSound = false;
 bool upscale = false;
 bool smoothUpscale = false;
+bool screenFill = false;   // JC4827W543: fill the 480x272 panel with the 320x240 video (keep 4:3)
+uint8_t nesDisplaySkip = 3; // JC4827W543 NES: draw 1 of every N frames (core-0 display-skip frees the core-1 interpreter)
+bool nesFast = false;       // NES: NORMAL (paced ~60fps) by default; true = FAST (uncapped)
+float nesMeasuredMhz = 0.0f; // NES: measured 2A03 speed (fps-derived), updated in cpuLoop
 bool AppleIIe = true;
 bool OptionsWindow = false;
 bool DebugWindow = false;
@@ -88,6 +100,23 @@ String selectedHdFileName;
 String selectedC64FileName;   // last C64 image highlighted/loaded
 String selectedNesFileName;   // currently-loaded NES ROM (for the settings file browser)
 String selectedAtariFileName; // currently-loaded Atari 2600 ROM (for the settings file browser)
+String selectedMsxFileName;   // currently-loaded MSX1 .rom cartridge (for the settings file browser)
+bool msxFast = false;         // MSX: NORMAL (paced to 3.58 MHz) by default; true = FAST (uncapped)
+float msxMeasuredMhz = 0.0f;  // MSX: measured uncapped Z80 speed from the boot benchmark
+String selectedSmsFileName;   // currently-loaded SMS .sms/.bin ROM (for the settings file browser)
+bool smsFast = false;         // SMS: NORMAL (paced to 3.58 MHz) by default; true = FAST (uncapped)
+float smsMeasuredMhz = 0.0f;  // SMS: measured uncapped Z80 speed from the boot benchmark
+String selectedPcFileName;    // PCXT A: floppy image (for the settings file browser)
+String selectedPcHdFileName;  // PCXT C: hard-disk image (auto-mounted on boot)
+bool pcFast = false;          // PCXT: reserved speed flag
+float pcMeasuredMhz = 0.0f;   // PCXT: measured 8086 equivalent speed from the boot benchmark
+String selectedTiny386FileName;   // tiny386: C: hard-disk image (hda) (settings file browser)
+String selectedTiny386FileNameA;  // tiny386: A: floppy image (fda) (settings file browser)
+float tiny386MeasuredMhz = 0.0f;  // tiny386: measured i386 throughput (boot benchmark)
+float appleMeasuredMhz = 0.0f; // Apple II: live measured 6502 speed (updated in cpuLoop)
+float appleClockMhz = 1.0f;    // Apple II: target clock when throttled (1.0 = stock 1 MHz; UI-adjustable on desktop)
+volatile int  g_pcSpkFreq = 0;     // PCXT PC-speaker: PIT ch2 frequency (Hz)
+volatile bool g_pcSpkOn   = false; // PCXT PC-speaker: gate+data enabled (port 0x61)
 bool c64Autoload = false;     // C64: auto-load the saved image on boot
 uint8_t joyPort = 2;          // C64: joystick port (1 or 2)
 volatile bool c64AutoloadPending = false;  // .prg/.d64 autoload deferred to the BASIC READY trap

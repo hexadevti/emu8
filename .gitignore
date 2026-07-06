@@ -32,7 +32,14 @@
 *.app
 
 build/*
+.iigs_host.exe
+.gpp_path.txt
+.m0build/
+.m05build/
+.m1build/
+.m2build/
+/src/iigs/iigs_rom01.cpp
+.m3build/
+.iigsbuild/
 
 sdcard/
-
-.m3build/

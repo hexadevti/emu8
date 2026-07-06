@@ -25,6 +25,17 @@ static int      cartCurBank = -1;
 static File     cartFile;           // kept OPEN for fast bank streaming (re-opening per bank
                                     // took ~190ms each, stalling the CPU and crashing loaders)
 
+#if defined(BOARD_DESKTOP)
+// Desktop debug: the currently-mapped 8K bank (-1 = no cart) and the cart's total bank count, for the
+// cartridge ROM-access map in the "Disk read" panel (src/desktop/ui_imgui.cpp).
+int c64CartCurBank() { return c64::cartActive ? cartCurBank : -1; }
+int c64CartBankCount() {
+  if (!c64::cartActive) return 0;
+  int mx = 0; for (int i = 0; i < cartChipCount; i++) if (cartChips[i].bank > mx) mx = cartChips[i].bank;
+  return mx + 1;
+}
+#endif
+
 void c64CartUnmount() {
   c64::cartActive = false;
   c64::cartExrom = c64::cartGame = true;   // both lines inactive (no cart)

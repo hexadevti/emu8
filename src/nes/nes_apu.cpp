@@ -211,7 +211,11 @@ static void apuTask(void *) {
   size_t wrote;
   while (running) {
     for (int i = 0; i < 128; i++) buf[i] = (uint16_t)(genSample() << 8);   // DAC uses high byte
+#if BOARD_AUDIO_DAC
     i2s_write(I2S_NUM_0, buf, sizeof(buf), &wrote, portMAX_DELAY);
+#else
+    ampWriteDac8(buf, 128);                                                // S3: 8-bit DAC -> I2S amp
+#endif
   }
   vTaskDelete(NULL);
 }
@@ -223,6 +227,7 @@ static void apuSetup() {
   noise.lfsr = 1;                                        // must be non-zero
   frameAcc = 0; halfTick = false;
 
+#if BOARD_AUDIO_DAC
   i2s_config_t cfg = {};
   cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_DAC_BUILT_IN);
   cfg.sample_rate = APU_FS;
@@ -241,6 +246,12 @@ static void apuSetup() {
   i2s_zero_dma_buffer(I2S_NUM_0);
   xTaskCreatePinnedToCore(apuTask, "apuTask", 4096, NULL, 2, NULL, 0);   // core 0
   printLog("APU: pulse x2 + triangle + noise on (I2S DAC GPIO26)");
+#else
+  // ESP32-S3: external I2S amp (no internal DAC).
+  ampBegin(APU_FS);
+  xTaskCreatePinnedToCore(apuTask, "apuTask", 4096, NULL, 2, NULL, 0);   // core 0
+  printLog("APU: pulse x2 + triangle + noise on (I2S amp)");
+#endif
 }
 
 } // namespace nes

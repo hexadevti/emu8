@@ -1,5 +1,8 @@
 #include "../../emu.h"
 #include <dirent.h>   // raw POSIX readdir() for the fast SD scan (see loadDiskFilesSync)
+#if defined(BOARD_DESKTOP)
+#include "../desktop/debug_bridge.h"   // dbgDiskRead: desktop disk-read heat map (no-op on device)
+#endif
 
 
 ushort diskFileHeaderSize = 0;
@@ -191,6 +194,7 @@ void getTrack(fs::FS &fs, int track, bool force)
 {
   if (track != diskTrack || force)
   {
+    busTake();   // hold the shared HSPI bus for the whole open+seek+read (touch must wait)
     size_t positionToRead = getOffset(track, 0);
     // sprintf(buf, "Reading track %d - %s (%s)", track, selectedDiskFileName.c_str(), force ? "force" : "");
     // printLog(buf);
@@ -213,6 +217,7 @@ void getTrack(fs::FS &fs, int track, bool force)
     {
       printLog("Failed to open file for reading");
     }
+    busGive();
   }
 }
 
@@ -221,7 +226,8 @@ void saveImage(fs::FS &fs, int track)
   sprintf(buf, "Saving Track %0d", track);
   Serial.println(buf);
   int positionToWrite = getOffset(track, 0);
-  
+
+  busTake();   // hold the shared HSPI bus for the whole open+seek+write
   File file = fs.open(selectedDiskFileName.c_str(), "r+");
   if (file) {
     file.seek(positionToWrite, SeekSet);
@@ -233,7 +239,7 @@ void saveImage(fs::FS &fs, int track)
   {
     Serial.println("File failed to open");
   }
-
+  busGive();
 }
 
 void nextDiskFile()
@@ -278,6 +284,22 @@ void setDiskFile()
     selectedDiskFileName = diskFiles[shownFile].c_str();
   }
   paused = false;
+}
+
+// Hot-swap the mounted floppy by PATH (no reboot): re-point selectedDiskFileName, re-detect the new
+// image's volume/format (getDiskFileInfo leaves the head at track 0), and flag a track reload so the
+// next $C0EC read re-opens the new file (getTrack always re-opens by name). The running software sees
+// it as a disk swap and reads the new image on its next drive access.
+void apple2InsertDisk(const char *path)
+{
+  bool wasPaused = paused;
+  paused = true;                 // freeze the CPU while we re-point + re-read the image
+  selectedDiskFileName = path;
+  getDiskFileInfo(FSTYPE);       // re-detect volume + DOS/ProDOS order for the new image
+  pointer = 0;
+  trackChanged = true;
+  diskChanged = true;
+  paused = wasPaused;
 }
 
 // Scan the SD root for disk images into diskFiles. Synchronous so it can be called
@@ -596,6 +618,11 @@ char diskSoftSwitchesRead(ushort address)
       if (pointer > trackEncodedSize - 1)
         pointer = 0;
 
+#if defined(BOARD_DESKTOP)
+      // heat map: attribute this read to the SECTOR the RWTS is currently seeking ($2D DOS / $D357
+      // ProDOS), so the wedges map to real sectors (like the write path). Only when recording.
+      if (g_dbgDiskHeatOn) { int dsec = FlagDO_PO ? read8(0x2d) : read8(0xd357); dbgDiskRead(diskTrack, dsec); }
+#endif
       //   sprintf(buf, "Disk Track: %d, Disk Read: %04X, Pointer: %d, Data: %02X", diskTrack, address, pointer, trackEncodedData[pointer]);
       //   printLog(buf);
       //  sprintf(buf, "(%04x)[R]%04X: %02X", PC, address, trackEncodedData[pointer]);
@@ -615,6 +642,9 @@ void diskSoftSwitchesWrite(ushort address, char value)
   {
     if (DriveQ6H_L == false && DriveQ7H_L == true)
     {
+#if defined(BOARD_DESKTOP)
+      dbgDiskWrite(diskTrack, sec);   // heat map: this track/sector is being written
+#endif
       outputSectorData.push_back(value);
 
       if (outputSectorData.size() == 354)
@@ -703,12 +733,12 @@ char processSwitchc0e0(ushort address, char value)
   else if (address == 0xc0e8)
   {
     DriveMotorON_OFF = false;
-    digitalWrite(LED_PIN, HIGH);
+    diskLed(HIGH);
   }
   else if (address == 0xc0e9)
   {
     DriveMotorON_OFF = true;
-    digitalWrite(LED_PIN, LOW);
+    diskLed(LOW);
   }
   else if (address == 0xc0ea)
     Drive1_2 = true;

@@ -1,0 +1,38 @@
+{
+  // F5 debug for the DESKTOP (SDL2) build — runs the same emulator code as the devices, under gdb.
+  // Requires the Microsoft C/C++ extension (ms-vscode.cpptools) for the "cppdbg" type.
+  // Pick the platform via the EMU_PLATFORM env below (apple2|c64|nes|atari|iigs|msx|sms|pcxt|tiny386).
+  // The MinGW bin dir is prepended to PATH so SDL2.dll + the libstdc++/libgcc/winpthread DLLs load.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug emu8 (desktop, choose platform)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/emu8.exe",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}/build",
+      "environment": [
+        { "name": "PATH", "value": "C:\\msys64\\mingw32\\bin;${env:PATH}" },
+        { "name": "EMU_PLATFORM", "value": "${input:platform}" }
+      ],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "C:\\msys64\\mingw32\\bin\\gdb.exe",
+      "setupCommands": [
+        { "description": "Enable pretty-printing for gdb", "text": "-enable-pretty-printing", "ignoreFailures": true }
+      ],
+      "preLaunchTask": "desktop: build"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "platform",
+      "type": "pickString",
+      "description": "Which platform to boot?",
+      "options": ["apple2", "c64", "nes", "atari", "iigs", "msx", "sms", "pcxt", "tiny386"],
+      "default": "msx"
+    }
+  ]
+}

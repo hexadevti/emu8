@@ -6,7 +6,7 @@
 // so it never collides with the Apple II globals (read8/write8/ram/PC/A/X/Y/SR/cpuLoop).
 // Shared CYD globals (tft, touchRead, running, paused, OptionsWindow, currentPlatform,
 // joystick ADC, sharedBigBuf, sound/volume/videoColor) are used from global scope. The
-// C-linkage entry points (bottom) are called by the platform dispatch (apple2esp32cyd.ino /
+// C-linkage entry points (bottom) are called by the platform dispatch (emu8.ino /
 // video.cpp / joystick.cpp).
 //
 // LESSON from the NES/C64 ports: any atari:: function used before its definition MUST be
