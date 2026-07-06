@@ -7,7 +7,11 @@
 // drove (joyX/joyY/Pb0-3) and hand off to the shared applyPlatformInput(). Apple II also gets
 // paddle (timerpdl) updates.
 //
-// Build target only: BOARD_INPUT_USB (the JC4827W543). The CYD keeps its analog joystick.
+// Build target only: BOARD_INPUT_USB (the JC4827W543, and the JC1060P470 P4). The CYD keeps its
+// analog joystick. On the P4 the same EspUsbHost code runs on the native USB-HS OTG controller; if
+// that library does not build/enumerate under core 3.x, set BOARD_INPUT_USB=0 (board.h) — touch +
+// the on-screen keyboard then provide full input. The core-1 pinning below still applies on the P4
+// (its render loop is on core 0 too).
 //
 // Report format (decoded from a real pad over serial; 8-byte report):
 //   byte0 = X axis  (0x00 left, ~0x7F center, 0xFF right)
@@ -20,7 +24,11 @@
 
 #if BOARD_INPUT_USB
 
-#include "EspUsbHost.h"
+#if BOARD_PANEL_DSI
+#include "p4/usb/EspUsbHost.h"   // P4: vendored EspUsbHost fork, patched for IDF 5.x (in-repo)
+#else
+#include "EspUsbHost.h"          // S3: external apple2esp32 fork (IDF 4.4)
+#endif
 
 #define GP_AXIS_X     0
 #define GP_AXIS_Y     1
@@ -33,6 +41,9 @@
 
 // Set to 1 to log every raw report to serial (for re-mapping a different controller).
 #define GP_LOG_RAW    0
+// Set to 1 to log every HID report (onReceive + onKeyboard) to serial, e.g. to capture a keyboard's
+// media-key report format when adding a new shortcut.
+#define USB_RX_DEBUG  0   // log every HID report (set 1 to diagnose a new controller/keyboard/mouse)
 
 // NOTE on hot-swap: after a device disconnect the ESP32-S3 USB host leaves the root port wedged,
 // and the next plugged device fails to enumerate ("HUB: Failed to issue second reset / Root port
@@ -45,22 +56,56 @@ public:
   void onReceive(const usb_transfer_t *transfer) override {
     EspUsbHost *h = (EspUsbHost *)transfer->context;
     endpoint_data_t *ep = &h->endpoint_data_list[transfer->bEndpointAddress & USB_B_ENDPOINT_ADDRESS_EP_NUM_MASK];
+#if USB_RX_DEBUG
+    { int n = transfer->actual_num_bytes; char ln[160];
+      int p = snprintf(ln, sizeof(ln), "RX ep=%02x cls=%02x sub=%02x proto=%02x n=%d:",
+                       transfer->bEndpointAddress, ep->bInterfaceClass, ep->bInterfaceSubClass, ep->bInterfaceProtocol, n);
+      for (int i = 0; i < n && i < 20; i++) p += snprintf(ln + p, sizeof(ln) - p, " %02X", transfer->data_buffer[i]);
+      Serial.println(ln); }
+#endif
+    // A USB keyboard's media keys (Consumer Control) ride the keyboard endpoint here as a short
+    // report-ID'd report, e.g. "02 E9 00" = Vol+, "02 EA 00" = Vol- (report ID 0x02, then the 16-bit
+    // usage). They arrive with proto=KEYBOARD, so catch Volume Up/Down BEFORE the keyboard/mouse
+    // early-return below (the boot keyboard's own 8-byte reports are too long to match, so normal
+    // typing is untouched and still flows through onKeyboard).
+    if (handleConsumerVolume(transfer->data_buffer, transfer->actual_num_bytes)) return;
     // Keyboard/mouse are handled by the base class (onKeyboard below); only decode the gamepad here.
-    if (ep->bInterfaceProtocol == HID_ITF_PROTOCOL_KEYBOARD ||
-        ep->bInterfaceProtocol == HID_ITF_PROTOCOL_MOUSE) return;
+    if (ep->bInterfaceProtocol == HID_ITF_PROTOCOL_MOUSE) {
+      // Parse the raw HID mouse report ourselves (the library's onMouse misparses this device): layout
+      // is [buttons][dx][dy], possibly behind a 1-byte report ID. This keyboard's embedded mouse sends
+      // 6 bytes with ID=0x01 first; a plain boot mouse sends 3-4 bytes with no ID. dx/dy are signed.
+      const uint8_t *d = transfer->data_buffer; int n = transfer->actual_num_bytes;
+      int off = (n >= 5) ? 1 : 0;
+      if (n >= off + 3) {
+        int8_t mdx = (int8_t)d[off + 1], mdy = (int8_t)d[off + 2]; uint8_t mb = d[off + 0];
+        if (currentPlatform == PLATFORM_TINY386) tiny386MouseInput(mdx, mdy, mb);  // -> PS/2 mouse
+        else                                     pcxtMouseInput(mdx, mdy, mb);     // -> INT 33h
+      }
+      return;
+    }
+    if (ep->bInterfaceProtocol == HID_ITF_PROTOCOL_KEYBOARD) return;
     parseGamepad(transfer->data_buffer, transfer->actual_num_bytes);
   }
 
   // A USB keyboard shares this host: the base class decodes its boot report and calls us here.
   // Forward the raw report (modifier + 6-key rollover) to the per-platform mapper (usbkeyboard.cpp).
   void onKeyboard(hid_keyboard_report_t report, hid_keyboard_report_t last_report) override {
+#if USB_RX_DEBUG
+    Serial.printf("KB mod=%02x keys= %02X %02X %02X %02X %02X %02X\n", report.modifier,
+                  report.keycode[0], report.keycode[1], report.keycode[2],
+                  report.keycode[3], report.keycode[4], report.keycode[5]);
+#endif
     usbKeyboardReport(report.modifier, report.keycode, last_report.keycode);
   }
+
+  // Mouse is parsed from the raw report in onReceive() above (the library's onMouse misparses this
+  // device's report-ID'd layout), so no onMouse override here.
 
   void onGone(const usb_host_client_event_msg_t *eventMsg) override {
     joyX = joyY = 1; Pb0 = Pb1 = Pb2 = Pb3 = false;
     timerpdl0 = timerpdl1 = JOY_MID;
     applyPlatformInput();
+    _prevConsumer = 0;    // forget any half-pressed media key
     usbKeyboardReset();   // release any keys a disconnected keyboard was holding
     printLog("USB device disconnected (tap RST after plugging a new device)");
   }
@@ -68,6 +113,24 @@ public:
 private:
   bool _prevMenu = false;
   int  _pmX = 1, _pmY = 1; bool _pmFire = false;
+  uint8_t _prevConsumer = 0;   // last Consumer-Control volume usage seen (press/release edge tracking)
+
+  // Master volume from a USB keyboard's media keys. The Consumer-Control report is short and carries
+  // a 16-bit usage; Volume Up = 0xE9, Volume Down = 0xEA (Consumer page). We step the app volume once
+  // per press (edge-detected) and swallow the report so the gamepad decoder never sees it. Returns
+  // true if the short report was a media-volume press/release (consumed), false otherwise.
+  bool handleConsumerVolume(const uint8_t *d, int n) {
+    if (!d || n < 1 || n > 4) return false;        // gamepad reports are 8 bytes; media reports are short
+    uint8_t cur = 0;
+    for (int i = 0; i < n; i++) if (d[i] == 0xE9 || d[i] == 0xEA) { cur = d[i]; break; }
+    if (!cur && !_prevConsumer) return false;      // short report, no volume usage, none pending: not ours
+    if (cur && cur != _prevConsumer) {             // press edge -> one step (0x10 of the 0x00..0xF0 range)
+      if (cur == 0xE9) { if (volume < 0xf0) volume += 0x10; }
+      else             { if (volume > 0) { volume -= 0x10; if (volume > 0xf0) volume = 0; } }
+    }
+    _prevConsumer = cur;                            // track so holding a media key steps only once
+    return true;
+  }
 
   void parseGamepad(const uint8_t *d, int n) {
     if (n < 2) return;

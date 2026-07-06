@@ -1,12 +1,18 @@
 #include "../../emu.h"
 #include "c64.h"
+#if BOARD_HAS_BLE
 #include "esp_bt.h"   // to release the unused Bluetooth controller's reserved DRAM
+#endif               // (absent on the radio-less ESP32-P4)
 
 // Shared render scratch (one 320x8 line band). MALLOC'd on the C64 path only - NOT a static
 // array, because a static would be reserved in BSS for the Apple path too (~10K) and starve
 // its already-fragmented heap (disk tasks can't allocate). c64RenderBitmap and the text-mode
 // renderer never run at the same time, so they share this one buffer.
 static uint16_t *c64Scratch = nullptr;
+
+// Set when the SD card has no usable /roms/c64 ROMs: the 6510 is left halted (it would
+// dereference the null ROM pointers) and c64Loop holds an error screen instead.
+static bool c64RomLoadFailed = false;
 
 // C64 core entry points (C linkage), called by the platform dispatch:
 //   setup() -> c64Setup(),  loop() -> c64Loop(),  renderLoop() -> c64RenderFrame().
@@ -15,7 +21,10 @@ static uint16_t *c64Scratch = nullptr;
 // ble.ino was removed). Called at the very start of the C64 boot, BEFORE the SD mount and
 // the big C64 allocations, so the reclaimed DMA-capable memory is available to all of them.
 void c64FreeBtMem() {
+#if BOARD_HAS_BLE
   esp_bt_controller_mem_release(ESP_BT_MODE_BTDM);
+#endif
+  // The ESP32-P4 has no Bluetooth controller, so there is nothing to release there.
 }
 
 void c64Setup() {
@@ -28,7 +37,12 @@ void c64Setup() {
   // 64K RAM FIRST (essential - needs one contiguous 64K block; if it loses the race the
   // machine can't run). Then the VIC framebuffer (two 32K halves) fits in the leftovers; if
   // it can't, we fall back to text mode (drawRasterline is gated on `bitmap`), no crash.
-  c64::memoryAlloc();                              // 64K RAM
+  c64::memoryAlloc();                              // 64K RAM (first - needs a contiguous block)
+  if (!c64LoadRoms()) {                            // BASIC/KERNAL/CHARGEN from /roms/c64 on the SD
+    c64RomLoadFailed = true;                       // halt: c64Loop holds the error screen
+    printLog("C64: ROMs missing on SD (/roms/c64) - put basic.bin/kernal.bin/chargen.bin there");
+    return;                                        // skip VIC/CIA; do NOT run the 6510 on null ROMs
+  }
   c64::vicSetup(c64::ram, charset_rom);            // framebuffer (best-effort)
   if (c64::bitmap) printLog("C64: VIC framebuffer ON (bitmap/sprites/multicolor)");
   else             printLog("C64: framebuffer alloc FAILED -> text-mode only");
@@ -44,7 +58,22 @@ void c64Setup() {
   printLog(buf);
 }
 
+// Held forever when the SD card is missing the /roms/c64 system ROMs: there is nothing to run.
+static void c64ShowRomError() {
+  static bool drawn = false;
+  if (drawn) return;
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(tft.color565(220, 40, 40), TFT_BLACK); tft.drawString("C64: ROMs NOT FOUND", 8, 8, 2);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString("Put basic.bin, kernal.bin, chargen.bin", 8, 40, 1);
+  tft.drawString("in /roms/c64 on the SD card.", 8, 56, 1);
+  tft.setTextDatum(MC_DATUM);
+  drawn = true;
+}
+
 void c64Loop() {
+  if (c64RomLoadFailed) { c64ShowRomError(); delay(50); return; }   // halt, hold the error screen
   c64::cpuLoop();   // runs forever (6510 + VIC raster + CIA)
 }
 
@@ -161,6 +190,7 @@ void c64SetJoystick(uint8_t mask) { c64::kbSetJoystickPort(joyPort, mask); }
 // reset autostarts it); a .prg/.d64 is deferred until the KERNAL reaches the BASIC READY
 // prompt (handled by a one-shot trap in cpuLoop), since the machine isn't ready yet at setup.
 void c64Autostart() {
+  if (c64RomLoadFailed) return;   // no ROMs -> the machine never booted; nothing to autoload into
   if (!c64Autoload || selectedC64FileName.length() < 2) return;
   String p = selectedC64FileName;
   if (p.endsWith(".crt") || p.endsWith(".CRT")) c64LoadCRT(p.c_str());

@@ -2,7 +2,7 @@
 //
 // Compiles only with -DIIGS_M1_TEST. Runs hand-assembled 65816 programs against a 64KB bank-0
 // test RAM and verifies memory/registers, printing PASS/FAIL + a register dump per test. Hooked
-// (looping) from emu6502.ino so a plain serial read captures the result. See the IIGS feasibility
+// (looping) from emu8.ino so a plain serial read captures the result. See the IIGS feasibility
 // memory for the GO verdict that motivated building this core.
 
 #ifdef IIGS_M1_TEST

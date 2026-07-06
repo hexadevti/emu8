@@ -95,7 +95,19 @@ bool cia1IRQPending() { return (icrData1 & 0x80) != 0; }
 
 unsigned char cia2Read(uint8_t reg) {
   switch (reg) {
-    case 0x00: return pra2;
+    case 0x00: {
+      // Port A: bits 0-5 = VIC bank + serial/RS232 OUTPUTS (read back the latch); bits 6-7 = serial
+      // CLK IN / DATA IN, which are INPUTS (ddra2=0x3f). With no drive on the bus (open-collector +
+      // pull-ups) those inputs read the INVERSE of the C64's own CLK OUT (PA4) / DATA OUT (PA5):
+      // a released output leaves the bus line high. Cart loaders poll this to confirm the serial bus
+      // is idle before starting (write PA4/PA5=0, then wait for PA6/PA7=1); returning the raw latch
+      // left bit6 stuck at 0 and hung them in an infinite loop. (No real 1541 here — LOAD is trapped
+      // at $F49E, so modelling the idle bus this way is both correct and harmless.)
+      uint8_t v = pra2 & 0x3f;
+      if (!(pra2 & 0x10)) v |= 0x40;   // CLK OUT released  -> CLK IN  high
+      if (!(pra2 & 0x20)) v |= 0x80;   // DATA OUT released -> DATA IN high
+      return v;
+    }
     case 0x02: return ddra2;
     case 0x04: return ta2 & 0xff;
     case 0x05: return (ta2 >> 8) & 0xff;

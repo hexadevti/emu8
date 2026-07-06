@@ -29,6 +29,21 @@ static uint8_t  readBuffer = 0; // $2007 read buffer
 static int scanline = 0;        // 0..261 (0..239 visible, 241 vblank, 261 pre-render)
 int dotAcc = 0;                 // accumulated PPU dots (global so cpuLoop can inline ppuStep)
 
+#if defined(BOARD_DESKTOP)
+// Read-only snapshot of live PPU state for the desktop debug "I/O" panel. Side-effect-free (unlike
+// reading $2002, which clears the VBlank flag). An accessor — not external register symbols — so the
+// hot-path registers (mask/v/x) keep internal linkage and the renderer is unchanged on device.
+void dbgPpuSnapshot(uint8_t *o_ctrl, uint8_t *o_mask, uint8_t *o_status,
+                    int *o_scanline, uint16_t *o_v, uint8_t *o_finex) {
+  if (o_ctrl)     *o_ctrl     = ctrl;
+  if (o_mask)     *o_mask     = mask;
+  if (o_status)   *o_status   = status;
+  if (o_scanline) *o_scanline = scanline;
+  if (o_v)        *o_v        = v;
+  if (o_finex)    *o_finex    = x;
+}
+#endif
+
 // ---- per-scanline scratch ----
 static bool bgOpaque[256];      // background pixel non-transparent (for sprite priority/spr0)
 static bool spriteDrawn[256];   // a sprite already owns this pixel (lower OAM index wins)
@@ -305,5 +320,62 @@ void ppuReset() {
   memset(oam, 0, sizeof(oam));
   memset(paletteRam, 0, sizeof(paletteRam));
 }
+
+#if defined(BOARD_DESKTOP)
+// ---- desktop debug renderers (PPU/VRAM inspector) ----
+// Resolve a NES master-palette index (0..63) to ABGR8888 for the debug textures.
+static inline uint32_t nesRGBA(uint8_t masterIdx) {
+  uint16_t c = nesPalette[masterIdx & 0x3F];           // RGB565
+  uint8_t r = (uint8_t)(((c >> 11) & 0x1F) * 255 / 31);
+  uint8_t g = (uint8_t)(((c >> 5)  & 0x3F) * 255 / 63);
+  uint8_t b = (uint8_t)(( c        & 0x1F) * 255 / 31);
+  return 0xFF000000u | ((uint32_t)b << 16) | ((uint32_t)g << 8) | r;
+}
+// One pattern table (half=0 -> $0000, 1 -> $1000) as a 128x128 ABGR image (16x16 tiles of 8x8).
+// pal4 picks which 4-colour palette (0..7) from paletteRam to colourise with (0..3 BG, 4..7 sprite).
+void dbgRenderPatternTable(int half, int pal4, uint32_t *out) {
+  uint16_t base = half ? 0x1000 : 0x0000;
+  const uint8_t *pal = &paletteRam[(pal4 & 7) << 2];
+  for (int ty = 0; ty < 16; ty++)
+    for (int tx = 0; tx < 16; tx++) {
+      uint16_t tile = (uint16_t)(base + (ty * 16 + tx) * 16);
+      for (int row = 0; row < 8; row++) {
+        uint8_t lo = chrRead(tile + row), hi = chrRead(tile + row + 8);
+        for (int col = 0; col < 8; col++) {
+          int bit = 7 - col;
+          int pix = ((lo >> bit) & 1) | (((hi >> bit) & 1) << 1);
+          uint8_t mi = pix ? (pal[pix] & 0x3F) : (paletteRam[0] & 0x3F);
+          out[(ty * 8 + row) * 128 + (tx * 8 + col)] = nesRGBA(mi);
+        }
+      }
+    }
+}
+// All 4 logical nametables as a 512x480 ABGR image (2x2 of 256x240), using the current BG pattern
+// table (ctrl bit4), each tile's attribute palette, and live mirroring (so mirrored tables repeat).
+void dbgRenderNametables(uint32_t *out) {
+  uint16_t bgBase = (ctrl & 0x10) ? 0x1000 : 0x0000;
+  for (int nt = 0; nt < 4; nt++) {
+    uint16_t ntBase = (uint16_t)(0x2000 + nt * 0x0400);
+    int ox = (nt & 1) * 256, oy = (nt >> 1) * 240;
+    for (int row = 0; row < 30; row++)
+      for (int colc = 0; colc < 32; colc++) {
+        uint8_t tileIdx = vram[mirrorAddr((uint16_t)(ntBase + row * 32 + colc))];
+        uint8_t at = vram[mirrorAddr((uint16_t)(ntBase + 0x03C0 + (row / 4) * 8 + (colc / 4)))];
+        int shift = ((row & 2) << 1) | (colc & 2);
+        const uint8_t *pal = &paletteRam[((at >> shift) & 3) << 2];
+        uint16_t tile = (uint16_t)(bgBase + tileIdx * 16);
+        for (int r = 0; r < 8; r++) {
+          uint8_t lo = chrRead(tile + r), hi = chrRead(tile + r + 8);
+          for (int c = 0; c < 8; c++) {
+            int bit = 7 - c;
+            int pix = ((lo >> bit) & 1) | (((hi >> bit) & 1) << 1);
+            uint8_t mi = pix ? (pal[pix] & 0x3F) : (paletteRam[0] & 0x3F);
+            out[(oy + row * 8 + r) * 512 + (ox + colc * 8 + c)] = nesRGBA(mi);
+          }
+        }
+      }
+  }
+}
+#endif // BOARD_DESKTOP
 
 } // namespace nes

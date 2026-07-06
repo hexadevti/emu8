@@ -41,3 +41,5 @@ build/*
 /src/iigs/iigs_rom01.cpp
 .m3build/
 .iigsbuild/
+
+sdcard/

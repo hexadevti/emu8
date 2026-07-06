@@ -1,4 +1,7 @@
 #include "../../emu.h"
+#if defined(BOARD_DESKTOP)
+#include "../desktop/debug_bridge.h"   // dbgVicMarkFrame: tag VIC DMA reads in the heat map (no-op on device)
+#endif
 #include "c64.h"
 
 // VIC-II renderer ported from C64Esp32 VIC.ino: renders each scanline into the RGB565
@@ -597,6 +600,9 @@ uint8_t nextRasterline() {
   rasterline++;
   if (rasterline > 311) {
     rasterline = 0;
+#if defined(BOARD_DESKTOP)
+    dbgVicMarkFrame();   // once per frame: tag the VIC's DMA-read regions in the memory heat map
+#endif
   } else if (rasterline == 49) {
     if (vicreg[0x11] & 0x10) {
       badlinecond = true;

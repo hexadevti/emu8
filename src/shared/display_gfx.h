@@ -75,6 +75,10 @@ public:
   // --- blits ---
   void setSwapBytes(bool swap);
   void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data);
+  // Direct 1:1 RGB565 blit into the canvas at PANEL-native (x,y) — NO logical 320x240 scaling and NO
+  // centering offset (unlike pushImage). For cores that compose a full-panel image themselves and
+  // need exact pixel placement (the tiny386 PC renderer). UI-mode flush then pushes the canvas 1:1.
+  void drawCanvasRGB565(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data);
 
   // --- direct-to-panel fast path (NES video): push a band straight to the panel at the centered
   //     video offset, skipping the PSRAM canvas + the full-panel QSPI flush. setBypassCanvas(true)
@@ -82,6 +86,14 @@ public:
   //     the static border once. Used only when not in fill-screen mode. ---
   void setBypassCanvas(bool b) { _bypassCanvas = b; }
   void pushPanelBand(int32_t logicalX, int32_t logicalY, int32_t w, int32_t h, const uint16_t *data);
+  // Like pushPanelBand but at RAW panel coords (no DISP_OFFSET centering). The tiny386 PC renderer
+  // pushes its full-panel image straight to the panel (bypassing the PSRAM canvas + its flush) to
+  // halve the per-frame PSRAM traffic -- the canvas write + flush read were the FPS bottleneck.
+  void drawPanelRGB565(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data);
+  // Composite + push ONLY the on-screen-keyboard's panel band in one DSI transfer, so a key press
+  // doesn't re-flush the whole 1024x600 frame (the tiny386 OSK was laggy from the full composite).
+  // The caller setBypassCanvas(true) to skip the loop-top full flush. P4 (DSI) only; no-op elsewhere.
+  void flushOskBand();
   void fillPanelBlack();
 
   // --- scanline window writes (Apple II raster path) ---
@@ -111,10 +123,38 @@ public:
   uint16_t getTouchRawZ();
   void getTouchRaw(uint16_t *x, uint16_t *y);
 
+#if BOARD_PANEL_DSI
+  // On-screen-keyboard overlay (P4): the keyboard is drawn into a SEPARATE transparent buffer so it
+  // never overwrites the emulator video in the main canvas; flushDSI alpha-blends it on top. Drawing
+  // between oskOverlayBegin()/End() is redirected to that buffer (see fillRect/drawString/...).
+  void oskOverlayBegin();           // clear the overlay to "transparent" and redirect drawing to it
+  void oskOverlayEnd();             // stop redirecting
+  bool inOskOverlay() const { return _toOsk; }
+  // Fill a TRUE circle straight into the overlay buffer in PANEL pixels (the on-screen gamepad's
+  // analog stick — drawing it via the UI-scaled path would make it oval, since X/Y scale differ).
+  void oskOverlayFillCircle(int cx, int cy, int r, uint16_t color);
+  // Blit an 8x8 font glyph scaled (nearest-neighbour) into the canvas at PANEL rect (px,py,pw,ph) with
+  // fg for set bits / bg for clear bits (transparentBg leaves clear pixels untouched). Used by the
+  // PC-XT text renderer to draw the original IBM CP437 8x8 font crisply on the big panel.
+  void drawGlyph8(int px, int py, int pw, int ph, const uint8_t *g, uint16_t fg, uint16_t bg, bool transparentBg = false);
+#endif
+
 private:
-  // logical(320x240) -> physical(480x272): UI mode scales, video mode centers via offset.
+  // logical(320x240) -> physical(panel): UI mode scales, video mode centers via offset.
   void mapPt(int32_t x, int32_t y, int32_t &px, int32_t &py) const;
   void mapSz(int32_t w, int32_t h, int32_t &pw, int32_t &ph) const;
+  // current shape/text draw target: the keyboard overlay buffer (P4, while redirecting) or the canvas.
+  Arduino_Canvas *dtgt() {
+#if BOARD_PANEL_DSI
+    return (_toOsk && _oskCanvas) ? _oskCanvas : _canvas;
+#else
+    return _canvas;
+#endif
+  }
+#if BOARD_PANEL_DSI
+  void flushDSI();                  // ESP32-P4: compose + push the canvas to the JD9165 panel via esp_lcd
+  void fillVideoFrame(uint16_t *out); // fill-scale the canvas video into a full-panel frame
+#endif
 
   bool     _uiMode   = true;        // default UI (splash draws first); render loop toggles it
   uint8_t  _datum    = TL_DATUM;
@@ -131,6 +171,11 @@ private:
   Arduino_GFX     *_panel  = nullptr;
   Arduino_Canvas  *_canvas = nullptr;
   uint16_t        *_fb     = nullptr;   // canvas framebuffer (PSRAM), 480x272 row-major
+#if BOARD_PANEL_DSI
+  Arduino_Canvas  *_oskCanvas = nullptr;  // separate panel-size canvas for the keyboard overlay
+  uint16_t        *_oskFb     = nullptr;  // its framebuffer (blended over the video in flushDSI)
+  bool             _toOsk     = false;    // true while drawing should go to the overlay buffer
+#endif
 };
 
 // Flush the PSRAM canvas to the panel over QSPI. Called once per rendered frame (and after

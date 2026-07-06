@@ -1,4 +1,7 @@
 #include "../../emu.h"
+#if defined(BOARD_DESKTOP)
+#include "../desktop/debug_bridge.h"   // dbgBusTouch: desktop memory-access heat map (no-op on device)
+#endif
 
 void memoryAlloc() {
   showFreeMem();
@@ -45,6 +48,9 @@ void showFreeMem() {
 
 IRAM_ATTR unsigned char read8(unsigned short address)
 {
+#if defined(BOARD_DESKTOP)
+  dbgBusTouch(address, DBG_HEAT_R);
+#endif
 
   if (address < 0x0200)
   {
@@ -196,6 +202,9 @@ IRAM_ATTR unsigned char read8(unsigned short address)
 
 IRAM_ATTR void write8(unsigned short address, unsigned char value)
 {
+#if defined(BOARD_DESKTOP)
+  dbgBusTouch(address, DBG_HEAT_W);
+#endif
 
   if (address < 0x0200)
   {

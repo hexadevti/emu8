@@ -23,7 +23,11 @@
 
 #if BOARD_INPUT_USB
 
-#include "EspUsbHost.h"   // HID_KEY_* / KEYBOARD_MODIFIER_* constants + HID_KEYCODE_TO_ASCII table
+#if BOARD_PANEL_DSI
+#include "p4/usb/EspUsbHost.h"   // P4: vendored EspUsbHost fork, patched for IDF 5.x (in-repo)
+#else
+#include "EspUsbHost.h"   // S3: external fork — HID_KEY_* / KEYBOARD_MODIFIER_* + HID_KEYCODE_TO_ASCII
+#endif
 
 // --- small helpers -------------------------------------------------------------------------
 static bool kbContains(const uint8_t *arr, uint8_t kc)
@@ -131,10 +135,32 @@ static void c64KeyUp(uint8_t kc)
 // on the C64, so a held LEFT or UP also asserts SHIFT.
 static void c64ApplyModifiers(bool shift, bool ctrl, bool alt, const uint8_t *keys)
 {
-  bool wantShift = shift || kbContains(keys, HID_KEY_ARROW_LEFT) || kbContains(keys, HID_KEY_ARROW_UP);
+  // Cursor LEFT/UP are SHIFT+CRSR on the C64 -- but only while the arrows act as cursor keys. With the
+  // JOYSTICK option ON they drive the joystick instead, so don't force SHIFT then.
+  bool wantShift = shift;
+  if (!joystick) wantShift = wantShift || kbContains(keys, HID_KEY_ARROW_LEFT) || kbContains(keys, HID_KEY_ARROW_UP);
   c64KeyMatrix(7, 1, wantShift);  // left SHIFT  (col1,row7)
   c64KeyMatrix(2, 7, ctrl);       // CTRL        (col7,row2)
   c64KeyMatrix(5, 7, alt);        // Commodore   (col7,row5)
+}
+
+// C64 keyboard-as-joystick. With the JOYSTICK option ON, the arrow keys + Space drive the C64
+// joystick (routed to port 1/2 per joyPort) instead of the cursor matrix, so games are playable from
+// a USB keyboard. CIA bits are active-low: bit0=up,1=down,2=left,3=right,4=fire (0xff = idle).
+static bool c64IsJoyKey(uint8_t kc)
+{
+  return kc == HID_KEY_ARROW_UP || kc == HID_KEY_ARROW_DOWN ||
+         kc == HID_KEY_ARROW_LEFT || kc == HID_KEY_ARROW_RIGHT || kc == HID_KEY_SPACE;
+}
+static void c64ApplyJoystick(const uint8_t *keys)
+{
+  uint8_t m = 0xff;
+  if (kbContains(keys, HID_KEY_ARROW_UP))    m &= ~0x01;
+  if (kbContains(keys, HID_KEY_ARROW_DOWN))  m &= ~0x02;
+  if (kbContains(keys, HID_KEY_ARROW_LEFT))  m &= ~0x04;
+  if (kbContains(keys, HID_KEY_ARROW_RIGHT)) m &= ~0x08;
+  if (kbContains(keys, HID_KEY_SPACE))       m &= ~0x10;   // fire
+  c64SetJoystick(m);
 }
 
 // ============================ NES controller 1 ===========================================
@@ -175,6 +201,91 @@ static bool atariKey(uint8_t kc, bool down)   // returns true if it was an Atari
   return false;
 }
 
+// ============================ MSX keyboard matrix ========================================
+// Map a HID keycode to an MSX 8x11 matrix position in this codebase's (col,row) convention; fed to
+// msxKeyMatrix(row, col, down). col < 0 = unmapped. See the matrix table in src/msx/msx_ppi.cpp.
+struct MsxPos { int8_t col, row; };
+static MsxPos msxMap(uint8_t kc)
+{
+  switch (kc) {
+    case HID_KEY_A: return {6,2}; case HID_KEY_B: return {7,2}; case HID_KEY_C: return {0,3};
+    case HID_KEY_D: return {1,3}; case HID_KEY_E: return {2,3}; case HID_KEY_F: return {3,3};
+    case HID_KEY_G: return {4,3}; case HID_KEY_H: return {5,3}; case HID_KEY_I: return {6,3};
+    case HID_KEY_J: return {7,3}; case HID_KEY_K: return {0,4}; case HID_KEY_L: return {1,4};
+    case HID_KEY_M: return {2,4}; case HID_KEY_N: return {3,4}; case HID_KEY_O: return {4,4};
+    case HID_KEY_P: return {5,4}; case HID_KEY_Q: return {6,4}; case HID_KEY_R: return {7,4};
+    case HID_KEY_S: return {0,5}; case HID_KEY_T: return {1,5}; case HID_KEY_U: return {2,5};
+    case HID_KEY_V: return {3,5}; case HID_KEY_W: return {4,5}; case HID_KEY_X: return {5,5};
+    case HID_KEY_Y: return {6,5}; case HID_KEY_Z: return {7,5};
+    case HID_KEY_0: return {0,0}; case HID_KEY_1: return {1,0}; case HID_KEY_2: return {2,0};
+    case HID_KEY_3: return {3,0}; case HID_KEY_4: return {4,0}; case HID_KEY_5: return {5,0};
+    case HID_KEY_6: return {6,0}; case HID_KEY_7: return {7,0}; case HID_KEY_8: return {0,1};
+    case HID_KEY_9: return {1,1};
+    case HID_KEY_MINUS:        return {2,1};   // -
+    case HID_KEY_EQUAL:        return {3,1};   // =
+    case HID_KEY_BACKSLASH:    return {4,1};   // backslash
+    case HID_KEY_BRACKET_LEFT: return {5,1};   // [
+    case HID_KEY_BRACKET_RIGHT:return {6,1};   // ]
+    case HID_KEY_SEMICOLON:    return {7,1};   // ;
+    case HID_KEY_APOSTROPHE:   return {0,2};   // '
+    case HID_KEY_GRAVE:        return {1,2};   // `
+    case HID_KEY_COMMA:        return {2,2};   // ,
+    case HID_KEY_PERIOD:       return {3,2};   // .
+    case HID_KEY_SLASH:        return {4,2};   // /
+    case HID_KEY_ENTER:
+    case HID_KEY_KEYPAD_ENTER: return {7,7};   // RETURN
+    case HID_KEY_BACKSPACE:    return {5,7};   // BS
+    case HID_KEY_DELETE:       return {3,8};   // DEL
+    case HID_KEY_SPACE:        return {0,8};
+    case HID_KEY_ESCAPE:       return {2,7};
+    case HID_KEY_TAB:          return {3,7};
+    case HID_KEY_ARROW_LEFT:   return {4,8};
+    case HID_KEY_ARROW_UP:     return {5,8};
+    case HID_KEY_ARROW_DOWN:   return {6,8};
+    case HID_KEY_ARROW_RIGHT:  return {7,8};
+    case HID_KEY_F1: return {5,6}; case HID_KEY_F2: return {6,6}; case HID_KEY_F3: return {7,6};
+    case HID_KEY_F4: return {0,7}; case HID_KEY_F5: return {1,7};
+  }
+  return {-1, -1};
+}
+static inline void msxMatrix(int r, int c, bool d) { msxKeyMatrix(r, c, d); }
+static inline void msxJoy(uint8_t m) { msxSetInput(m); }
+static void msxKeyDown(uint8_t kc) { MsxPos p = msxMap(kc); if (p.col >= 0) msxMatrix(p.row, p.col, true); }
+static void msxKeyUp(uint8_t kc)   { MsxPos p = msxMap(kc); if (p.col >= 0) msxMatrix(p.row, p.col, false); }
+static void msxApplyModifiers(bool shift, bool ctrl, bool alt)
+{
+  msxMatrix(6, 0, shift);   // SHIFT (row6,col0)
+  msxMatrix(6, 1, ctrl);    // CTRL  (row6,col1)
+  msxMatrix(6, 2, alt);     // GRAPH (row6,col2) via Alt
+}
+static bool msxIsJoyKey(uint8_t kc)
+{
+  return kc == HID_KEY_ARROW_UP || kc == HID_KEY_ARROW_DOWN ||
+         kc == HID_KEY_ARROW_LEFT || kc == HID_KEY_ARROW_RIGHT || kc == HID_KEY_SPACE;
+}
+static void msxApplyJoystick(const uint8_t *keys)   // active-low: b0 up b1 down b2 left b3 right b4 trgA
+{
+  uint8_t m = 0xFF;
+  if (kbContains(keys, HID_KEY_ARROW_UP))    m &= ~0x01;
+  if (kbContains(keys, HID_KEY_ARROW_DOWN))  m &= ~0x02;
+  if (kbContains(keys, HID_KEY_ARROW_LEFT))  m &= ~0x04;
+  if (kbContains(keys, HID_KEY_ARROW_RIGHT)) m &= ~0x08;
+  if (kbContains(keys, HID_KEY_SPACE))       m &= ~0x10;   // trigger A
+  msxJoy(m);
+}
+// SMS has no keyboard: map the USB keyboard straight to controller 1 (active-low, same bit order).
+static void smsApplyJoystick(const uint8_t *keys)   // b0 up b1 down b2 left b3 right b4 btn1 b5 btn2
+{
+  uint8_t m = 0xFF;
+  if (kbContains(keys, HID_KEY_ARROW_UP))    m &= ~0x01;
+  if (kbContains(keys, HID_KEY_ARROW_DOWN))  m &= ~0x02;
+  if (kbContains(keys, HID_KEY_ARROW_LEFT))  m &= ~0x04;
+  if (kbContains(keys, HID_KEY_ARROW_RIGHT)) m &= ~0x08;
+  if (kbContains(keys, HID_KEY_SPACE) || kbContains(keys, HID_KEY_Z)) m &= ~0x10;   // button 1
+  if (kbContains(keys, HID_KEY_X))           m &= ~0x20;                            // button 2
+  smsSetInput(m);
+}
+
 // ============================ public entry points ========================================
 // Called from the USB host task (usbgamepad.cpp onKeyboard) with the current and previous
 // boot-report keycode arrays. We diff them to emit key-down / key-up events.
@@ -190,7 +301,7 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
     uint8_t kc = keys[i];
     if (!kc || kbContains(last, kc)) continue;
 
-    // Settings menu: F12 toggles; while open, the keyboard drives the menu (all platforms).
+    // Settings menu: F10 toggles; while open, the keyboard drives the menu (all platforms).
     if (OptionsWindow) {
       switch (kc) {
         case HID_KEY_ARROW_LEFT:   optionsUiNav(-1);    break;
@@ -200,22 +311,31 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
         case HID_KEY_ENTER:
         case HID_KEY_KEYPAD_ENTER: optionsUiActivate(); break;
         case HID_KEY_ESCAPE:
-        case HID_KEY_F12:          showHideOptionsWindow(); break;
+        case HID_KEY_F10:          showHideOptionsWindow(); break;
       }
       continue;   // menu swallows every key
     }
-    if (kc == HID_KEY_F12) { showHideOptionsWindow(); continue; }
+    if (kc == HID_KEY_F10) { showHideOptionsWindow(); continue; }
     if (kc == HID_KEY_F11 &&
         (currentPlatform == PLATFORM_APPLE2 || currentPlatform == PLATFORM_IIGS)) {
       cpuReset(); continue;
     }
+    if (currentPlatform == PLATFORM_SMS) {
+      if (kc == HID_KEY_F11) { smsPauseButton(); continue; }   // SMS PAUSE -> NMI
+      if (kc == HID_KEY_F12) { smsHardReset();   continue; }   // soft power-cycle
+    }
+    if (currentPlatform == PLATFORM_PCXT && kc == HID_KEY_F12) { pcxtHardReset(); continue; }  // soft reboot
+    if (currentPlatform == PLATFORM_TINY386 && kc == HID_KEY_F12) { tiny386HardReset(); continue; }  // soft reboot
 
     switch (currentPlatform) {
       case PLATFORM_APPLE2:
       case PLATFORM_IIGS:  appleKeyDown(kc, shift, ctrl); break;
-      case PLATFORM_C64:   c64KeyDown(kc);                break;
+      case PLATFORM_C64:   if (!(joystick && c64IsJoyKey(kc))) c64KeyDown(kc); break;  // arrows+Space = joystick when JOY on
       case PLATFORM_NES:   nesKbBits |= nesBit(kc); nesSetController(nesKbBits); break;
       case PLATFORM_ATARI: if (atariKey(kc, true)) atariApply(); break;
+      case PLATFORM_MSX:   if (!(joystick && msxIsJoyKey(kc))) msxKeyDown(kc); break;  // arrows+Space = joystick when JOY on
+      case PLATFORM_PCXT:  pcxtKeyDown(kc, shift, ctrl, alt); break;                    // USB key -> XT make scancode
+      case PLATFORM_TINY386: tiny386KeyDown(kc, shift, ctrl, alt); break;              // USB key -> PS/2 make code
     }
   }
 
@@ -227,9 +347,12 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
     uint8_t kc = last[i];
     if (!kc || kbContains(keys, kc)) continue;
     switch (currentPlatform) {
-      case PLATFORM_C64:   c64KeyUp(kc); break;
+      case PLATFORM_C64:   if (!(joystick && c64IsJoyKey(kc))) c64KeyUp(kc); break;
       case PLATFORM_NES:   nesKbBits &= ~nesBit(kc); nesSetController(nesKbBits); break;
       case PLATFORM_ATARI: if (atariKey(kc, false)) atariApply(); break;
+      case PLATFORM_MSX:   if (!(joystick && msxIsJoyKey(kc))) msxKeyUp(kc); break;
+      case PLATFORM_PCXT:  pcxtKeyUp(kc); break;   // USB key -> XT break scancode
+      case PLATFORM_TINY386: tiny386KeyUp(kc); break;   // USB key -> PS/2 break code
       default: break;   // Apple/IIGS keystrokes are edge-triggered (keymem); nothing to release
     }
   }
@@ -237,6 +360,25 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
   // --- continuous modifier state ---
   if (currentPlatform == PLATFORM_C64) {
     c64ApplyModifiers(shift, ctrl, alt, keys);
+    if (joystick) c64ApplyJoystick(keys);   // arrows + Space -> joystick
+    else          c64SetJoystick(0xff);     // typing mode: keep the joystick released
+  } else if (currentPlatform == PLATFORM_MSX) {
+    msxApplyModifiers(shift, ctrl, alt);
+    if (joystick) msxApplyJoystick(keys);   // arrows + Space -> joystick
+    else          msxJoy(0xFF);             // typing mode: joystick released
+  } else if (currentPlatform == PLATFORM_SMS) {
+    smsApplyJoystick(keys);                 // joystick-only: arrows + Z/X/Space -> controller 1
+  } else if (currentPlatform == PLATFORM_PCXT) {
+    // PC needs make/break for shift/ctrl/alt (they arrive as the modifier byte, not in keys[]).
+    static uint8_t prevMod = 0;
+    static const struct { uint8_t bit; uint8_t usage; } mm[] = {
+      {0x01,0xE0},{0x02,0xE1},{0x04,0xE2},{0x10,0xE4},{0x20,0xE5} };  // LCtrl LShift LAlt RCtrl RShift
+    for (auto& e : mm) {
+      bool now = (modifier & e.bit) != 0, was = (prevMod & e.bit) != 0;
+      if (now && !was) pcxtKeyDown(e.usage, false, false, false);
+      else if (!now && was) pcxtKeyUp(e.usage);
+    }
+    prevMod = modifier;
   } else if (currentPlatform == PLATFORM_APPLE2 || currentPlatform == PLATFORM_IIGS) {
     Pb0 = (modifier & KEYBOARD_MODIFIER_LEFTALT)  != 0;   // open-apple  (paddle button 0)
     Pb1 = (modifier & KEYBOARD_MODIFIER_RIGHTALT) != 0;   // solid-apple (paddle button 1)
@@ -248,11 +390,17 @@ void usbKeyboardReset()
 {
   if (currentPlatform == PLATFORM_C64) {
     c64KeyMatrix(7, 1, false); c64KeyMatrix(2, 7, false); c64KeyMatrix(5, 7, false);
+    c64SetJoystick(0xff);   // release the keyboard joystick
   }
   nesKbBits = 0;
   if (currentPlatform == PLATFORM_NES) nesSetController(0);
   atariDir = 0; atariFire = atariSelect = atariReset = false;
   if (currentPlatform == PLATFORM_ATARI) atariApply();
+  if (currentPlatform == PLATFORM_MSX) {
+    msxMatrix(6, 0, false); msxMatrix(6, 1, false); msxMatrix(6, 2, false);
+    msxJoy(0xFF);
+  }
+  if (currentPlatform == PLATFORM_SMS) smsSetInput(0xFF);
 }
 
 #endif // BOARD_INPUT_USB

@@ -12,15 +12,38 @@
 #include "esp_heap_caps.h"
 #include <string.h>
 #include "cpu65816.h"
-#include "iigs_rom01.h"      // const unsigned char iigsRom01[131072]
+#include "iigs_rom01.h"      // extern const unsigned char* iigsRom01 (loaded from SD)
 
 // ----- banked RAM -----
 static uint8_t* bankPtr[256];                 // 64KB base per bank, or nullptr (ROM/IO/unmapped)
 static uint8_t  lcB2[2][0x1000];              // language-card second $D000-$DFFF bank ($00,$01)
 static uint8_t  gluMem[256];                  // ADB microcontroller / BRAM
 
+// Apple IIGS ROM 01 (342-0077-B, 128K). Loaded from /roms/iigs/rom01.bin into a PSRAM buffer at boot
+// (iigsLoadRom) - it used to be the embedded iigsRom01[] flash array. romFE/romFF index it directly.
+const unsigned char* iigsRom01 = nullptr;
+static bool g_romMissing = false;             // set if /roms/iigs/rom01.bin is absent -> halt + error
+
 static inline uint8_t romFF(uint16_t off) { return iigsRom01[off]; }            // bank $FF = first 64K
 static inline uint8_t romFE(uint16_t off) { return iigsRom01[0x10000 + off]; }  // bank $FE = second 64K
+
+// Load ROM 01 from the SD card (once; cached). Must run before the 65C816 reset, which reads the
+// reset vector from bank $FF. Returns false if /roms/iigs/rom01.bin is missing or the wrong size.
+bool iigsLoadRom() {
+  if (iigsRom01) return true;
+  File f = FSTYPE.open("/roms/iigs/rom01.bin", FILE_READ);
+  if (!f) { printLog("IIGS: /roms/iigs/rom01.bin missing"); return false; }
+  if ((int)f.size() != 131072) { f.close(); printLog("IIGS: rom01.bin wrong size (want 128K)"); return false; }
+  uint8_t* b = (uint8_t*)ps_malloc(131072);
+  if (!b) { f.close(); printLog("IIGS: ROM alloc failed"); return false; }
+  int rd = 0;
+  while (rd < 131072) { int n = f.read(b + rd, (131072 - rd > 8192) ? 8192 : (131072 - rd)); if (n <= 0) break; rd += n; }
+  f.close();
+  if (rd != 131072) { free(b); printLog("IIGS: ROM read short"); return false; }
+  iigsRom01 = b;
+  printLog("IIGS: ROM 01 loaded from /roms/iigs/rom01.bin (128K)");
+  return true;
+}
 
 // ----- ADB GLU ($C026/$C027) -----
 static uint8_t gluCmd = 0; static int gluArgsLeft = 0; static uint8_t gluAddr = 0;
@@ -188,6 +211,7 @@ static void hdWrite(uint16_t off, uint8_t v) {
 void iigsLoadHD(const char* path) {
   if (!path || !path[0]) return;
   busTake();
+  apple2EnsureHdRom();                                // slot-7 HD firmware ($C700) from /roms/apple2 (shared w/ Apple II)
   File f = FSTYPE.open(path, FILE_READ);
   long sz = f ? (long)f.size() : 0;
   long n = 0;
@@ -327,7 +351,7 @@ static uint8_t iigsRd(uint32_t a) {
     if (off >= 0xC080 && off <= 0xC08F) { lcSwitch(bank, off, true); return 0; }
     if (off >= 0xC000 && off <= 0xC0FF) return ioRead(off);
     if (off >= 0xD000) return lcRd[bank] ? lcReadRAM(bank, off) : romFF(off);
-    if (off >= 0xC700 && off <= 0xC7FF && g_hd) return hdrom[off - 0xC700];   // slot 7 = our HD firmware
+    if (off >= 0xC700 && off <= 0xC7FF && g_hd && hdrom) return hdrom[off - 0xC700];   // slot 7 = our HD firmware (from /roms/apple2)
     if (off >= 0xC100) return romFF(off);
     { uint8_t rb = (bank == 0x00 && auxBankFor(off, false)) ? 0x01 : bank;   // aux-memory redirect
       return bankPtr[rb] ? bankPtr[rb][off] : 0; }
@@ -496,7 +520,7 @@ void iigsRenderText() {
   if (!g_ready || !bankPtr[0]) {                   // setup failed (e.g. out of memory): say so
     tft.fillScreen(TFT_BLACK);
     tft.setTextDatum(MC_DATUM);
-    tft.drawString("IIGS init failed", 160, 60, 2);
+    tft.drawString(g_romMissing ? "IIGS: put rom01.bin in /roms/iigs" : "IIGS init failed", 160, 60, 2);
     return;
   }
   // IIGS Super Hi-Res ($C029 bit7): the VGC overrides the Apple II video entirely.
@@ -554,6 +578,7 @@ void iigsRenderText() {
 
 void iigsSetup() {
   printLog("IIGS Setup (ROM 01)...");
+  if (!iigsLoadRom()) { g_romMissing = true; g_ready = false; return; }  // ROM must be on SD before reset
   // M0.5 locality: the HOTTEST bank $00 (zero page, stack, low RAM, language card) goes in INTERNAL
   // SRAM (fast); $01 (aux) + $E0/$E1 (Mega II/video) + the $02.. expansion stay in PSRAM. Internal
   // SRAM is fragmented by the platform statics, so $00 falls back to PSRAM if its 64K alloc fails.
@@ -583,6 +608,7 @@ void iigsSetup() {
 }
 
 void iigsLoop() {
+  if (g_romMissing) { delay(500); return; }                              // no ROM on SD -> halt (render shows it)
   if (!g_ready) { iigsSetup(); if (!g_ready) { delay(500); return; } }   // don't step a null-bus CPU
   uint64_t lastCyc = g_cpu.cycles; uint32_t lastUs = micros();
   for (;;) {

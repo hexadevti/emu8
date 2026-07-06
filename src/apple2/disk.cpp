@@ -1,5 +1,8 @@
 #include "../../emu.h"
 #include <dirent.h>   // raw POSIX readdir() for the fast SD scan (see loadDiskFilesSync)
+#if defined(BOARD_DESKTOP)
+#include "../desktop/debug_bridge.h"   // dbgDiskRead: desktop disk-read heat map (no-op on device)
+#endif
 
 
 ushort diskFileHeaderSize = 0;
@@ -281,6 +284,22 @@ void setDiskFile()
     selectedDiskFileName = diskFiles[shownFile].c_str();
   }
   paused = false;
+}
+
+// Hot-swap the mounted floppy by PATH (no reboot): re-point selectedDiskFileName, re-detect the new
+// image's volume/format (getDiskFileInfo leaves the head at track 0), and flag a track reload so the
+// next $C0EC read re-opens the new file (getTrack always re-opens by name). The running software sees
+// it as a disk swap and reads the new image on its next drive access.
+void apple2InsertDisk(const char *path)
+{
+  bool wasPaused = paused;
+  paused = true;                 // freeze the CPU while we re-point + re-read the image
+  selectedDiskFileName = path;
+  getDiskFileInfo(FSTYPE);       // re-detect volume + DOS/ProDOS order for the new image
+  pointer = 0;
+  trackChanged = true;
+  diskChanged = true;
+  paused = wasPaused;
 }
 
 // Scan the SD root for disk images into diskFiles. Synchronous so it can be called
@@ -599,6 +618,11 @@ char diskSoftSwitchesRead(ushort address)
       if (pointer > trackEncodedSize - 1)
         pointer = 0;
 
+#if defined(BOARD_DESKTOP)
+      // heat map: attribute this read to the SECTOR the RWTS is currently seeking ($2D DOS / $D357
+      // ProDOS), so the wedges map to real sectors (like the write path). Only when recording.
+      if (g_dbgDiskHeatOn) { int dsec = FlagDO_PO ? read8(0x2d) : read8(0xd357); dbgDiskRead(diskTrack, dsec); }
+#endif
       //   sprintf(buf, "Disk Track: %d, Disk Read: %04X, Pointer: %d, Data: %02X", diskTrack, address, pointer, trackEncodedData[pointer]);
       //   printLog(buf);
       //  sprintf(buf, "(%04x)[R]%04X: %02X", PC, address, trackEncodedData[pointer]);
@@ -618,6 +642,9 @@ void diskSoftSwitchesWrite(ushort address, char value)
   {
     if (DriveQ6H_L == false && DriveQ7H_L == true)
     {
+#if defined(BOARD_DESKTOP)
+      dbgDiskWrite(diskTrack, sec);   // heat map: this track/sector is being written
+#endif
       outputSectorData.push_back(value);
 
       if (outputSectorData.size() == 354)

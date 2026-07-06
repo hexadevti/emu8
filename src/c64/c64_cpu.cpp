@@ -4,6 +4,9 @@
 // timing added for the multi-platform CYD build.
 
 #include "../../emu.h"
+#if defined(BOARD_DESKTOP)
+#include "../desktop/debug_bridge.h"   // desktop debugger hooks (breakpoints/step/heat); no-op on device
+#endif
 #include "c64.h"
 
 namespace c64 {
@@ -260,10 +263,22 @@ void cpuLoop() {
   bool nmiPrev = false;           // previous NMI line state (NMI is edge-triggered)
   while (running)
   {
+#if defined(BOARD_DESKTOP)
+    // Desktop debugger: break at the upcoming PC (breakpoint / run-to-cursor / step-over / step-out).
+    if (dbgBpShouldBreak(PC)) paused = true;                                                      // breakpoint
+    if (g_dbgRunToPC >= 0 && PC == (uint16_t)g_dbgRunToPC) { paused = true; g_dbgRunToPC = -1; }  // run-to / step-over
+    if (g_dbgRunUntilSP >= 0 && STP > (uint8_t)g_dbgRunUntilSP) { paused = true; g_dbgRunUntilSP = -1; } // step-out
+#endif
     while (paused)
     {
+#if defined(BOARD_DESKTOP)
+      if (dbgStepReq > 0) { dbgStepReq--; break; }   // debugger single-step: run exactly one instruction
+#endif
       delay(100);
     }
+#if defined(BOARD_DESKTOP)
+    g_dbgBreakArmed = true;                          // re-arm after passing the breakpoint check once
+#endif
 
     // Reset request (e.g. after mounting a .crt): re-enter the reset vector so the KERNAL
     // re-detects the cartridge (CBM80 at $8004) or an Ultimax cart's own $FFFC vector.
@@ -314,6 +329,9 @@ void cpuLoop() {
     lastPC = PC;
 
     opcode = read8(PC++);
+#if defined(BOARD_DESKTOP)
+    dbgBusTouch(lastPC, DBG_HEAT_X);   // heat map: this instruction was fetched/executed at lastPC
+#endif
     int instrCycles = cycles[opcode];
     if (instrCycles < 1) instrCycles = 2;
 

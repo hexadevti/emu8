@@ -113,6 +113,57 @@ void applyPlatformInput()
         }
         atariSetInput(d, fire, select, reset);
     }
+
+    // MSX: 8-way stick + 2 triggers onto the general-purpose joystick port (PSG port A, register 14).
+    // Active-LOW: bit0=up, bit1=down, bit2=left, bit3=right, bit4=trigger A, bit5=trigger B.
+    if (currentPlatform == PLATFORM_MSX)
+    {
+        uint8_t m = 0xFF;
+        if (joystick && !OptionsWindow)
+        {
+            if (joyX == 0) m &= ~0x01;   // up
+            if (joyX == 2) m &= ~0x02;   // down
+            if (joyY == 0) m &= ~0x04;   // left
+            if (joyY == 2) m &= ~0x08;   // right
+            if (Pb0)       m &= ~0x10;   // trigger A
+            if (Pb1)       m &= ~0x20;   // trigger B
+        }
+        msxSetInput(m);
+    }
+
+    // SMS: 8-way d-pad + 2 buttons onto controller port 1 ($DC). Active-LOW, same bit order as MSX:
+    // bit0=up, bit1=down, bit2=left, bit3=right, bit4=button 1 (TL), bit5=button 2 (TR).
+    if (currentPlatform == PLATFORM_SMS)
+    {
+        uint8_t m = 0xFF;
+        if (joystick && !OptionsWindow)
+        {
+            if (joyX == 0) m &= ~0x01;   // up
+            if (joyX == 2) m &= ~0x02;   // down
+            if (joyY == 0) m &= ~0x04;   // left
+            if (joyY == 2) m &= ~0x08;   // right
+            if (Pb0)       m &= ~0x10;   // button 1
+            if (Pb1)       m &= ~0x20;   // button 2
+        }
+        smsSetInput(m);
+    }
+
+    // PC-XT: gamepad -> arrow keys + Enter/Esc (active-LOW mask, same bit order as SMS:
+    // bit0=up, bit1=down, bit2=left, bit3=right, bit4=A (Enter), bit5=B (Esc)).
+    if (currentPlatform == PLATFORM_PCXT)
+    {
+        uint8_t m = 0xFF;
+        if (!OptionsWindow)
+        {
+            if (joyX == 0) m &= ~0x01;   // up
+            if (joyX == 2) m &= ~0x02;   // down
+            if (joyY == 0) m &= ~0x04;   // left
+            if (joyY == 2) m &= ~0x08;   // right
+            if (Pb0)       m &= ~0x10;   // A -> Enter
+            if (Pb1)       m &= ~0x20;   // B -> Esc
+        }
+        pcxtSetInput(m);
+    }
 }
 
 #if BOARD_INPUT_ANALOG
@@ -463,6 +514,11 @@ static void analogJoystickTask(void *pvParameters)
 
 #else
 // No ADC analog joystick on this board: the USB SNES gamepad (usbgamepad.cpp) populates the
-// same globals (joyX/joyY/Pb0-3) and drives applyPlatformInput().
-void joystickSetup() { usbGamepadSetup(); }
+// same globals (joyX/joyY/Pb0-3) and drives applyPlatformInput(). Boards with neither ADC nor a
+// USB host (e.g. the JC1060P470, where USB host is deferred) get input from touch/OSK only.
+void joystickSetup() {
+#if BOARD_INPUT_USB
+  usbGamepadSetup();
+#endif
+}
 #endif // BOARD_INPUT_ANALOG

@@ -7,10 +7,15 @@
 
 #include <cstdint>
 
-// C64 ROM images (defined once in c64rom.cpp; const so they live in flash, not RAM).
-extern const unsigned char basic_rom[];
-extern const unsigned char kernal_rom[];
-extern const unsigned char charset_rom[];
+// C64 ROM images — loaded at boot from /roms/c64/*.bin on the SD card into PSRAM buffers
+// (c64rom.cpp); pointers, not arrays, and null until c64LoadRoms() has run.
+extern const unsigned char *basic_rom;
+extern const unsigned char *kernal_rom;
+extern const unsigned char *charset_rom;
+
+// Load BASIC/KERNAL/CHARGEN from the SD card (/roms/c64). Returns false if any is missing or
+// the wrong size — the caller must show an error and must NOT run the 6510 on the null pointers.
+bool c64LoadRoms();
 
 namespace c64 {
 
@@ -45,6 +50,11 @@ extern uint8_t cntRefreshs;
 extern const uint16_t c64Colors[16];
 
 // ---- CPU (c64_cpu.cpp) ----
+// 6510 register file (defined in c64_cpu.cpp). Declared here so the desktop debug facade
+// (src/desktop/debug_bridge.cpp) can read them for the CPU/disasm panels, exactly like the
+// Apple II core exposes its 6502 globals. Harmless on the device (just declarations).
+extern unsigned short PC, lastPC;
+extern unsigned char STP, A, X, Y, SR;
 void cpuReset();
 void cpuLoop();
 void cpuIRQ();

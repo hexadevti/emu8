@@ -2,9 +2,9 @@
 # One-shot: convert the IIGS ROM 01 binary into a C++ array embedded in flash.
 import sys
 
-src = r"C:\Users\lucia\repos\emu6502\resources\Apple IIGS ROM 01 - 342-0077-B.bin"
-out_cpp = r"C:\Users\lucia\repos\emu6502\src\iigs\iigs_rom01.cpp"
-out_h   = r"C:\Users\lucia\repos\emu6502\src\iigs\iigs_rom01.h"
+src = r"C:\Users\lucia\repos\emu8\resources\Apple IIGS ROM 01 - 342-0077-B.bin"
+out_cpp = r"C:\Users\lucia\repos\emu8\src\iigs\iigs_rom01.cpp"
+out_h   = r"C:\Users\lucia\repos\emu8\src\iigs\iigs_rom01.h"
 
 data = open(src, "rb").read()
 assert len(data) == 131072, "expected 128KB ROM 01, got %d" % len(data)

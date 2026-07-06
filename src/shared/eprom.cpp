@@ -37,7 +37,23 @@ void epromSetup() {
   dacSound = EEPROM.readBool(dacSoundEEPROMaddress);
   volume = EEPROM.readChar(VolumeEEPROMaddress);
   currentPlatform = EEPROM.readChar(PlatformEEPROMaddress);
-  if (currentPlatform > PLATFORM_IIGS) currentPlatform = PLATFORM_APPLE2;  // unset/garbage -> default
+  if (currentPlatform > PLATFORM_TINY386) currentPlatform = PLATFORM_APPLE2;  // unset/garbage -> default
+
+#if defined(BOARD_DESKTOP)
+  // Desktop debug: EMU_PLATFORM picks the platform (and esp_reset_reason() then skips the splash).
+  if (const char *p = getenv("EMU_PLATFORM")) {
+    String s(p); s.toLowerCase();
+    if      (s == "apple2" || s == "apple") currentPlatform = PLATFORM_APPLE2;
+    else if (s == "c64")                     currentPlatform = PLATFORM_C64;
+    else if (s == "nes")                     currentPlatform = PLATFORM_NES;
+    else if (s == "atari")                   currentPlatform = PLATFORM_ATARI;
+    else if (s == "iigs")                    currentPlatform = PLATFORM_IIGS;
+    else if (s == "msx")                     currentPlatform = PLATFORM_MSX;
+    else if (s == "sms")                     currentPlatform = PLATFORM_SMS;
+    else if (s == "pcxt" || s == "pc")       currentPlatform = PLATFORM_PCXT;
+    else if (s == "tiny386" || s == "386")   currentPlatform = PLATFORM_TINY386;
+  }
+#endif
 
   // C64 settings (validated so old/uninitialised EEPROM doesn't enable surprises).
   c64Autoload = (EEPROM.readChar(C64AutoloadEEPROMaddress) == 1);
@@ -46,6 +62,9 @@ void epromSetup() {
   // ==1 test (not readBool) so an uninitialised 0xFF on older devices reads as OFF, not ON.
   screenFill = (EEPROM.readChar(ScreenFillEEPROMaddress) == 1);
   { char s = EEPROM.readChar(NesDisplaySkipEEPROMaddress); nesDisplaySkip = (s >= 1 && s <= 3) ? (uint8_t)s : 3; }  // default 3; fresh EEPROM (0xFF) -> 3
+  msxFast = (EEPROM.readChar(MsxSpeedEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> NORMAL
+  nesFast = (EEPROM.readChar(NesSpeedEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> NORMAL
+  smsFast = (EEPROM.readChar(SmsSpeedEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> NORMAL
   readStringFromEEPROM(C64FileNameEEPROMaddress, &selectedC64FileName);
   if (selectedC64FileName.length() == 0 || selectedC64FileName.length() > 120 ||
       selectedC64FileName[0] != '/') {
@@ -64,7 +83,40 @@ void epromSetup() {
   if (selectedAtariFileName.length() == 0 || selectedAtariFileName.length() > 120 ||
       selectedAtariFileName[0] != '/')
     selectedAtariFileName = "";
-    
+
+  // MSX: last-loaded .rom cartridge, auto-loaded on boot (validated; garbage -> none).
+  readStringFromEEPROM(MsxFileNameEEPROMaddress, &selectedMsxFileName);
+  if (selectedMsxFileName.length() == 0 || selectedMsxFileName.length() > 120 ||
+      selectedMsxFileName[0] != '/')
+    selectedMsxFileName = "";
+
+  // SMS: last-loaded .sms/.bin ROM, auto-loaded on boot (validated; garbage -> none).
+  readStringFromEEPROM(SmsFileNameEEPROMaddress, &selectedSmsFileName);
+  if (selectedSmsFileName.length() == 0 || selectedSmsFileName.length() > 120 ||
+      selectedSmsFileName[0] != '/')
+    selectedSmsFileName = "";
+
+  // PCXT: last-mounted A: floppy + C: hard-disk images, auto-mounted on boot (validated; garbage -> none).
+  readStringFromEEPROM(PcxtFileNameEEPROMaddress, &selectedPcFileName);
+  if (selectedPcFileName.length() == 0 || selectedPcFileName.length() > 120 ||
+      selectedPcFileName[0] != '/')
+    selectedPcFileName = "";
+  readStringFromEEPROM(PcxtHdFileNameEEPROMaddress, &selectedPcHdFileName);
+  if (selectedPcHdFileName.length() == 0 || selectedPcHdFileName.length() > 120 ||
+      selectedPcHdFileName[0] != '/')
+    selectedPcHdFileName = "";
+
+  readStringFromEEPROM(Tiny386FileNameEEPROMaddress, &selectedTiny386FileName);
+  if (selectedTiny386FileName.length() == 0 || selectedTiny386FileName.length() > 120 ||
+      selectedTiny386FileName[0] != '/')
+    selectedTiny386FileName = "";
+
+  readStringFromEEPROM(Tiny386FileNameAEEPROMaddress, &selectedTiny386FileNameA);
+  if (selectedTiny386FileNameA.length() == 0 || selectedTiny386FileNameA.length() > 120 ||
+      selectedTiny386FileNameA[0] != '/')
+    selectedTiny386FileNameA = "";
+
+
   if (HdDisk) {
     int size = readStringFromEEPROM(HdFileNameEEPROMaddress, &selectedHdFileName);
     sprintf(buf, "EEPROM selectedHdFile value: %s", selectedHdFileName.c_str());
@@ -86,6 +138,16 @@ void epromSetup() {
   {
     selectedDiskFileName = "/";
   }
+#if defined(BOARD_DESKTOP)
+  // EMU_DISK overrides the auto-mounted floppy (debug aid) — AFTER the EEPROM read so it actually wins.
+  if (const char *d = getenv("EMU_DISK")) { selectedDiskFileName = d; HdDisk = false; }
+  // EMU_C64=/x.d64 (or .prg) auto-loads + runs it on the C64 once BASIC is ready (debug/boot aid).
+  if (const char *c = getenv("EMU_C64")) { selectedC64FileName = c; c64Autoload = true; }
+  // Default the Apple II to THROTTLED 1 MHz on desktop: uncapped runs the 6502 at tens of MHz on a PC,
+  // which makes the 1-bit speaker ultrasonic/garbage. (Toggle it off in Control > Clock speed for a
+  // speed-up, accepting bad audio.) EMU_FAST=1 forces uncapped instead.
+  Fast1MhzSpeed = (getenv("EMU_FAST") != nullptr);
+#endif
 }
 
 int writeStringToEEPROM(int addrOffset, const String &strToWrite)
@@ -124,6 +186,9 @@ void saveEEPROM() {
     EEPROM.writeChar(PlatformEEPROMaddress, currentPlatform);
     EEPROM.writeChar(ScreenFillEEPROMaddress, screenFill ? 1 : 0);
     EEPROM.writeChar(NesDisplaySkipEEPROMaddress, (char)nesDisplaySkip);
+    EEPROM.writeChar(MsxSpeedEEPROMaddress, msxFast ? 1 : 0);
+    EEPROM.writeChar(NesSpeedEEPROMaddress, nesFast ? 1 : 0);
+    EEPROM.writeChar(SmsSpeedEEPROMaddress, smsFast ? 1 : 0);
   }
 
 // Persist every user-configurable option (all toggles, volume, and the selected
@@ -138,6 +203,12 @@ void saveConfig() {
     writeStringToEEPROM(C64FileNameEEPROMaddress, selectedC64FileName);
     writeStringToEEPROM(NesFileNameEEPROMaddress, selectedNesFileName);
     writeStringToEEPROM(AtariFileNameEEPROMaddress, selectedAtariFileName);
+    writeStringToEEPROM(MsxFileNameEEPROMaddress, selectedMsxFileName);
+    writeStringToEEPROM(SmsFileNameEEPROMaddress, selectedSmsFileName);
+    writeStringToEEPROM(PcxtFileNameEEPROMaddress, selectedPcFileName);
+    writeStringToEEPROM(PcxtHdFileNameEEPROMaddress, selectedPcHdFileName);
+    writeStringToEEPROM(Tiny386FileNameEEPROMaddress, selectedTiny386FileName);
+    writeStringToEEPROM(Tiny386FileNameAEEPROMaddress, selectedTiny386FileNameA);
     EEPROM.commit();
   }
   

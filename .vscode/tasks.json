@@ -104,6 +104,86 @@
         "panel": "shared",
         "clear": true
       }
+    },
+    {
+      // Guition JC1060P470 (ESP32-P4). ISOLATED toolchain: ARDUINO_DIRECTORIES_DATA/USER point at a
+      // P4-only sketchbook+core dir OUTSIDE the repo (~/.emu6502-p4) so this build uses Arduino-ESP32
+      // core 3.x (IDF 5.x) WITHOUT touching the global 2.0.17 the CYD/S3 builds use. It MUST be outside
+      // the sketch folder, else arduino-cli tries to copy the deep core tree and overruns the Windows
+      // 260-char path limit. One-time setup (see README, "P4 build"):
+      //   $env:ARDUINO_DIRECTORIES_DATA="$HOME/.emu6502-p4/data"
+      //   $env:ARDUINO_DIRECTORIES_USER="$HOME/.emu6502-p4/user"
+      //   arduino-cli core update-index; arduino-cli core install esp32:esp32@3.3.10
+      //   arduino-cli lib install "GFX Library for Arduino"   (USB host is deferred on P4 -> no EspUsbHost)
+      // Confirm the exact FQBN menu options/values for your installed core with:
+      //   arduino-cli board details --fqbn esp32:esp32:esp32p4
+      "label": "Arduino: Build (JC1060P470)",
+      "type": "shell",
+      "command": "arduino-cli",
+      "args": [
+        "compile",
+        "--fqbn",
+        "esp32:esp32:esp32p4:PSRAM=enabled,FlashSize=16M,PartitionScheme=huge_app,DebugLevel=none",
+        "--verbose",
+        "--build-property",
+        "compiler.optimization_flags=-O2",
+        "--build-property",
+        "compiler.cpp.extra_flags=-DBOARD_JC1060P470",
+        "${workspaceFolder}"
+      ],
+      "options": {
+        "env": {
+          "ARDUINO_DIRECTORIES_DATA": "${userHome}/.emu6502-p4/data",
+          "ARDUINO_DIRECTORIES_USER": "${userHome}/.emu6502-p4/user"
+        }
+      },
+      "group": "build",
+      "problemMatcher": ["$gcc"],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Arduino: Build & Upload (JC1060P470)",
+      "type": "shell",
+      "command": "arduino-cli",
+      "args": [
+        "upload",
+        "-p",
+        "COM6",
+        "--fqbn",
+        "esp32:esp32:esp32p4:PSRAM=enabled,FlashSize=16M,PartitionScheme=huge_app,DebugLevel=none",
+        "--verbose",
+        "${workspaceFolder}"
+      ],
+      "options": {
+        "env": {
+          "ARDUINO_DIRECTORIES_DATA": "${userHome}/.emu6502-p4/data",
+          "ARDUINO_DIRECTORIES_USER": "${userHome}/.emu6502-p4/user"
+        }
+      },
+      "dependsOn": "Arduino: Build (JC1060P470)",
+      "dependsOrder": "sequence",
+      "group": "build",
+      "problemMatcher": ["$gcc"],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      // DESKTOP (SDL2) debug build via MSYS2 MinGW32. Used as the preLaunchTask for F5
+      // (.vscode/launch.json). Configures CMake on first run, then builds build/emu8.exe.
+      "label": "desktop: build",
+      "type": "process",
+      "command": "C:\\msys64\\usr\\bin\\bash.exe",
+      "args": [
+        "-lc",
+        "cd /c/Users/lucia/repos/emu8 && cmake -G 'Unix Makefiles' -S . -B build -DEMU_M32=OFF -DCMAKE_BUILD_TYPE=Debug && make -C build -j4"
+      ],
+      "options": { "env": { "MSYSTEM": "MINGW32", "CHERE_INVOKING": "1" } },
+      "group": "build",
+      "problemMatcher": ["$gcc"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
     }
   ]
 }

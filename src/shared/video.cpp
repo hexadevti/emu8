@@ -3,7 +3,21 @@
 
 
 #include "bootlogo.h"   // embedded boot-splash logo (RGB565)
+#include <esp_system.h>          // esp_reset_reason()
+#include <esp_attr.h>            // RTC_NOINIT_ATTR
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+#include "esp_task_wdt.h"        // esp_task_wdt_reconfigure (core 3.x TWDT, replaces disableCore0WDT)
+#endif
 bool splashActive = true; // true until the boot splash times out or is dismissed
+
+// Boot-splash policy. The SELECT SYSTEM banner only appears on a hardware reset (power-on / RST
+// button) or when the user explicitly asks for it via the "Reboot" settings button / Ctrl-F5 --
+// which call requestSplashOnNextBoot() to stash a magic in RTC memory (it survives the soft reset)
+// just before restarting. Selecting a platform on the splash, and the mount+reboot paths, restart
+// WITHOUT the magic, so they boot straight into the chosen system without re-showing the banner.
+RTC_NOINIT_ATTR static uint32_t splashOnBootMagic;
+#define SPLASH_ON_BOOT_MAGIC 0x5350A5AAu
+void requestSplashOnNextBoot() { splashOnBootMagic = SPLASH_ON_BOOT_MAGIC; }
 
 // colors[] / colors16[] are defined in globals.cpp (after tft, for static-init order).
 int flashCount = 0;
@@ -17,25 +31,38 @@ int height = 192;
 static StaticTask_t renderTaskTCB;
 static StackType_t  renderTaskStack[8192];
 
-#if !BOARD_DISPLAY_GFX
+#if !BOARD_DISPLAY_GFX && !defined(BOARD_DESKTOP)
 // On TFT_eSPI boards drawing goes straight to the 320x240 panel; the canvas flush and the
-// UI/video mode switch are no-ops. (The Arduino_GFX boards define these in display_gfx.cpp.)
+// UI/video mode switch are no-ops. (The Arduino_GFX boards define these in display_gfx.cpp;
+// the desktop SDL backend defines them in src/desktop/display_sdl.cpp.)
 void displayFlush() {}
 void displaySetUiMode(bool) {}
 void displaySetVideoRect(int, int) {}
+void displaySetVideoFill(int, int, bool) {}
 #endif
 
 void videoSetup()
 {
   printLog("Video Setup...");
+  // Decide whether the boot splash shows this run (see splashOnBootMagic above): a soft reboot
+  // (ESP.restart) skips it UNLESS the magic was set; any hardware reset (power-on / RST) shows it.
+  bool softReboot = (esp_reset_reason() == ESP_RST_SW);
+  splashActive = !softReboot || (splashOnBootMagic == SPLASH_ON_BOOT_MAGIC);
+  splashOnBootMagic = 0;   // consume the request; the next plain reboot then skips the splash
   tft.begin();
   tft.setRotation(3);
   tft.invertDisplay(true);
   tft.initDMA();
   tft.fillRect(0, 0, 320, 240, TFT_BLACK);
+#if defined(BOARD_DESKTOP)
+  // Desktop: the render loop runs on the MAIN thread (SDL window/events/present must live there);
+  // main() calls renderLoop(NULL) after spawning the CPU thread. Don't spawn it as a task here.
+  printLog("video: renderLoop runs on main thread (desktop)");
+#else
   TaskHandle_t h = xTaskCreateStaticPinnedToCore(renderLoop, "renderLoop", 8192, NULL, 1,
                                                  renderTaskStack, &renderTaskTCB, 0); // core 0
   printLog(h ? "video: renderLoop started" : "video: renderLoop FAILED");
+#endif
 
   // The render task (core 0) owns all the settings-window UI, and that includes BLOCKING SD
   // I/O: directory scans for the file browser and loading disk/PRG/CRT/D64 images. A single
@@ -44,7 +71,19 @@ void videoSetup()
   // idle task and the 5s task watchdog reboots the board mid-SD-transaction (which then wedges
   // the card -> "Card Mount Failed" until a power cycle). Since core 0 legitimately blocks on
   // SD by design, drop the idle-task WDT for this core. Core 1 (the CPU core) keeps its WDT.
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+  // IDF 5.x: disableCore0WDT() DELETES the idle task from the TWDT, but its idle hook keeps calling
+  // esp_task_wdt_reset() -> a "task not found" flood every idle tick. Instead RECONFIGURE the TWDT:
+  // stop monitoring the idle tasks (idle_core_mask=0 removes the hooks too) and make it non-panic
+  // with a long timeout, so the render loop's multi-second SD blocking can never reboot the board.
+  esp_task_wdt_config_t twdt = {};
+  twdt.timeout_ms     = 60000;
+  twdt.idle_core_mask = 0;
+  twdt.trigger_panic  = false;
+  esp_task_wdt_reconfigure(&twdt);
+#else
   disableCore0WDT();
+#endif
 }
 
 int red(int color) {
@@ -72,13 +111,14 @@ uint16_t last_x = 0;
 #define SPLASH_MS    12000   // generous: time to read the menu and tap a platform
 #define SPLASH_BTN_Y 164
 #define SPLASH_BTN_H 44
-static const int splashBtnX[5] = {6, 68, 130, 192, 254};   // pulled in from the right edge (touch is
-static const int splashBtnW    = 58;                       // less reliable at the extreme right)
+static const int splashBtnX[9] = {2, 37, 72, 107, 142, 177, 212, 247, 282};  // nine platforms across the 320px panel
+static const int splashBtnW    = 33;                                    // (33px + 2px gap at 35px pitch)
+static const char *splashLabels[9] = {"APPLE", "C64", "NES", "ATARI", "IIGS", "MSX", "SMS", "PCXT", "386"};
 
 static int splashHitTest(int16_t x, int16_t y)
 {
   if (y < SPLASH_BTN_Y || y >= SPLASH_BTN_Y + SPLASH_BTN_H) return -1;
-  for (int i = 0; i < 5; i++)
+  for (int i = 0; i < 9; i++)
     if (x >= splashBtnX[i] && x < splashBtnX[i] + splashBtnW) return i;
   return -1;
 }
@@ -94,7 +134,8 @@ static void splashDrawBtn(int i, const char *label, bool enabled)
   tft.drawRoundRect(x, y, w, h, 6, active ? TFT_WHITE : tft.color565(70, 78, 92));
   tft.setTextDatum(MC_DATUM);
   tft.setTextColor(enabled ? TFT_WHITE : tft.color565(110, 118, 130), face);
-  tft.drawString(label, x + w / 2, enabled ? y + h / 2 : y + h / 2 - 6, 2);
+  int lblFont = (strlen(label) >= 4) ? 1 : 2;   // 44px buttons: shrink 4+ char labels (APPLE/ATARI/IIGS) to fit
+  tft.drawString(label, x + w / 2, enabled ? y + h / 2 : y + h / 2 - 6, lblFont);
   if (!enabled) {
     tft.setTextColor(tft.color565(110, 118, 130), face);
     tft.drawString("SOON", x + w / 2, y + h - 12, 1);
@@ -109,18 +150,25 @@ static void splashFinish()           // boot the current platform
 
 static void splashSelect(uint8_t platform)
 {
-  if (platform == currentPlatform) { splashFinish(); return; }
-  currentPlatform = platform;        // switching platforms needs a reboot to re-init
-  saveConfig();
-  // ESP.restart() (an on-chip reset from firmware) reboots this board cleanly - unlike the host-side
-  // RTS reset which wedges it. Brief confirmation, then reboot; setup() inits the saved platform.
-  tft.setUiMode(true);
-  tft.fillScreen(TFT_BLACK);
+  // Deselect the previously highlighted button and mark the tapped one, swap the subtitle for a
+  // loading message, hold it for a second, then close the splash (or reboot if the platform
+  // changed, since setup() must re-init the new core).
+  uint8_t prev = currentPlatform;
+  currentPlatform = platform;          // drives the highlight in splashDrawBtn below
+  if (prev != platform) splashDrawBtn(prev, splashLabels[prev], true);   // redraw old as inactive
+  splashDrawBtn(platform, splashLabels[platform], true);                 // redraw new as active
+  tft.fillRect(0, 140, 320, 20, TFT_BLACK);            // wipe the "SELECT SYSTEM" subtitle
   tft.setTextDatum(MC_DATUM);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawString("LOADING...", 160, 110, 2);
+  tft.setTextColor(tft.color565(0, 200, 120), TFT_BLACK);
+  tft.drawString("Loading...", 160, 150, 2);
   displayFlush();
-  delay(700);
+  delay(1000);
+
+  if (prev == platform) { splashFinish(); return; }
+  // Switching platforms needs a reboot to re-init. ESP.restart() (an on-chip reset from firmware)
+  // reboots this board cleanly - unlike the host-side RTS reset which wedges it. currentPlatform is
+  // already the new platform; persist it so setup() inits the saved platform after the restart.
+  saveConfig();
   ESP.restart();
 }
 
@@ -142,6 +190,14 @@ static void splashService()
     splashDrawBtn(PLATFORM_NES,    "NES",    true);
     splashDrawBtn(PLATFORM_ATARI,  "ATARI",  true);
     splashDrawBtn(PLATFORM_IIGS,   "IIGS",   true);
+    splashDrawBtn(PLATFORM_MSX,    "MSX",    true);
+    splashDrawBtn(PLATFORM_SMS,    "SMS",    true);
+    splashDrawBtn(PLATFORM_PCXT,   "PCXT",   true);
+#if defined(BOARD_JC1060P470) || defined(BOARD_DESKTOP)
+    splashDrawBtn(PLATFORM_TINY386, "386",   true);    // i386 PC: P4 / desktop only
+#else
+    splashDrawBtn(PLATFORM_TINY386, "386",   false);   // S3 (not built here) / CYD (no PSRAM) -> shown as SOON
+#endif
     drawn = true;
   }
 
@@ -153,6 +209,10 @@ static void splashService()
     else if (b == PLATFORM_NES)   splashSelect(PLATFORM_NES);
     else if (b == PLATFORM_ATARI) splashSelect(PLATFORM_ATARI);
     else if (b == PLATFORM_IIGS)  splashSelect(PLATFORM_IIGS);
+    else if (b == PLATFORM_MSX)   splashSelect(PLATFORM_MSX);
+    else if (b == PLATFORM_SMS)   splashSelect(PLATFORM_SMS);
+    else if (b == PLATFORM_PCXT)  splashSelect(PLATFORM_PCXT);
+    else if (b == PLATFORM_TINY386) splashSelect(PLATFORM_TINY386);
     else if (b < 0)               splashFinish();   // tapped outside -> boot current
     return;
   }
@@ -216,9 +276,39 @@ void renderLoop(void *pvParameters)
       continue;
     }
 
+    // MSX startup overlay: hard error if no BIOS, or a brief "C-BIOS = no Disk BASIC" note.
+    if (currentPlatform == PLATFORM_MSX && msxRenderLoadWarning())
+    {
+      Vertical_blankingOn_Off = true;
+      vTaskDelay(pdMS_TO_TICKS(20));
+      continue;
+    }
+
+
+    // SMS startup overlay: held while no .sms/.bin ROM is loaded. Still poll touch so a tap opens
+    // SETTINGS (to pick a ROM); smsRenderLoadWarning() yields to the options window once it opens.
+    if (currentPlatform == PLATFORM_SMS && smsRenderLoadWarning())
+    {
+      oskPoll();                       // a screen tap opens SETTINGS even while the notice is up
+      Vertical_blankingOn_Off = true;
+      vTaskDelay(pdMS_TO_TICKS(20));
+      continue;
+    }
+
+    // Apple II startup overlay: held when the system ROMs are missing from /roms/apple2 on the SD card.
+    if (currentPlatform == PLATFORM_APPLE2 && apple2RenderLoadWarning())
+    {
+      Vertical_blankingOn_Off = true;
+      vTaskDelay(pdMS_TO_TICKS(20));
+      continue;
+    }
+
     // On-screen touch keyboard: poll touch every frame so its state is current
     // before we pick the raster geometry below.
     oskPoll();
+#if BOARD_PANEL_DSI
+    osgRender();   // redraw the on-screen virtual gamepad overlay (no-op unless NES/Atari/SMS + dirty)
+#endif
 
     // Modern touch-driven settings window takes over the whole screen (CPU paused).
     if (OptionsWindow)
@@ -238,6 +328,7 @@ void renderLoop(void *pvParameters)
 #endif
       displaySetUiMode(false);
       displaySetVideoRect(20, 200);      // VIC-II screen is 200 lines (logical y 20..220); fill-screen scales that
+      displaySetVideoFill(0, 320, true); // fill-screen stretches the full-width 320x200 picture to 100% (no aspect/bars)
       c64RenderFrame();                  // text screen (top 14 rows when the OSK is open)
       if (oskActive()) { displaySetUiMode(true); oskRender(); }  // keyboard owns the bottom (UI)
       Vertical_blankingOn_Off = true;
@@ -282,7 +373,41 @@ void renderLoop(void *pvParameters)
 #endif
       displaySetUiMode(false);
       displaySetVideoRect(24, 192);      // TIA picture is 192 lines centered in 240 (24px borders)
+      displaySetVideoFill(0, 320, true); // fill-screen stretches the full-width 320x192 picture to 100% (no aspect/bars)
       atariRenderFrame();
+      Vertical_blankingOn_Off = true;
+      vTaskDelay(pdMS_TO_TICKS(10));
+      continue;
+    }
+
+    // MSX1 core: the Z80 (core 1) runs the BIOS/BASIC; the VDP fills a 256x192 framebuffer that we
+    // convert + push here, centered with 32px side borders + 24px top/bottom (like NES/Atari).
+    if (currentPlatform == PLATFORM_MSX)
+    {
+#if BOARD_DISPLAY_GFX
+      if (clearScr) { tft.fillScreen(TFT_BLACK); clearScr = false; }   // wipe border after a menu
+#endif
+      displaySetUiMode(false);
+      displaySetVideoRect(24, 192);      // 192 active lines centered in 240
+      displaySetVideoFill(32, 256, true);// 256-wide picture starting at x=32
+      msxRenderFrame();
+      if (oskActive()) { displaySetUiMode(true); oskRender(); }   // on-screen keyboard overlays the bottom
+      Vertical_blankingOn_Off = true;
+      vTaskDelay(pdMS_TO_TICKS(10));
+      continue;
+    }
+
+    // SMS core: the Z80 (core 1) runs the cartridge; the VDP fills a 256x192 Mode 4 framebuffer that we
+    // convert (via the live CRAM palette) + push here, centered with 32px side borders (like MSX).
+    if (currentPlatform == PLATFORM_SMS)
+    {
+#if BOARD_DISPLAY_GFX
+      if (clearScr) { tft.fillScreen(TFT_BLACK); clearScr = false; }   // wipe border after a menu
+#endif
+      displaySetUiMode(false);
+      displaySetVideoRect(24, 192);      // 192 active lines centered in 240
+      displaySetVideoFill(32, 256, true);// 256-wide picture starting at x=32
+      smsRenderFrame();
       Vertical_blankingOn_Off = true;
       vTaskDelay(pdMS_TO_TICKS(10));
       continue;
@@ -298,6 +423,65 @@ void renderLoop(void *pvParameters)
       if (oskActive()) { displaySetUiMode(true); oskRender(); }   // on-screen keyboard overlays the bottom
       Vertical_blankingOn_Off = true;
       vTaskDelay(pdMS_TO_TICKS(33));      // ~30 fps text refresh
+      continue;
+    }
+
+    // PC-XT: the 8086 (core 1) runs the BIOS/DOS; render the CGA buffer here. pcxtRenderFrame() returns
+    // false when the picture is UNCHANGED -> we then skip the QSPI flush (setBypassCanvas), so core 0
+    // stops draining the shared MSPI bus and the 8086 runs much faster while the screen is static.
+    if (currentPlatform == PLATFORM_PCXT)
+    {
+#if BOARD_DISPLAY_GFX
+      if (clearScr) { tft.fillScreen(TFT_BLACK); tft.fillPanelBlack(); clearScr = false; pcxtForceRedraw(); }
+#endif
+      bool drew = pcxtRenderFrame();
+      if (oskActive()) { displaySetUiMode(true); oskRender(); drew = true; }
+#if BOARD_DISPLAY_GFX
+      if (!drew) tft.setBypassCanvas(true);   // nothing changed -> no flush this round (free the bus)
+#endif
+      Vertical_blankingOn_Off = true;
+#if defined(BOARD_DESKTOP)
+      vTaskDelay(pdMS_TO_TICKS(4));   // desktop: present is vsync-paced; the device's 16-40ms throttle
+                                      // (shared MSPI bus) just adds input lag here — keep it snappy
+#else
+      vTaskDelay(pdMS_TO_TICKS(drew ? 16 : 40));
+#endif
+      continue;
+    }
+
+    // tiny386 (Intel i386 + VGA): the i386 (core 1) runs SeaBIOS/DOS/Windows; nearest-scale the VGA
+    // framebuffer onto the panel here. tiny386RenderFrame() returns false when the picture is
+    // UNCHANGED -> skip the QSPI flush so core 0 stops draining the shared bus (like PC-XT).
+    if (currentPlatform == PLATFORM_TINY386)
+    {
+#if BOARD_DISPLAY_GFX
+      if (clearScr) { tft.fillScreen(TFT_BLACK); tft.fillPanelBlack(); clearScr = false; tiny386ForceRedraw(); }
+#endif
+      bool vgaDrew = tiny386RenderFrame();
+      bool osk = oskActive();
+      bool oskChanged = false;
+      if (osk) { displaySetUiMode(true); oskChanged = oskDirty(); oskRender(); }  // oskDirty before oskRender clears it
+#if BOARD_PANEL_DSI
+      if (osk && oskChanged && !vgaDrew) {
+        tft.flushOskBand();          // only the keyboard changed -> push just its band (cheap), and
+        tft.setBypassCanvas(true);   // skip the loop-top full 1024x600 composite (that made it laggy)
+      } else
+#endif
+      {
+#if BOARD_DISPLAY_GFX
+        if (!(vgaDrew || oskChanged)) tft.setBypassCanvas(true);   // nothing changed -> skip the flush
+#endif
+      }
+      Vertical_blankingOn_Off = true;
+      // Keyboard open: poll touch fast (12ms) so it stays responsive -- an idle frame is cheap (flush is
+      // gated above). Otherwise cap the render rate (~22 fps): a full 1024x600 frame costs a lot of PSRAM
+      // bandwidth and at 60 fps saturates the bus the i386 (core 1) shares, so throttling frees the CPU.
+#if defined(BOARD_DESKTOP)
+      vTaskDelay(pdMS_TO_TICKS(4));   // desktop: vsync-paced present; skip the device's 45-80ms bus-relief
+                                      // throttle so input + the VGA display stay responsive
+#else
+      vTaskDelay(pdMS_TO_TICKS(osk ? 12 : ((vgaDrew || oskChanged) ? 45 : 80)));
+#endif
       continue;
     }
 
@@ -329,6 +513,11 @@ void renderLoop(void *pvParameters)
     tft.setAddrWindow(0, 0, 320, 240);
     else
     tft.setAddrWindow(margin_x, margin_y, 280, rasterH);
+    // fill-screen: stretch the raster to 100% of the panel (no 4:3 aspect, no side bars). Mirror the
+    // horizontal extent of the addr window above so we sample exactly the columns the raster filled
+    // (full 320 for the 40-col branch; the centered 280 at margin_x for the graphics/80-col branches).
+    if (!OptionsWindow && AppleIIe && !Cols40_80 && !DHiResOn_Off) displaySetVideoFill(0, 320, true);
+    else                                                           displaySetVideoFill(margin_x, (int)screen_width, true);
     tft.startWrite();
     
     

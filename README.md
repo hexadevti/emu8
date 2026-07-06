@@ -1,10 +1,10 @@
-# emu6502
+# emu8
 
-**emu6502** is a multi-platform 6502/65xx retro-console emulator for low-cost ESP32 boards with a
-built-in TFT and microSD. Pick a system on the boot splash and it boots disk/cartridge images
+**emu8** is a multi-platform 8-bit retro-console emulator — 6502-family and Z80 cores — for low-cost
+ESP32 boards with a built-in TFT and microSD. Pick a system on the boot splash and it boots disk/cartridge images
 straight off a microSD card — no PC, no external ROM files.
 
-Five systems share one firmware, dispatched at runtime from the boot splash — four mature cores plus
+Seven systems share one firmware, dispatched at runtime from the boot splash — six playable cores plus
 the **Apple IIGS, which is still in development** (experimental):
 
 | System | CPU | Status | Image formats |
@@ -13,32 +13,41 @@ the **Apple IIGS, which is still in development** (experimental):
 | **Commodore 64** | 6510 | Playable (VIC-II + SID + CIA); `.crt` cartridge support is partial | `.prg` `.d64` `.crt` |
 | **NES** | 2A03 (6502) | Playable; mappers 0–4 | `.nes` (iNES) |
 | **Atari 2600** | 6507 (6502) | Playable | `.a26` `.bin` (2K/4K/8K/16K/32K) |
+| **MSX1** | Z80 | Playable (TMS9918 VDP + AY-3-8910 PSG); BIOS from SD or embedded C-BIOS | `.rom` `.mx1` `.dsk` |
+| **Sega Master System** | Z80 | Playable (Mode 4 VDP + SN76489 PSG); Sega mapper + line interrupts; boots cartridges directly (no BIOS) | `.sms` `.bin` |
 | **Apple IIGS** | 65C816 | **In development** — boots ROM 01, 40-col text + HiRes/DHiRes, standard ProDOS 5.25″/800 KB disks, 1-bit speaker. SHR-heavy/protected titles and GS-native (Ensoniq) sound are not done. | `.dsk` `.po` `.2mg` `.hdv` |
 
 > Derived from [hexadevti/Apple2Esp32](https://github.com/hexadevti/Apple2Esp32). The original was a
-> single-system Apple II emulator; emu6502 generalises the renderer, input, audio and SD layers into a
+> single-system Apple II emulator; emu8 generalises the renderer, input, audio and SD layers into a
 > shared core and adds C64, NES and Atari 2600 emulation plus a second hardware target.
 
 ---
 
 ## Supported boards
 
-emu6502 builds for **two boards** from the same source tree — the target is selected at *compile time*
-by a single macro (`-DBOARD_JC4827W543`), defined per build task. The hardware abstraction lives in
-[`board.h`](board.h) as capability macros (display backend, audio path, input path, touch bus) that the
-shared code switches on.
+emu8 builds for **three boards** from the same source tree — the target is selected at *compile time*
+by a single macro (`-DBOARD_JC4827W543` / `-DBOARD_JC1060P470`), defined per build task. The hardware
+abstraction lives in [`board.h`](board.h) as capability macros (display backend, audio path, input
+path, touch bus) that the shared code switches on.
 
-| | **ESP32 CYD** (default) | **Guition JC4827W543** |
-| --- | --- | --- |
-| MCU | ESP32-WROOM-32 (no PSRAM) | ESP32-S3 (OPI PSRAM) |
-| Display | ILI9341 320×240 SPI, via TFT_eSPI | NV3041A 480×272 QSPI, via Arduino_GFX |
-| Input | PS/2 keyboard + analog joystick/paddles | **USB SNES gamepad + USB keyboard** (USB-HID host) |
-| On-screen keyboard | XPT2046 touch (display bus) | XPT2046 touch (dedicated SPI bus) |
-| Audio | Internal DAC (GPIO26) → on-board amp | I2S → NS4168 Class-D amp |
-| Storage | microSD (VSPI) | microSD (shared HSPI w/ touch) |
+| | **ESP32 CYD** (default) | **Guition JC4827W543** | **Guition JC1060P470** |
+| --- | --- | --- | --- |
+| MCU | ESP32-WROOM-32 (no PSRAM) | ESP32-S3 (OPI PSRAM) | ESP32-P4 (32MB PSRAM) |
+| Display | ILI9341 320×240 SPI, via TFT_eSPI | NV3041A 480×272 QSPI, via Arduino_GFX | JD9165 1024×600 **MIPI-DSI**, via esp_lcd |
+| Input | PS/2 keyboard + analog joystick/paddles | **USB SNES gamepad + USB keyboard** (USB-HID host) | USB-HID host + touch |
+| On-screen keyboard | XPT2046 touch (display bus) | XPT2046 touch (dedicated SPI bus) | **GT911** capacitive (I2C) |
+| Audio | Internal DAC (GPIO26) → on-board amp | I2S → NS4168 Class-D amp | I2S → **ES8311 codec** → NS4150B amp |
+| Storage | microSD (VSPI) | microSD (shared HSPI w/ touch) | microSD (**SD_MMC** / SDIO) |
 
 The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_ESP32-2432S024)
 (2.4″, ILI9341); the 2.8″ ESP32-2432S028 shares the same driver and pin map.
+
+> **JC1060P470 (ESP32-P4)** — working & verified on hardware (display, GT911 touch, on-screen keyboard,
+> ES8311 audio, SD_MMC, and USB host via a vendored IDF-5-patched EspUsbHost fork). It is built against Arduino-ESP32
+> **core 3.x** (IDF 5.x) on an *isolated* toolchain (its own `ARDUINO_DIRECTORIES_DATA/USER` at
+> `~/.emu6502-p4`, outside the repo), so the CYD/S3 builds stay on 2.0.17 and unchanged. It needs the
+> JD9165 `esp_lcd` vendor driver dropped in — see [`src/shared/p4/README.md`](src/shared/p4/README.md)
+> for the one-time setup, status notes, and fallback levers.
 
 ---
 
@@ -64,8 +73,8 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
 
 ### Shared core
 
-- **Boot-splash platform selector** — tap **APPLE / C64 / NES / ATARI / IIGS** to choose a system; the
-  selection persists in EEPROM and auto-boots next time. (**IIGS** is experimental / in development.)
+- **Boot-splash platform selector** — tap **APPLE / C64 / NES / ATARI / IIGS / MSX / SMS** to choose a
+  system; the selection persists in EEPROM and auto-boots next time. (**IIGS** is experimental / in development.)
 - **microSD storage** for every platform, with on-screen file browsers per system.
 - **On-screen touch keyboard** (OSK) on both boards, plus PS/2 on the CYD and a **USB keyboard** on the JC4827W543.
 - **Audio** routed to the board's amplifier — internal DAC on the CYD, I2S Class-D on the S3.
@@ -110,7 +119,7 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
 
 ## Boot & platform selection
 
-On power-up emu6502 shows a boot splash with five buttons — **APPLE**, **C64**, **NES**, **ATARI**,
+On power-up emu8 shows a boot splash with five buttons — **APPLE**, **C64**, **NES**, **ATARI**,
 **IIGS** (the last still in development). Tap one to switch systems (this saves the choice and reboots
 into it); tap elsewhere or wait for the timeout to boot the currently-selected platform. On the CYD a
 joystick button also dismisses the splash.
@@ -139,10 +148,11 @@ USB keyboard mapping (works on every platform):
 | --- | --- |
 | Letters / digits / symbols | Type into the active system (Apple/IIGS keycode, C64 keyboard matrix, …) |
 | Arrow keys | Cursor / d-pad |
-| `F12` | Open / close the options menu (arrows navigate, `Enter` activates) |
+| `F10` | Open / close the options menu (arrows navigate, `Enter` activates) |
 | `F11` | Apple / IIGS **Reset** (CPU reset) |
 | NES: arrows + `X`=A · `Z`=B · `Enter`=Start · `Tab`=Select | NES controller 1 |
 | Atari: arrows + `Space`/`X`=Fire · `Enter`=Reset · `Tab`=Select | Atari stick + console switches |
+| C64 (when **JOYSTICK** is on): arrows + `Space`=Fire | C64 joystick (port per **JOY PORT**) |
 
 > Only keyboards that expose the standard HID **boot** protocol are decoded, and one USB device works at
 > a time (no hub). The native USB port has no VBUS switching, so **hot-swapping devices needs a tap of
@@ -235,6 +245,8 @@ arduino-cli upload -p COM5 --fqbn esp32:esp32:esp32s3:PSRAM=opi,PartitionScheme=
    - C64: `.prg` / `.d64` / `.crt`
    - NES: `.nes`
    - Atari 2600: `.a26` / `.bin`
+   - MSX1: `.rom` / `.mx1` / `.dsk` (plus an `MSXBIOS.ROM`, or it falls back to the embedded C-BIOS)
+   - Sega Master System: `.sms` / `.bin`
 3. Insert the card, power on, pick a platform on the splash, then choose an image from its on-screen
    file browser.
 
@@ -312,7 +324,7 @@ emulated system. The top-level sketch wires them together:
 
 | Path | Purpose |
 | --- | --- |
-| [`emu6502.ino`](emu6502.ino) | `setup()` / `loop()` — per-platform init and the main dispatch |
+| [`emu8.ino`](emu8.ino) | `setup()` / `loop()` — per-platform init and the main dispatch |
 | [`board.h`](board.h) | Board selection (CYD vs JC4827W543), capability macros, pin map |
 | [`emu.h`](emu.h) · [`proto.h`](proto.h) · [`globals.cpp`](globals.cpp) | Shared state (`extern`), prototypes, definitions |
 | [`rom.h`](rom.h) | Embedded Apple II/IIe ROMs |

@@ -1,4 +1,4 @@
-// emu6502 - multi-platform retro emulator for the ESP32 Cheap Yellow Display
+// emu8 - multi-platform retro emulator for the ESP32 Cheap Yellow Display
 // (ESP32 + ILI9341 TFT via TFT_eSPI), SD-card storage.
 //
 // This header declares the shared state as `extern`; the single definitions live in
@@ -13,10 +13,16 @@
 #include <SPI.h>
 #if BOARD_HAS_TFT_ESPI
   #include <TFT_eSPI.h>
+#elif defined(BOARD_DESKTOP)
+  #include "src/desktop/display_sdl.h"  // DisplayGFX: TFT_eSPI-compatible SDL2 backend (desktop)
 #else
   #include "src/shared/display_gfx.h"   // DisplayGFX: TFT_eSPI-compatible Arduino_GFX backend
 #endif
+#if BOARD_SD_MMC
+#include "SD_MMC.h"     // ESP32-P4: microSD over the SDMMC (SDIO) peripheral, not SPI
+#else
 #include "SD.h"
+#endif
 #include <EEPROM.h>
 #include "rom.h"
 #include <string>
@@ -32,6 +38,7 @@
 #include <map>
 #include <condition_variable>
 
+#if BOARD_HAS_BLE
 #include "BLEDevice.h"
 
 // BLE (currently unused; kept for reference)
@@ -42,6 +49,7 @@ static bool connected = false;
 static bool doScan = false;
 static BLERemoteCharacteristic* pRemoteCharacteristic;
 static BLEAdvertisedDevice* myDevice;
+#endif
 
 extern size_t content_len;
 extern File file;
@@ -50,13 +58,24 @@ extern String filelist;
 extern int freeSpace;
 
 // SD storage
+#if BOARD_SD_MMC
+#define FSTYPE SD_MMC
+#else
 #define FSTYPE SD
+#endif
 // VFS mount path the Arduino SD class uses (the default mountpoint passed to SD.begin() in
 // FSSetup()). Raw opendir()/readdir() need the full VFS path, so file scans prefix their
 // SD-relative directory with this. If FSSetup() ever passes a different mountpoint, update it.
+#if defined(BOARD_DESKTOP)
+#define SD_VFS_ROOT "./sdcard"   // desktop: the emulated SD card is this host dir (see sd_host.cpp).
+#else
 #define SD_VFS_ROOT "/sd"
+#endif
 #define SD_SPI_HZ   20000000   // SD SPI clock (Hz). 20MHz >> the 4MHz default -> ~5x faster reads.
-extern SPIClass hspi;          // SD HSPI bus (shared with the XPT2046 touch on the JC4827W543)
+#if !BOARD_SD_MMC
+extern SPIClass hspi;          // SD HSPI bus (shared with the XPT2046 touch on the JC4827W543).
+                               // Absent on the P4 (SD is SD_MMC, touch is I2C — no shared SPI bus).
+#endif
 // Serializes XPT2046 touch reads against SD-card operations: both use the same HSPI bus, and the
 // SPIClass mutex only protects ONE transaction, not the SD library's multi-transaction
 // (command -> data) sequences. A touch read sneaking in mid-SD-op corrupted the card and the USB
@@ -69,6 +88,10 @@ extern std::vector<std::string> diskFiles;
 extern std::vector<std::string> c64Files;
 extern std::vector<std::string> nesFiles;
 extern std::vector<std::string> atariFiles;   // Atari 2600 .a26/.bin ROMs on SD
+extern std::vector<std::string> msxFiles;      // MSX1 .rom/.mx1/.dsk images on SD
+extern std::vector<std::string> smsFiles;      // SMS .sms/.bin ROM images on SD
+extern std::vector<std::string> pcFiles;       // PCXT .img/.ima/.dsk/.vhd disk images on SD
+extern std::vector<std::string> tiny386Files;  // tiny386 .img/.ima/.vhd/.hdd disk images on SD
 
 // Board Pins, capability macros, and the display backend selection now live in board.h
 // (included above). Pins: SD_*, KEYBOARD_*, ANALOG_*, LED_PIN, DIGITAL_BUTTON12_PIN, SPEAKER_PIN.
@@ -105,7 +128,7 @@ extern char keymem;
 #define JOY_MAX 1024
 #define JOY_MID 512
 #define JOY_MIN 0
-#define EEPROM_SIZE 1024
+#define EEPROM_SIZE 1664   // ... + Tiny386FileName (1280, C:) + Tiny386FileNameA (1408, A:)
 extern int fnSelected;
 extern int joystickCycles0;
 extern int joystickCycles1;
@@ -132,6 +155,8 @@ extern bool upscale;
 extern bool smoothUpscale;
 extern bool screenFill;   // JC4827W543: scale the emulator video to fill the panel (keep 4:3 aspect)
 extern uint8_t nesDisplaySkip;  // JC4827W543 NES: draw 1 of every N emulated frames (1=every frame; 2-3 trade picture smoothness for game speed)
+extern bool nesFast;            // NES: false = NORMAL (paced ~60fps/1.79MHz), true = FAST (uncapped)
+extern float nesMeasuredMhz;    // NES: measured 2A03 speed (derived from fps x cycles-per-frame)
 extern bool AppleIIe;
 extern bool OptionsWindow;
 extern bool DebugWindow;
@@ -151,8 +176,8 @@ extern uint8_t volume;
 
 // Target system for the multi-platform emulator. Apple II is implemented; C64 and
 // NES are placeholders selectable from the boot splash (see src/shared/video.cpp
-// splashService and the dispatch in emu6502.ino). Persisted in EEPROM.
-enum Platform : uint8_t { PLATFORM_APPLE2 = 0, PLATFORM_C64 = 1, PLATFORM_NES = 2, PLATFORM_ATARI = 3, PLATFORM_IIGS = 4 };
+// splashService and the dispatch in emu8.ino). Persisted in EEPROM.
+enum Platform : uint8_t { PLATFORM_APPLE2 = 0, PLATFORM_C64 = 1, PLATFORM_NES = 2, PLATFORM_ATARI = 3, PLATFORM_IIGS = 4, PLATFORM_MSX = 5, PLATFORM_SMS = 6, PLATFORM_PCXT = 7, PLATFORM_TINY386 = 8 };
 extern uint8_t currentPlatform;
 
 // Log Config
@@ -173,17 +198,44 @@ extern int logLineCount;
 #define JoyPortEEPROMaddress 10        // C64: joystick port (1 or 2)
 #define ScreenFillEEPROMaddress 11     // JC4827W543: fill-screen video upscale (char: 1 = fill)
 #define NesDisplaySkipEEPROMaddress 12 // JC4827W543 NES: display frame-skip 1..3 (char)
+#define MsxSpeedEEPROMaddress 13       // MSX: 1 = FAST (uncapped) / 0 = NORMAL (paced to 3.58 MHz)
+#define SmsSpeedEEPROMaddress 14       // SMS: 1 = FAST (uncapped) / 0 = NORMAL (paced to 3.58 MHz)
+#define PcxtSpeedEEPROMaddress 15      // PCXT: reserved speed flag (currently always uncapped)
+#define NesSpeedEEPROMaddress 17       // NES: 1 = FAST (uncapped) / 0 = NORMAL (paced ~60fps/1.79MHz)
 #define NewDeviceConfigEEPROMaddress 50
 #define DiskFileNameEEPROMaddress 128
 #define HdFileNameEEPROMaddress 256
 #define C64FileNameEEPROMaddress 384   // C64: last-loaded .prg/.d64/.crt (for autoload)
 #define NesFileNameEEPROMaddress 512   // NES: last-loaded .nes (auto-loaded on boot)
 #define AtariFileNameEEPROMaddress 640 // Atari: last-loaded .a26/.bin (auto-loaded on boot)
+#define MsxFileNameEEPROMaddress 768   // MSX: last-loaded .rom cartridge (auto-loaded on boot)
+#define SmsFileNameEEPROMaddress 896   // SMS: last-loaded .sms/.bin ROM (auto-loaded on boot)
+#define PcxtFileNameEEPROMaddress 1024 // PCXT: last-mounted A: floppy image (auto-mounted on boot)
+#define PcxtHdFileNameEEPROMaddress 1152 // PCXT: last-mounted C: hard-disk image (auto-mounted on boot)
+#define Tiny386FileNameEEPROMaddress 1280 // tiny386: last C: hard-disk image (auto-mounted on boot)
+#define Tiny386FileNameAEEPROMaddress 1408 // tiny386: last A: floppy image (auto-mounted on boot)
 extern String selectedDiskFileName;
 extern String selectedHdFileName;
 extern String selectedC64FileName;
 extern String selectedNesFileName;   // NES: currently-loaded ROM (settings file browser marker)
 extern String selectedAtariFileName; // Atari: currently-loaded ROM (settings file browser marker)
+extern String selectedMsxFileName;   // MSX: currently-loaded .rom cartridge (settings file browser marker)
+extern bool msxFast;                 // MSX: true = run uncapped (FAST), false = pace to real 3.58 MHz
+extern float msxMeasuredMhz;         // MSX: measured uncapped Z80 speed (one-time boot benchmark)
+extern String selectedSmsFileName;   // SMS: currently-loaded .sms/.bin ROM (settings file browser marker)
+extern bool smsFast;                 // SMS: true = run uncapped (FAST), false = pace to real 3.58 MHz
+extern float smsMeasuredMhz;         // SMS: measured uncapped Z80 speed (one-time boot benchmark)
+extern String selectedPcFileName;    // PCXT: A: floppy image (settings file browser marker)
+extern String selectedPcHdFileName;  // PCXT: C: hard-disk image (auto-mounted on boot)
+extern bool pcFast;                  // PCXT: reserved (8086 always runs uncapped for now)
+extern float pcMeasuredMhz;          // PCXT: measured 8086 equivalent speed (one-time boot benchmark)
+extern String selectedTiny386FileName; // tiny386: C: hard-disk image (settings browser marker / auto-mount)
+extern String selectedTiny386FileNameA; // tiny386: A: floppy image (settings browser marker / auto-mount)
+extern float tiny386MeasuredMhz;     // tiny386: measured i386 throughput (one-time boot benchmark)
+extern float appleMeasuredMhz;       // Apple II: live measured 6502 speed (updated in cpuLoop)
+extern float appleClockMhz;          // Apple II: target clock when throttled (1.0 = stock 1 MHz)
+extern volatile int  g_pcSpkFreq;    // PCXT PC-speaker: PIT ch2 frequency (Hz), read by the audio ISR
+extern volatile bool g_pcSpkOn;      // PCXT PC-speaker: gate+data enabled (port 0x61), read by the audio ISR
 extern bool c64Autoload;          // C64: auto-load selectedC64FileName on boot
 extern uint8_t joyPort;           // C64: joystick port (1 or 2)
 extern String NewDeviceConfig;

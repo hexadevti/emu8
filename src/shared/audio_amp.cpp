@@ -12,6 +12,9 @@
 #if !BOARD_AUDIO_DAC
 
 #include "driver/i2s.h"
+#if BOARD_AUDIO_CODEC
+#include "p4/es8311.h"     // ES8311 codec (JC1060P470): configured over I2C, then fed via I2S
+#endif
 
 // Install the I2S driver (once) and route it to the amp pins. Idempotent across cores.
 void ampBegin(int sampleRate) {
@@ -27,17 +30,31 @@ void ampBegin(int sampleRate) {
   cfg.dma_buf_count = 8;
   cfg.dma_buf_len = 128;
   cfg.use_apll = false;
+#if BOARD_AUDIO_CODEC
+  cfg.mclk_multiple = I2S_MCLK_MULTIPLE_256;          // ES8311 runs off MCLK = 256 * Fs
+#endif
   if (i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL) != ESP_OK) { printLog("amp: I2S install failed"); return; }
   i2s_pin_config_t pins = {};
-  pins.mck_io_num = I2S_PIN_NO_CHANGE;
+#if BOARD_AUDIO_CODEC
+  pins.mck_io_num = I2S_MCLK_PIN;                     // codec needs a master clock
+#else
+  pins.mck_io_num = I2S_PIN_NO_CHANGE;                // dumb amp (S3): no MCLK
+#endif
   pins.bck_io_num = I2S_BCLK_PIN;
   pins.ws_io_num = I2S_LRCLK_PIN;
   pins.data_out_num = I2S_DOUT_PIN;
   pins.data_in_num = I2S_PIN_NO_CHANGE;
   i2s_set_pin(I2S_NUM_0, &pins);
   i2s_zero_dma_buffer(I2S_NUM_0);
-  done = true;
+#if BOARD_AUDIO_CODEC
+  // Bring up the ES8311 (I2C) and un-mute the NS4150B amp via its enable GPIO.
+  es8311Init((uint32_t)sampleRate);
+  if (AUDIO_SPK_EN_PIN >= 0) { pinMode(AUDIO_SPK_EN_PIN, OUTPUT); digitalWrite(AUDIO_SPK_EN_PIN, HIGH); }
+  printLog("amp: ES8311 codec + I2S output on");
+#else
   printLog("amp: I2S external amp output on");
+#endif
+  done = true;
 }
 
 // Write `n` samples that are in the cores' DAC format (8-bit value in the HIGH byte, i.e.

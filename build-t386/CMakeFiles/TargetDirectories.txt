@@ -1,0 +1,3 @@
+C:/Users/lucia/repos/emu6502/build-t386/CMakeFiles/emu6502.dir
+C:/Users/lucia/repos/emu6502/build-t386/CMakeFiles/edit_cache.dir
+C:/Users/lucia/repos/emu6502/build-t386/CMakeFiles/rebuild_cache.dir

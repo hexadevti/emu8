@@ -1,8 +1,0 @@
-
-Valid values to ESP32 Dev Module
-
-espressif@2.0.17
-
-ESP32Lib@0.3.4
-
-TFT_eSPI@2.5.43
