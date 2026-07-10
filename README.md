@@ -4,8 +4,8 @@
 ESP32 boards with a built-in TFT and microSD. Pick a system on the boot splash and it boots disk/cartridge images
 straight off a microSD card — no PC, no external ROM files.
 
-Seven systems share one firmware, dispatched at runtime from the boot splash — six playable cores plus
-the **Apple IIGS, which is still in development** (experimental):
+Nine systems share one firmware, dispatched at runtime from the boot splash — the classic 8-bit cores
+plus the experimental **Apple IIGS**, **PC-XT** and **386** targets that are still in development:
 
 | System | CPU | Status | Image formats |
 | --- | --- | --- | --- |
@@ -16,6 +16,8 @@ the **Apple IIGS, which is still in development** (experimental):
 | **MSX1** | Z80 | Playable (TMS9918 VDP + AY-3-8910 PSG); BIOS from SD or embedded C-BIOS | `.rom` `.mx1` `.dsk` |
 | **Sega Master System** | Z80 | Playable (Mode 4 VDP + SN76489 PSG); Sega mapper + line interrupts; boots cartridges directly (no BIOS) | `.sms` `.bin` |
 | **Apple IIGS** | 65C816 | **In development** — boots ROM 01, 40-col text + HiRes/DHiRes, standard ProDOS 5.25″/800 KB disks, 1-bit speaker. SHR-heavy/protected titles and GS-native (Ensoniq) sound are not done. | `.dsk` `.po` `.2mg` `.hdv` |
+| **PC-XT** | Intel 8086 | **In development** — fabgl-based IBM PC-XT: BIOS POST, CGA text/graphics, PC speaker; mounts floppy (A:) and hard-disk (C:) images and boots DOS. BIOS from `/roms/pcxt/bios.bin` | `.img` `.ima` `.dsk` `.vhd` `.hdd` |
+| **386** | Intel i386 | **In development** — vendored [tiny386](https://github.com/hchunhui/tiny386) core + VGA, SeaBIOS/VGABIOS from `/roms/tiny386`; PS/2 keyboard + mouse, A:/C: disk mounts, boots DOS and heavier PC OSes. PSRAM-heavy, so it targets the **P4** (not built for the S3) | `.img` `.ima` `.vhd` `.hdd` |
 
 > Derived from [hexadevti/Apple2Esp32](https://github.com/hexadevti/Apple2Esp32). The original was a
 > single-system Apple II emulator; emu8 generalises the renderer, input, audio and SD layers into a
@@ -59,6 +61,7 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
 - [On-screen options menu](#on-screen-options-menu)
 - [Software prerequisites](#software-prerequisites)
 - [Build & flash](#build--flash)
+- [Desktop (SDL2) debug build](#desktop-sdl2-debug-build)
 - [microSD card preparation](#microsd-card-preparation)
 - [Display configuration (CYD / TFT_eSPI)](#display-configuration-cyd--tft_espi)
 - [Pin assignments (CYD)](#pin-assignments-cyd)
@@ -73,8 +76,9 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
 
 ### Shared core
 
-- **Boot-splash platform selector** — tap **APPLE / C64 / NES / ATARI / IIGS / MSX / SMS** to choose a
-  system; the selection persists in EEPROM and auto-boots next time. (**IIGS** is experimental / in development.)
+- **Boot-splash platform selector** — tap **APPLE / C64 / NES / ATARI / IIGS / MSX / SMS / PCXT / 386**
+  to choose a system; the selection persists in EEPROM and auto-boots next time. (**IIGS**, **PCXT** and
+  **386** are experimental / in development.)
 - **microSD storage** for every platform, with on-screen file browsers per system.
 - **On-screen touch keyboard** (OSK) on both boards, plus PS/2 on the CYD and a **USB keyboard** on the JC4827W543.
 - **Audio** routed to the board's amplifier — internal DAC on the CYD, I2S Class-D on the S3.
@@ -115,14 +119,50 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
   auto-detection. Whole ROM held in RAM (no SD streaming).
 - Analog stick / USB gamepad → joystick + console switches.
 
+### MSX1
+
+- **Z80** CPU (shared with the SMS core), **TMS9918** VDP, **AY-3-8910** PSG and the **8255 PPI**;
+  64 KB work RAM in slot 3.
+- Loads `.rom` / `.mx1` cartridges and `.dsk` floppies. BIOS is read from an `MSXBIOS.ROM` on the SD
+  card, or falls back to the **embedded C-BIOS** (no Disk BASIC in that case).
+- USB keyboard / on-screen keyboard for typing, joystick/gamepad on controller port 1.
+
+### Sega Master System
+
+- **Z80** CPU, **315-5124** VDP (**Mode 4** tile/sprite mode plus the TMS9918 legacy modes and line
+  interrupts) and the **SN76489** PSG.
+- Boots cartridge ROMs directly at `PC=0x0000` — **no BIOS** needed. **Sega memory mapper** for
+  bank-switched carts; `.sms` / `.bin` images.
+- 8-way d-pad + two fire buttons on controller port 1; **F11** = the SMS **PAUSE** button (NMI).
+
+### PC-XT *(in development)*
+
+- fabgl-derived **Intel 8086** IBM PC-XT: runs the embedded PC BIOS (POST text in the CGA buffer),
+  **CGA** text/graphics and the **PC speaker**; 1 MB main RAM.
+- Mounts disk images as **A:** (floppy) or **C:** (hard disk) — `.img` / `.ima` / `.dsk` / `.vhd` /
+  `.hdd` — and boots **MS-DOS**. Files are auto-routed to A:/C: by size. BIOS loads from
+  `/roms/pcxt/bios.bin` on the SD card.
+- USB keyboard → XT scancodes; gamepad → arrow/enter injection.
+
+### 386 *(in development)*
+
+- Vendored **[tiny386](https://github.com/hchunhui/tiny386)** (hchunhui, BSD-3) **Intel i386** PC with
+  **VGA** (RGB565 framebuffer, nearest-scaled to the panel). **SeaBIOS** + **VGABIOS** are read from
+  `/roms/tiny386` on the SD card.
+- **PS/2 keyboard + mouse** emulation, A:/C: disk mounts (`.img` / `.ima` / `.vhd` / `.hdd`), boots
+  MS-DOS and heavier PC operating systems.
+- The machine is allocated in PSRAM, so it targets the **JC1060P470 (ESP32-P4)** — it is **not built
+  for the S3** (too large for that toolchain).
+
 ---
 
 ## Boot & platform selection
 
-On power-up emu8 shows a boot splash with five buttons — **APPLE**, **C64**, **NES**, **ATARI**,
-**IIGS** (the last still in development). Tap one to switch systems (this saves the choice and reboots
-into it); tap elsewhere or wait for the timeout to boot the currently-selected platform. On the CYD a
-joystick button also dismisses the splash.
+On power-up emu8 shows a boot splash with one button per system — **APPLE**, **C64**, **NES**,
+**ATARI**, **IIGS**, **MSX**, **SMS**, **PCXT** and **386** (the IIGS, PCXT and 386 still in
+development). Tap one to switch systems (this saves the choice and reboots into it); tap elsewhere or
+wait for the timeout to boot the currently-selected platform. On the CYD a joystick button also
+dismisses the splash.
 
 ---
 
@@ -237,6 +277,40 @@ arduino-cli upload -p COM5 --fqbn esp32:esp32:esp32s3:PSRAM=opi,PartitionScheme=
 
 ---
 
+## Desktop (SDL2) debug build
+
+The **same** emulator code also builds as a native PC program (`BOARD_DESKTOP`) so the cores can be run
+under **gdb, sanitizers and second-by-second iteration** — it is a *debug target*, not a separate
+emulator. Only the hardware leaves (display / audio / input / SD / EEPROM) are swapped, behind
+`#if defined(BOARD_DESKTOP)`; the `arduino-cli` device build never defines `BOARD_DESKTOP`, so the
+firmware binaries stay byte-for-byte identical.
+
+Fidelity choices: **multi-thread faithful** (each FreeRTOS task → a `std::thread`), **32-bit `-m32`**
+(same `long`/pointer widths as the Xtensa ESP32), and an **SDL2 interactive** window.
+
+```sh
+# Windows (MSYS2 MINGW32 shell) — native .exe + gdb:
+cmake -G "MinGW Makefiles" -S . -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build -j && ./build/emu8.exe
+
+# WSL/Linux + ThreadSanitizer (catches the multi-thread races):
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DEMU_SANITIZE=thread
+cmake --build build -j && ./build/emu8
+```
+
+Runtime: put ROM/disk images under `./sdcard` (the emulated SD card; override with `EMU_SD_DIR`);
+settings persist to `./eeprom.bin`. `F10` opens the settings/file-browser menu, `F11`/`F12` are the
+platform reset/menu keys. `ESP.restart()` maps to a process exit, so set `EMU_PLATFORM=<name>` to boot
+a platform directly (also the deterministic choice for gdb).
+
+**Status:** builds & runs (MinGW-w64 i686 / SDL2) and is smoke-tested booting **Apple II** and **MSX1**
+to `Ready.`. Per-platform polish (upscale options, gamepad maps) is ongoing; the **PC-XT / fabgl**
+runtime on desktop is **Phase 3** (currently a stub — selecting it on desktop is inert, though it runs
+on the device). Full setup, toolchain and status notes live in
+[`src/desktop/README.md`](src/desktop/README.md).
+
+---
+
 ## microSD card preparation
 
 1. Format a microSD card as **FAT32**.
@@ -247,6 +321,8 @@ arduino-cli upload -p COM5 --fqbn esp32:esp32:esp32s3:PSRAM=opi,PartitionScheme=
    - Atari 2600: `.a26` / `.bin`
    - MSX1: `.rom` / `.mx1` / `.dsk` (plus an `MSXBIOS.ROM`, or it falls back to the embedded C-BIOS)
    - Sega Master System: `.sms` / `.bin`
+   - PC-XT: `.img` / `.ima` / `.dsk` / `.vhd` / `.hdd` (plus the BIOS at `/roms/pcxt/bios.bin`)
+   - 386: `.img` / `.ima` / `.vhd` / `.hdd` (plus SeaBIOS + VGABIOS under `/roms/tiny386/`)
 3. Insert the card, power on, pick a platform on the splash, then choose an image from its on-screen
    file browser.
 
@@ -334,7 +410,14 @@ emulated system. The top-level sketch wires them together:
 | [`src/c64/`](src/c64/) | 6510, VIC-II, SID, CIA, keyboard, disk, `.crt` loader, ROMs |
 | [`src/nes/`](src/nes/) | 2A03 CPU, PPU, APU, iNES loader, mappers 0–4 |
 | [`src/atari/`](src/atari/) | 6507 CPU, TIA, RIOT, cartridge bank-switching, audio |
+| [`src/z80/`](src/z80/) | Shared Z80 CPU core (MSX1 + SMS) |
+| [`src/msx/`](src/msx/) | MSX1 — TMS9918 VDP, AY-3-8910 PSG, 8255 PPI, slot/BIOS, disk |
+| [`src/sms/`](src/sms/) | Sega Master System — 315-5124 VDP (Mode 4), SN76489 PSG, Sega mapper, cart loader |
+| [`src/pcxt/`](src/pcxt/) | PC-XT — fabgl i8086 machine, CGA, PC speaker, disk mount (in development) |
+| [`src/tiny386/`](src/tiny386/) | 386 — vendored tiny386 i386 + VGA core and emu8 glue (in development) |
 | [`src/iigs/`](src/iigs/) | Apple IIGS core — 65C816, banked memory, ROM 01 boot, video, disk (in development) + the original feasibility benchmark |
+| [`src/desktop/`](src/desktop/) | SDL2 desktop debug build — Arduino/FreeRTOS shims, SDL display/audio/input backends (see its [README](src/desktop/README.md)) |
+| [`host/`](host/) | Off-device debug harnesses (MSX / SMS / IIGS cores on a PC) |
 | [`data/`](data/) · [`resources/`](resources/) | Sample disk images / test files |
 
 ---
