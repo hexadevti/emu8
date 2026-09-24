@@ -1,3 +1,10 @@
+// This SMS translation unit is compiled out entirely on boards that clear
+// BOARD_HAS_Z80_CORES (the PicoCalc's original RP2040 mainboard -- see board.h for why).
+// emu.h must be included FIRST because it is what pulls in board.h and defines the macro;
+// the guard below then empties the file, handing this core's static RAM to the Apple II.
+#include "../../emu.h"
+#if BOARD_HAS_Z80_CORES
+
 // sms_psg.cpp - Texas Instruments SN76489 PSG for the SMS core. Unlike the MSX AY-3-8910 there is a
 // SINGLE write port and no envelope generator: 3 square-tone channels + 1 noise channel, each with a
 // 4-bit attenuation. Writes use a latch/data protocol:
@@ -84,3 +91,5 @@ int psgGenSample(int masterVol, bool mute) {
 }
 
 } // namespace sms
+
+#endif  // BOARD_HAS_Z80_CORES

@@ -1,5 +1,5 @@
 #include "../../emu.h"
-#include <dirent.h>   // raw POSIX readdir() for the fast SD scan (see loadHdFilesSync)
+#include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
 
 // Memory map (for slot 7):
 
@@ -33,41 +33,33 @@ void HDSetup()
     initializedHdDisk = true;
     printLog("HD Setup...");
     xTaskCreate(loadHdAsync, "loadHdAsync", 4096, NULL, 2, NULL);
-    sprintf(buf, "FS.freeSpace = %d bytes", FSTYPE.totalBytes() - FSTYPE.usedBytes());
+#if defined(BOARD_PICOCALC)
+    // sdFreeBytes() returns 0 on this board by design (see the note in sd.cpp): the only
+    // route to a free-space figure here walks the entire FAT, ~25s on a 32GB card over SPI.
+    // Printing "0 bytes" made a perfectly good card look like an empty or broken volume.
+    printLog("FS.freeSpace = not measured on this board");
+#else
+    sprintf(buf, "FS.freeSpace = %llu bytes", (unsigned long long)sdFreeBytes());
     printLog(buf);
+#endif
     getHdFileInfo(FSTYPE);
     xTaskCreate(getBlockAsync, "getBlockAsync", 4096, NULL, 1, NULL);
   }
 }
 
-// Scan the SD root for HD images into hdFiles. Synchronous so it can be called
-// directly (e.g. from the Settings device toggle) without racing the renderer.
-void loadHdFilesSync()
-{
-  hdFiles.clear();
-  // Fast scan via raw readdir() - see loadDiskFilesSync() for why (avoids per-entry fopen/stat).
-  DIR *dp = opendir(SD_VFS_ROOT);
-  if (!dp)
-  {
-    printLog("Failed to open directory");
-    return;
-  }
-  struct dirent *de;
-  while ((de = readdir(dp)) != nullptr)
-  {
-    if (de->d_type == DT_DIR) continue;                 // root files only (matches old behavior)
-    std::string fileName = de->d_name;
-    for (int j = 0; j < (int)fileExtensions.size(); j++)
-    {
-      if ((int)fileName.find(fileExtensions[j].c_str()) > 0)
-      {
-        hdFiles.push_back("/" + fileName);
-        break;                                          // one extension match is enough
-      }
-    }
-  }
-  closedir(dp);
+// SD image browser -- same shape as the DiskII one in disk.cpp, different extension list.
+static bool hdAccept(const std::string &name) {
+  for (int j = 0; j < (int)fileExtensions.size(); j++)
+    if ((int)name.find(fileExtensions[j].c_str()) > 0) return true;
+  return false;
 }
+static FileBrowser hdBrowser = { "HD", &hdFiles, hdAccept, nullptr, 250, "/" };
+
+// Rescan the current browse directory into hdFiles. Synchronous so it can be called
+// directly (e.g. from the Settings device toggle) without racing the renderer.
+void loadHdFilesSync()      { fbScan(hdBrowser); }
+void hdBrowseEnter(const char *path) { fbEnter(hdBrowser, path); }
+void hdBrowseUp()           { fbUp(hdBrowser); }
 
 void loadHdAsync(void *pvParameters)
 {
@@ -98,7 +90,9 @@ void getBlockAsync(void *pvParameters) {
 
 void loadHD() 
 {
-  loadHDDir(FSTYPE, "/", 1);
+  busTake();               // loadHDDir() recurses, so the lock is taken here, at the one entry
+  loadHDDir(FSTYPE, "/", 1);   // point -- gBusLock is not recursive.
+  busGive();
 }
 
 char HDSoftSwitchesRead(ushort address)
@@ -134,6 +128,7 @@ char HDSoftSwitchesRead(ushort address)
   } else if (address == 0xc0fa) {
     return (char)((hdUnitNumber1_2 ? getBlockQty() : getBlockQty()) & 0xff00);
   }
+  return 0;   // $C0F8 and any address this card does not decode read back as 0
 }
 
 void HDSoftSwitchesWrite(ushort address, char value) {
@@ -159,11 +154,12 @@ void HDSoftSwitchesWrite(ushort address, char value) {
 
 void getHdFileInfo(fs::FS &fs)
 {
+  busTake();               // exists()+open()+size() is one FS transaction; keep other cores out
   if (!fs.exists(selectedHdFileName.c_str())) 
   {
     selectedHdFileName = "/";
   }
-  File file = fs.open(selectedHdFileName.c_str());
+  File file = fs.open(selectedHdFileName.c_str(), "r");
   size_t len = file.size();
   hdDiskImageSize = len;
   if (len % 512 > 0)
@@ -172,6 +168,7 @@ void getHdFileInfo(fs::FS &fs)
     printLog("File Header Size: ");Serial.println(fileHeaderSize);
   }
   file.close();
+  busGive();
 }
 
 void nextHdFile()
@@ -209,8 +206,15 @@ void setHdFile()
     shownFile = 0;
     selectedHdFileName = "/";
   }
+  else if (hdFiles[shownFile] == ".." || hdFiles[shownFile].back() == '/') {
+    // A directory row: navigate instead of mounting it (see setDiskFile()).
+    if (hdFiles[shownFile] == "..") hdBrowseUp();
+    else                            hdBrowseEnter(hdFiles[shownFile].c_str());
+    shownFile = 0; firstShowFile = 0;
+  }
   else {
     selectedHdFileName = hdFiles[shownFile].c_str();
+    closeHdFile();   // the cached handle points at the OLD image -- drop it before anything reads
   }
   paused = false;
 
@@ -248,34 +252,38 @@ ushort getBlockQty()
   return (ushort)((hdDiskImageSize - fileHeaderSize) / 512);
 }
 
+// Open the image ONCE and keep the handle; seek within it for random access.
+//
+// This used to close and fs.open(selectedHdFileName) again on every block that was not the
+// immediate successor of the last one. ProDOS reads are overwhelmingly non-sequential (volume
+// bitmap, directory, then file data), so that was a full open-by-path -- a directory walk from
+// the FAT root -- per 512-byte block. On the ESP32's SD it was merely wasteful; on the PicoCalc,
+// where the card hangs off a ribbon and the mount ladder may have settled at 4 MHz, it cost tens
+// of milliseconds per block and a ProDOS boot looked like a hung machine. A seek is one FAT
+// cluster-chain walk at worst and usually nothing at all.
+//
+// hdFile is invalidated (closed) by closeHdFile() whenever selectedHdFileName changes, so the
+// handle can never be left pointing at the previously mounted image.
 void getBlock(fs::FS &fs, ushort block)
 {
-  busTake();   // hold the shared HSPI bus for the whole HD block read (touch must wait)
-  if (block != lastBlock + 1) {
-    //printLog("New");
-    if (hdFile.available())
-      hdFile.close();
-      
-    hdFile = fs.open(selectedHdFileName.c_str());
-    if (hdFile) {
-      size_t positionToRead = block * 512 + fileHeaderSize;
-      if (hdFile.seek(positionToRead))
-      {
-        hdFile.read(actualBlock, 512);
-        //printSequence(20);
-        
-      }
-    }
-  }
-  else
-  {
-    //printLog("Sequential");
-    if (hdFile.available()) {
-      hdFile.read(actualBlock, 512);
-      //printSequence(20);
-    }
+  busTake();   // hold the shared bus for the whole HD block read (touch/other cores must wait)
+  if (!hdFile)
+    hdFile = fs.open(selectedHdFileName.c_str(), "r");
+  if (hdFile) {
+    if (block != lastBlock + 1)                       // random access: reposition
+      hdFile.seek((size_t)block * 512 + fileHeaderSize);
+    hdFile.read(actualBlock, 512);                    // sequential: the handle is already there
   }
   lastBlock = block;
+  busGive();
+}
+
+// Drop the cached handle. Called whenever the mounted image changes; the next getBlock() reopens.
+void closeHdFile()
+{
+  busTake();
+  if (hdFile) hdFile.close();
+  lastBlock = (ushort)-1;
   busGive();
 }
 
@@ -284,7 +292,7 @@ void loadHDDir(fs::FS &fs, const char *dirname, uint8_t levels) {
   printLog(buf);
   hdFiles.clear();
 
-  File root = fs.open(dirname);
+  File root = fs.open(dirname, "r");
   if (!root) {
     printLog("Failed to open directory");
     return;
@@ -301,7 +309,11 @@ void loadHDDir(fs::FS &fs, const char *dirname, uint8_t levels) {
       printLog("  DIR : ");
       printLog(file.name());
       if (levels) {
+#if defined(BOARD_PICOCALC)
+        loadHDDir(fs, file.fullName(), levels - 1);   // arduino-pico's name for path()
+#else
         loadHDDir(fs, file.path(), levels - 1);
+#endif
       }
     } else {
       bool acepted = false;

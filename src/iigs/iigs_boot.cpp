@@ -1,3 +1,7 @@
+// Not built for the PicoCalc (RP2350): this core needs multi-megabyte ps_malloc'd guest RAM,
+// and the board has 520KB of SRAM with its 8MB PSRAM on plain GPIOs (not memory-mapped). The
+// shared dispatch/render/UI code links against src/picocalc/bigram_stubs.cpp instead.
+#if !defined(BOARD_PICOCALC)
 // iigs_boot.cpp - the Apple IIGS platform core (selectable from the boot splash).
 //
 // Runs the 65C816 (src/iigs/cpu65816) against the embedded ROM 01 + a bankPtr memory map (banks
@@ -513,7 +517,7 @@ static void renderLoRes(int availH) {
 // Render the IIGS 40x24 text page ($00:0400) to the LCD (built-in 6x8 font; renderLoop flushes).
 // Called from renderLoop (core 0) while iigsLoop (core 1) runs the CPU - shared SRAM, read-only here.
 void iigsRenderText() {
-  tft.setUiMode(true);
+  displaySetUiMode(true);
   bool osk = oskActive();
   int kbdTop = osk ? oskRasterHeight() : 240;      // logical y where the on-screen keyboard starts
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -638,3 +642,4 @@ void iigsLoop() {
     if (paused) { while (paused) delay(50); lastCyc = g_cpu.cycles; lastUs = micros(); }
   }
 }
+#endif // !defined(BOARD_PICOCALC)

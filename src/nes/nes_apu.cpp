@@ -5,11 +5,17 @@
 // NES APU (2A03 audio) -> ESP32 internal DAC (GPIO26) via I2S DMA, mirroring the C64 SID path.
 //   * 2 pulse (square, 4 duties, sweep, envelope, length), triangle (linear+length counter),
 //     noise (LFSR, envelope, length). DMC (sample channel) is NOT emulated.
-//   * The frame sequencer (envelope/linear at 240Hz, length/sweep at 120Hz) is clocked inside the
-//     audio task from the sample count, so the CPU only writes registers (like the SID).
+//   * The frame sequencer (envelope/linear at 240Hz, length/sweep at 120Hz) is clocked from
+//     EMULATED time: the PPU bumps apuQuarterTicks four times per frame and the audio task
+//     consumes those ticks. Driving it from the audio sample count instead (what this used to do)
+//     runs the envelopes at a constant 240Hz while the interpreter renders at 40-50fps, so decays
+//     finish early and notes end up clipped against their own channel.
 //   * Channel timers come from the period registers; per-sample phase accumulators synthesise the
 //     waveforms directly (register-based synthesis, like the SID — not cycle-accurate).
-//   * Output gated by the app `sound` toggle and scaled by `volume`. Tune by ear.
+//   * Mixing uses the standard linear approximation of the 2A03's non-linear DAC followed by a
+//     DC blocker, so the output is genuinely bipolar instead of the old "mix - 16" guess. Boards
+//     with a real amp get full 16-bit samples; only the CYD's internal DAC quantises to 8 bits.
+//   * Output gated by the app `sound` toggle and scaled by `volume`.
 //
 // I2S_NUM_0 is free on the NES path (the SID is C64-only), so nesApuSetup() owns it.
 
@@ -37,6 +43,7 @@ struct Pulse {
   uint8_t  volParam;
   bool     envStart; uint8_t envDivider, envDecay;
   bool     sweepEnable, sweepNegate, sweepReload;
+  bool     sweepMute;        // sweep target out of range -> channel silenced (recomputed on writes)
   uint8_t  sweepPeriod, sweepShift, sweepDivider;
   uint8_t  lengthCounter;
   uint32_t phase, step;      // 32-bit cycle accumulator
@@ -65,8 +72,9 @@ static Triangle tri;
 static Noise    noise;
 static uint8_t  frameMode;            // $4017 bit7 (4/5-step) — only 4-step behaviour modelled
 static bool     frameIRQInhibit;
-static uint32_t frameAcc;             // accumulates toward 240Hz quarter frames
+static uint32_t apuQuarterSeen;       // quarter-frame ticks already applied (chases apuQuarterTicks)
 static bool     halfTick;
+static int32_t  hpPrevIn, hpPrevOut;  // one-pole DC blocker state (see genSample16)
 
 // ---- period -> phase step (computed on register writes, not per sample) ----
 // pulse: freq = 1.789773MHz / (16*(P+1));  step = freq * 2^32 / Fs
@@ -100,6 +108,16 @@ static void clockLengths() {
   if (!tri.control       && tri.lengthCounter)        tri.lengthCounter--;
   if (!noise.lengthHalt  && noise.lengthCounter)      noise.lengthCounter--;
 }
+// The sweep unit silences its channel whenever the *target* period is out of range, even when the
+// sweep is disabled and even when it never reloads the timer. Without this, parked channels leak a
+// continuous ultrasonic/garbage tone into the mix, which is a large part of why it sounded muddy.
+static void updateSweepMute(Pulse &p, int ch) {
+  int change = p.timer >> p.sweepShift;
+  if (p.sweepNegate) change = -change - (ch == 0 ? 1 : 0);
+  int target = (int)p.timer + change;
+  p.sweepMute = (p.timer < 8) || (!p.sweepNegate && target > 0x7FF);
+}
+
 static void clockSweep(Pulse &p, int ch) {
   if (p.sweepDivider == 0 && p.sweepEnable && p.sweepShift > 0) {
     int change = p.timer >> p.sweepShift;
@@ -109,6 +127,7 @@ static void clockSweep(Pulse &p, int ch) {
   }
   if (p.sweepDivider == 0 || p.sweepReload) { p.sweepDivider = p.sweepPeriod; p.sweepReload = false; }
   else p.sweepDivider--;
+  updateSweepMute(p, ch);
 }
 static void quarterFrame() {                              // 240Hz: envelopes + triangle linear
   clockEnvelope(pulse[0].volParam, pulse[0].lengthHalt, pulse[0].envStart, pulse[0].envDivider, pulse[0].envDecay);
@@ -128,36 +147,85 @@ static inline void clockLFSR() {
   noise.lfsr = (noise.lfsr >> 1) | (fb << 14);
 }
 
-// ---- one 8-bit DAC sample (centered on 128, like the SID) ----
-static int genSample() {
-  frameAcc += 240;
-  if (frameAcc >= APU_FS) { frameAcc -= APU_FS; quarterFrame(); }
+// 65536/n for n = 1..20 -- the shortest noise period clocks the LFSR ~20 times per output sample,
+// and the M0+ has no hardware divide, so the box-average below multiplies by a reciprocal instead.
+static const uint16_t noiseRecip[21] = {
+      0, 65535, 32768, 21845, 16384, 13107, 10923, 9362, 8192, 7282, 6554,
+   5958,  5461,  5041,  4681,  4369,  4096,  3855, 3641, 3449, 3277 };
 
-  int mix = 0;
+// Linear approximation of the 2A03's non-linear mixer (the usual blargg weights), scaled by
+// 100000 so the whole mix stays integer:  pulse_out = 0.00752*(p1+p2),
+// tnd_out = 0.00851*triangle + 0.00494*noise.  APU_MIX_MAX is every channel at maximum at once.
+#define APU_W_PULSE  752
+#define APU_W_TRI    851
+#define APU_W_NOISE  494
+#define APU_MIX_MAX  (30 * APU_W_PULSE + 15 * APU_W_TRI + 15 * APU_W_NOISE)   // 42735
+// Normalise that to a 0..30000 range (leaves head-room for the DC blocker's overshoot).
+#define APU_NORM     ((30000 << 16) / APU_MIX_MAX)
+// Post-DC-block gain. One pulse channel alone swings about +-4000 before this, so 3 puts a single
+// voice at ~36% of full scale and pushes a dense four-voice mix just into the clamp. Raising this
+// further squares off loud passages -- turn up VOLUME in the options window instead.
+#define APU_GAIN     3
+
+// ---- one 16-bit signed output sample ----
+static int16_t genSample16() {
+  // Frame sequencer, clocked from emulated time rather than from the sample count (see the header
+  // note). Cap the catch-up so a pause / ROM load cannot fire hundreds of envelope clocks at once.
+  uint32_t q = apuQuarterTicks;
+  int32_t pending = (int32_t)(q - apuQuarterSeen);
+  if (pending < 0 || pending > 8) { apuQuarterSeen = q; pending = 0; }
+  while (pending-- > 0) { apuQuarterSeen++; quarterFrame(); }
+
+  int pmix = 0;
   for (int i = 0; i < 2; i++) {
     Pulse &p = pulse[i];
     p.phase += p.step;
-    if (p.enabled && p.lengthCounter > 0 && p.step) {
+    if (p.enabled && p.lengthCounter > 0 && p.step && !p.sweepMute) {
       int vol = p.constVol ? p.volParam : p.envDecay;
-      if (dutySeq[p.duty][(p.phase >> 29) & 7]) mix += vol;     // 0..15
+      if (dutySeq[p.duty][(p.phase >> 29) & 7]) pmix += vol;       // 0..15 per channel
     }
   }
+  int tmix = 0;
   tri.phase += tri.step;
   if (tri.enabled && tri.lengthCounter > 0 && tri.linCounter > 0 && tri.step)
-    mix += triSeq[(tri.phase >> 27) & 31];                       // 0..15
+    tmix = triSeq[(tri.phase >> 27) & 31];                         // 0..15
+
+  // Noise: box-average the LFSR output over the sample instead of point-sampling it. At short
+  // periods the LFSR runs ~20x per sample, and taking a single bit aliases the hiss down into a
+  // whistle -- the "not clear" part of percussion.
   noise.phase += noise.step;
-  while (noise.phase >= 0x10000) { noise.phase -= 0x10000; clockLFSR(); }
+  int nClk = 0, nHigh = 0;
+  while (noise.phase >= 0x10000) {
+    noise.phase -= 0x10000;
+    clockLFSR();
+    nClk++;
+    if (!(noise.lfsr & 1)) nHigh++;
+  }
+  int nmix = 0;
   if (noise.enabled && noise.lengthCounter > 0) {
     int vol = noise.constVol ? noise.volParam : noise.envDecay;
-    if (!(noise.lfsr & 1)) mix += vol;                           // 0..15
+    if (nClk == 0)       nmix = (noise.lfsr & 1) ? 0 : vol;        // period longer than a sample
+    else if (nClk <= 20) nmix = (vol * nHigh * noiseRecip[nClk]) >> 16;
+    else                 nmix = vol * nHigh / nClk;                // unreachable in practice
   }
 
-  int s = (mix - 16) * (int)volume / 255;     // rough center; app master volume
-  if (!sound || OptionsWindow) s = 0;         // mute toggle, and silence while the menu is open
-  int dac = 128 + s * 3;                       // scale to the 8-bit DAC range
-  if (dac < 0)   dac = 0;
-  if (dac > 255) dac = 255;
-  return dac;
+  int32_t acc = pmix * APU_W_PULSE + tmix * APU_W_TRI + nmix * APU_W_NOISE;   // 0..APU_MIX_MAX
+  int32_t in  = (acc * (int32_t)APU_NORM) >> 16;                              // 0..~30000
+
+  // One-pole DC blocker, y = x - x[-1] + 0.999*y[-1] (~3.5Hz at 22050Hz). The NES mix is unipolar,
+  // so without this the signal sits on a large, program-dependent DC offset -- which the old code
+  // tried to cancel with a fixed "- 16" and could not, leaving the waveform lopsided and the
+  // usable swing tiny. Removing it properly is most of the volume this channel was missing.
+  int32_t y = in - hpPrevIn + ((hpPrevOut * 32735) >> 15);
+  if (y >  60000) y =  60000;              // keep the feedback multiply inside int32
+  if (y < -60000) y = -60000;
+  hpPrevIn = in; hpPrevOut = y;
+
+  if (!sound || OptionsWindow) return 0;   // filter state still advances, so no thump on unmute
+  int32_t out = (y * APU_GAIN * (int32_t)volume) >> 8;
+  if (out >  32767) out =  32767;
+  if (out < -32768) out = -32768;
+  return (int16_t)out;
 }
 
 // ---- CPU-side register access (called from nes_memory.cpp) ----
@@ -166,10 +234,12 @@ static void pulseWrite(int i, int sub, uint8_t val) {
   switch (sub) {
     case 0: p.duty = val >> 6; p.lengthHalt = val & 0x20; p.constVol = val & 0x10; p.volParam = val & 0x0F; break;
     case 1: p.sweepEnable = val & 0x80; p.sweepPeriod = (val >> 4) & 7; p.sweepNegate = val & 8;
-            p.sweepShift = val & 7; p.sweepReload = true; break;
-    case 2: p.timer = (p.timer & 0x700) | val; p.step = pulseStep(p.timer); break;
+            p.sweepShift = val & 7; p.sweepReload = true; updateSweepMute(p, i); break;
+    case 2: p.timer = (p.timer & 0x700) | val; p.step = pulseStep(p.timer);
+            updateSweepMute(p, i); break;
     case 3: p.timer = (p.timer & 0x0FF) | ((uint16_t)(val & 7) << 8); p.step = pulseStep(p.timer);
-            if (p.enabled) p.lengthCounter = lengthTable[val >> 3]; p.envStart = true; break;
+            if (p.enabled) p.lengthCounter = lengthTable[val >> 3]; p.envStart = true;
+            updateSweepMute(p, i); break;
   }
 }
 
@@ -190,7 +260,8 @@ void apuWrite(uint8_t reg, uint8_t val) {
       tri.enabled      = val & 4; if (!(val & 4)) tri.lengthCounter = 0;
       noise.enabled    = val & 8; if (!(val & 8)) noise.lengthCounter = 0;
       break;
-    case 0x17: frameMode = val & 0x80; frameIRQInhibit = val & 0x40; frameAcc = 0; halfTick = false;
+    case 0x17: frameMode = val & 0x80; frameIRQInhibit = val & 0x40; halfTick = false;
+               apuQuarterSeen = apuQuarterTicks;
                if (frameMode) quarterFrame();           // 5-step mode clocks immediately
                break;
     default: break;
@@ -207,16 +278,27 @@ uint8_t apuReadStatus() {                                // $4015: which length 
 }
 
 static void apuTask(void *) {
+#if BOARD_AUDIO_DAC
+  // CYD only: the ESP32's internal DAC is 8-bit, so quantise here and nowhere else.
   uint16_t buf[128];                 // on the task stack (not static BSS — dram0_0_seg is tight)
   size_t wrote;
   while (running) {
-    for (int i = 0; i < 128; i++) buf[i] = (uint16_t)(genSample() << 8);   // DAC uses high byte
-#if BOARD_AUDIO_DAC
+    for (int i = 0; i < 128; i++) {
+      int dac = 128 + (genSample16() >> 8);
+      buf[i] = (uint16_t)((dac < 0 ? 0 : dac > 255 ? 255 : dac) << 8);   // DAC uses the high byte
+    }
     i2s_write(I2S_NUM_0, buf, sizeof(buf), &wrote, portMAX_DELAY);
-#else
-    ampWriteDac8(buf, 128);                                                // S3: 8-bit DAC -> I2S amp
-#endif
   }
+#else
+  // Every other board has a real amp (I2S on the S3/P4, PWM on the PicoCalc) and takes signed
+  // 16-bit directly. The old path squeezed the mix through 8 bits first, which on a quiet signal
+  // threw away four bits and turned soft passages into audible steps.
+  int16_t buf[128];
+  while (running) {
+    for (int i = 0; i < 128; i++) buf[i] = genSample16();
+    ampWriteMono(buf, 128);
+  }
+#endif
   vTaskDelete(NULL);
 }
 
@@ -225,7 +307,11 @@ static void apuSetup() {
   memset(&tri,   0, sizeof(tri));
   memset(&noise, 0, sizeof(noise));
   noise.lfsr = 1;                                        // must be non-zero
-  frameAcc = 0; halfTick = false;
+  halfTick = false;
+  apuQuarterSeen = apuQuarterTicks;
+  hpPrevIn = hpPrevOut = 0;
+  updateSweepMute(pulse[0], 0);
+  updateSweepMute(pulse[1], 1);
 
 #if BOARD_AUDIO_DAC
   i2s_config_t cfg = {};

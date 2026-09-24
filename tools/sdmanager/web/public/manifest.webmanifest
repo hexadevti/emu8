@@ -1,0 +1,13 @@
+{
+  "name": "emu8 SD Manager",
+  "short_name": "emu8 SD",
+  "description": "Browse, upload and download files on an emu8 board's microSD card over USB serial.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#101418",
+  "theme_color": "#101418",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

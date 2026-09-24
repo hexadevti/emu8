@@ -3,7 +3,7 @@
 
 // TIA video — the 2600 has no framebuffer in hardware: the program writes TIA registers in real
 // time as the electron beam scans ("racing the beam"). We emulate the beam at colour-clock (dot)
-// resolution and composite each visible pixel directly into a 160x192 indexed framebuffer.
+// resolution and composite each visible pixel directly into a 160xATARI_FB_H indexed framebuffer.
 //
 // One scanline = 228 dots (68 HBLANK + 160 visible). The CPU runs at 1/3 the dot rate, so the CPU
 // loop calls tiaStep(cpuCycles) to advance 3*cpuCycles dots after each instruction (instruction-
@@ -17,7 +17,7 @@ namespace atari {
 
 int colorClock = 0;                 // current dot 0..227 (exposed in atari.h for the CPU loop)
 static int scanline = 0;
-static int outRow   = 0;            // current framebuffer row being drawn (0..191)
+static int outRow   = 0;            // current framebuffer row being drawn (0..ATARI_FB_H-1)
 static bool vsync   = false;
 static bool vblank  = false;
 
@@ -188,7 +188,7 @@ static inline __attribute__((always_inline)) void compositePixel(uint8_t *line, 
 // (per-dot accurate) but in tight batches (per-scanline fast).
 static void flushSpan(int toPx) {
   if (toPx <= spanX) return;
-  if (!vblank && !vsync && outRow < 192) {
+  if (!vblank && !vsync && outRow < ATARI_FB_H) {
     buildCoverage(spanX, toPx);   // build exactly this span's coverage (clipped) from live registers
     uint8_t *line = framebuffer + outRow * 160;
     bool score = ctrlpf & 0x02;
@@ -213,7 +213,7 @@ static void flushSpan(int toPx) {
 // Finish the current scanline and start the next — called when the beam crosses dot 228. Exported
 // (not static) so the CPU loop can inline the common no-wrap step via tiaStepInline() in atari.h.
 void tiaLineWrap() {
-  if (!vblank && !vsync && outRow < 192) { flushSpan(160); outRow++; }   // finish the line
+  if (!vblank && !vsync && outRow < ATARI_FB_H) { flushSpan(160); outRow++; }   // finish the line
   spanX = 0;
   scanline++;
 }
@@ -246,7 +246,22 @@ void tiaWrite(uint8_t reg, uint8_t val) {
   switch (reg) {
     case 0x00: {                         // VSYNC
       bool n = val & 0x02;
-      if (n && !vsync) atariFrameCount++;   // entering vsync: the field just finished
+      if (n && !vsync) {                    // entering vsync: the field just finished
+        atariFrameCount++;
+        // Blank the rows this field did not reach, so a shorter field never shows stale lines
+        // from a longer one below it.
+        if (outRow < ATARI_FB_H) memset(framebuffer + outRow * 160, 0, (ATARI_FB_H - outRow) * 160);
+        if (!frontBuf) frontRows = outRow;  // live-buffer fallback: still centre on the field height
+        // Hand the finished field to the render task. It pushes to the panel far slower than the
+        // beam redraws (esp. the PicoCalc's SPI LCD), so reading the live buffer tore scrolling
+        // games (River Raid) into rows from two fields. Busy renderer -> this field is dropped.
+        if (frontBuf && frontState == 0) {
+          memcpy(frontBuf, framebuffer, 160 * ATARI_FB_H);
+          frontRows = outRow;
+          __sync_synchronize();
+          frontState = 1;
+        }
+      }
       if (!n && vsync) outRow = 0;          // leaving vsync: top of the next field
       vsync = n;
       break;
@@ -325,7 +340,7 @@ void tiaReset() {
   for (int i = 0; i < 8; i++) collision[i] = 0;
   wsyncStall = false;
   pfDirty = true; spanX = 0;
-  if (framebuffer) memset(framebuffer, 0, 160 * 192);
+  if (framebuffer) memset(framebuffer, 0, 160 * ATARI_FB_H);
 }
 
 } // namespace atari

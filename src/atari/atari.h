@@ -42,8 +42,17 @@ extern volatile uint8_t inpt4;               // P0 fire on bit7 (0 = pressed)
 extern volatile uint8_t inpt5;               // P1 fire on bit7
 
 // ---- TIA video (atari_tia.cpp) ----
-extern uint8_t  *framebuffer;                // 160x192, 8-bit TIA palette indices (= sharedBigBuf)
+// Up to 240 visible lines per field: most games show 192, but some draw more (River Raid: 199,
+// its score/logo strip) -- a 192-row buffer silently dropped those bottom lines.
+#define ATARI_FB_H 240
+extern uint8_t  *framebuffer;                // 160xATARI_FB_H, 8-bit TIA palette indices (= sharedBigBuf)
 extern volatile uint32_t atariFrameCount;    // completed fields (FPS diagnostic)
+// Completed-field snapshot for the render task (malloc'd at boot; nullptr = render live buffer).
+// Handshake: the TIA only fills it while frontState==0 then sets 1; the renderer only reads it
+// while frontState==1 then sets 0 -- each side moves the state off the value it owns, so no lock.
+extern uint8_t  *frontBuf;
+extern volatile uint8_t frontState;
+extern volatile int frontRows;               // visible lines in the last completed field (<= ATARI_FB_H)
 extern volatile bool wsyncStall;             // CPU halted until end of scanline (TIA $02)
 extern int colorClock;                       // current dot 0..227 (exposed so cpuLoop inlines)
 void    tiaReset();
@@ -71,7 +80,9 @@ extern uint32_t  cartSize;
 uint8_t cartRead(uint16_t addr);             // $1000-$1FFF (bank hotspots + Superchip RAM)
 void    cartWrite(uint16_t addr, uint8_t val);
 bool    atariLoadROM(const char *path);      // load .a26/.bin, detect bank scheme
-void    loadAtariFilesSync();                // scan SD root for *.a26 / *.bin -> atariFiles
+void    loadAtariFilesSync();          // scan the current browser dir for *.a26 / *.bin
+void    browseEnter(const char *path); // navigate into a subdirectory and rescan
+void    browseUp();                    // navigate to the parent directory and rescan
 bool    atariLoadFirstRom();                 // load the first loadable ROM on the SD root
 extern char *loadWarn;                       // startup ROM-skip warning text (malloc'd at boot)
 extern volatile bool atariResetReq;          // settings: reset after loading a new ROM
@@ -90,3 +101,5 @@ bool atariRenderLoadWarning();   // draw the startup ROM-skip warning; true whil
 void atariAudioSetup();          // init the TIA audio task (I2S DAC); call last in the setup branch
 bool atariLoadSelected(const char *path);  // settings: load a ROM + reset (returns success)
 void atariScanFiles();           // settings: (re)scan the SD root for *.a26 / *.bin
+void atariBrowseEnter(const char *path);  // settings: descend into a subdirectory and rescan
+void atariBrowseUp();                     // settings: go back to the parent directory

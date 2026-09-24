@@ -1,5 +1,11 @@
 #include "../../emu.h"
 
+// PicoCalc has no touch panel: the whole on-screen keyboard (and its ~30 KB of layout
+// tables) is compiled out there. src/picocalc/input_picocalc.cpp supplies the osk*/
+// touchRead stubs this file would otherwise export.
+#if !defined(BOARD_PICOCALC)
+
+
 #if BOARD_TOUCH_GT911
 #include <Wire.h>
 #include "p4/p4_i2c.h"     // shared I2C bring-up (GT911 touch + ES8311 codec on GPIO7/8)
@@ -928,3 +934,5 @@ void oskIgnoreCurrentTouch()
   osk_visible  = false;
   osk_prevDown = true;   // require a release before the next tap can open the keyboard
 }
+
+#endif // !BOARD_PICOCALC

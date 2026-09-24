@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#101418"/>
+  <!-- microSD card outline -->
+  <path d="M20 10h18l8 8v8l-3 3v25a2 2 0 0 1-2 2H20a2 2 0 0 1-2-2V12a2 2 0 0 1 2-2z" fill="#3ddc97"/>
+  <g fill="#101418">
+    <rect x="23" y="14" width="3" height="8" rx="1"/>
+    <rect x="28" y="14" width="3" height="8" rx="1"/>
+    <rect x="33" y="14" width="3" height="8" rx="1"/>
+    <rect x="38" y="16" width="3" height="6" rx="1"/>
+  </g>
+  <!-- up/down arrows -->
+  <path d="M26 44l5-7 5 7h-3v6h-4v-6z" fill="#101418"/>
+</svg>

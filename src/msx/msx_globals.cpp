@@ -1,3 +1,10 @@
+// This MSX translation unit is compiled out entirely on boards that clear
+// BOARD_HAS_Z80_CORES (the PicoCalc's original RP2040 mainboard -- see board.h for why).
+// emu.h must be included FIRST because it is what pulls in board.h and defines the macro;
+// the guard below then empties the file, handing this core's static RAM to the Apple II.
+#include "../../emu.h"
+#if BOARD_HAS_Z80_CORES
+
 // msx_globals.cpp - definitions of the namespace-msx shared state declared in msx.h.
 // (Kept Arduino-free so it also links into host/msx_host.cpp.)
 
@@ -13,3 +20,5 @@ namespace msx {
   bool     biosIsCbios = false;
   volatile bool frameReady = false;   // set by core 1 when a frame is rendered, cleared by core 0 after display
 }
+
+#endif  // BOARD_HAS_Z80_CORES

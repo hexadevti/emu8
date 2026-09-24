@@ -9,9 +9,9 @@
 // the Atari path only (like the NES path's nesScratch) so it never burdens the static budget.
 static uint16_t *atariScratch = nullptr;
 
-// The TIA picture is 160x192; we double it horizontally to 320 (fills the panel width) and centre
-// it vertically with 24px black borders top and bottom (240 - 192 = 48).
-static const int A_W = 160, A_H = 192, A_OY = (240 - 192) / 2;
+// The TIA picture is 160 wide x (usually) 192 lines; we double it horizontally to 320 (fills the
+// panel width) and centre it vertically: 24px borders for 192 lines, less for taller fields.
+static const int A_W = 160, A_H = ATARI_FB_H, A_MINH = 192;
 // Extra left/right nudge of the displayed picture (TIA pixels). 0 normally — the HMOVE comb is now
 // emulated in the TIA, which is the real cause of the left-edge alignment.
 static const int A_XSHIFT = 0;
@@ -29,12 +29,17 @@ void atariSetup() {
   atari::loadWarn = (char *)malloc(256);
   if (atari::loadWarn) atari::loadWarn[0] = 0;
 
-  // 160x192 8-bit indexed framebuffer lives in the shared static buffer (mutually exclusive with
-  // Apple RAM / C64 / NES); 160*192 = 30720 <= sizeof(sharedBigBuf). Set before tiaReset (it clears it).
+  // 160x240 8-bit indexed framebuffer lives in the shared static buffer (mutually exclusive with
+  // Apple RAM / C64 / NES); 160*240 = 38400 <= sizeof(sharedBigBuf). Set before tiaReset (it clears it).
   atari::framebuffer = sharedBigBuf;
   memset(sharedBigBuf, 0, A_W * A_H);
 
   atariScratch = (uint16_t *)malloc(320 * 8 * sizeof(uint16_t));
+  // Snapshot of the last completed field for the renderer (tear-free). Optional: if the heap
+  // cannot spare 30KB, rendering falls back to reading the live framebuffer.
+  atari::frontBuf = (uint8_t *)malloc(A_W * A_H);
+  if (atari::frontBuf) memset(atari::frontBuf, 0, A_W * A_H);
+  else printLog("Atari: no heap for frame snapshot; rendering live buffer");
 
   atari::tiaReset();
   atari::riotReset();
@@ -53,14 +58,26 @@ void atariLoop() {
 // top/bottom borders. Runs on the core-0 render task (which owns the TFT), like nesRenderFrame.
 void atariRenderFrame() {
   if (!atariScratch || !atari::framebuffer) return;
+  // Tear-free path: draw only a completed field. No new one yet -> skip (the TIA may be filling
+  // the snapshot right now); the next field lands within ~17ms.
+  const uint8_t *fb = atari::framebuffer;
+  if (atari::frontBuf) {
+    if (atari::frontState != 1) return;
+    __sync_synchronize();
+    fb = atari::frontBuf;
+  }
+  int rows = atari::frontRows;
+  // Height to show: at least 192 so standard games keep their usual 24px borders and position.
+  int h = rows < A_MINH ? A_MINH : (rows > A_H ? A_H : rows);
+  int oy = (240 - h) / 2;
   const uint16_t *pal = videoColor ? atari::atariPalette : atari::atariPaletteGray;
-  tft.fillRect(0, 0, 320, A_OY, TFT_BLACK);                       // top border
-  tft.fillRect(0, A_OY + A_H, 320, 240 - (A_OY + A_H), TFT_BLACK); // bottom border
+  if (oy > 0) tft.fillRect(0, 0, 320, oy, TFT_BLACK);                    // top border
+  if (oy + h < 240) tft.fillRect(0, oy + h, 320, 240 - (oy + h), TFT_BLACK); // bottom border
   tft.setSwapBytes(true);
-  for (int y = 0; y < A_H; ) {
+  for (int y = 0; y < h; ) {
     int n = 0;
-    while (y + n < A_H && n < 8) {
-      const uint8_t *src = atari::framebuffer + (y + n) * A_W;
+    while (y + n < h && n < 8) {
+      const uint8_t *src = fb + (y + n) * A_W;
       uint16_t *dst = atariScratch + n * 320;
       for (int x = 0; x < A_W; x++) {
         int sc = x + A_XSHIFT;                                     // shift content left to re-centre
@@ -69,10 +86,11 @@ void atariRenderFrame() {
       }
       n++;
     }
-    tft.pushImage(0, A_OY + y, 320, n, atariScratch);
+    tft.pushImage(0, oy + y, 320, n, atariScratch);
     y += n;
   }
   tft.setSwapBytes(false);
+  if (atari::frontBuf) { __sync_synchronize(); atari::frontState = 0; }   // snapshot free for the next field
 }
 
 // Joystick task -> TIA/RIOT input ports. dirBits: bit0=Up,1=Down,2=Left,3=Right (active-high here,
@@ -101,6 +119,10 @@ bool atariLoadSelected(const char *path) {
 }
 // Settings: (re)scan the SD root for *.a26 / *.bin so freshly-added ROMs show in the browser.
 void atariScanFiles() { atari::loadAtariFilesSync(); }
+// Settings: subdirectory navigation for that browser. Same forwarding as nesBrowse* -- the
+// workers live inside namespace atari and the shared options UI calls these.
+void atariBrowseEnter(const char *path) { atari::browseEnter(path); }
+void atariBrowseUp()                    { atari::browseUp(); }
 
 // ---- startup ROM-skip warning overlay (runs on the core-0 render task, which owns the TFT) ----
 static void atariDrawWarning() {

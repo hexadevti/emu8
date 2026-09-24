@@ -10,7 +10,8 @@
 //                       the open-/solid-apple paddle buttons (Pb0/Pb1).
 //   * C64             : press/release the CIA1 keyboard matrix via c64KeyMatrix(row,col,down),
 //                       with PC Shift/Ctrl/Alt mapped to the C64 SHIFT/CTRL/Commodore lines.
-//   * NES             : map the d-pad + Z/X/Enter/Tab onto controller 1 (nesSetController()).
+//   * NES             : map the d-pad + Z/X/Enter/Tab, or F4/F5 (A/B) and F2/F3
+//                       (Start/Select), onto controller 1 (nesSetController()).
 //   * Atari 2600      : map the d-pad + Space/Enter/Tab onto the stick + Fire/Reset/Select.
 //
 // Settings menu (every platform): F12 opens/closes it; while it is open the arrow keys navigate
@@ -72,6 +73,44 @@ static void appleKeyDown(uint8_t kc, bool shift, bool ctrl)
   keymem = (char)code;
 }
 
+// Apple II keyboard-as-joystick. With the JOYSTICK option ON the arrow keys deflect the paddles
+// and Space is the button, exactly as the C64/MSX cores already do -- and exactly as the CYD's
+// PS/2 path has always done (keyboardPs2.cpp), which is why this was the one input backend where
+// turning JOYSTICK on did nothing at all on a USB/matrix keyboard.
+//
+// The Apple II has no digital stick: games read the PADDLE TIMERS at $C064/$C065, which
+// processJoystick() ramps toward timerpdl0/timerpdl1 after a $C070 trigger. So a held arrow is a
+// full deflection and neutral is centre -- the same three values usbgamepad.cpp writes.
+// NOTHING is taken away from the keyboard when JOYSTICK is on. The arrows drive the paddles and
+// still deliver 0x88/0x95/0x8B/0x8A to keymem, so a game that steers with the paddles and one that
+// reads the arrow keys both work without leaving the menu to flip the mode -- and Space fires and
+// still reaches keymem as 0xA0, for the same reason.
+//
+// Space used to be the exception, on the theory that typing a space into a running game was worse
+// than useless. Karateka disproves it: pick its KEYBOARD control mode and Space is a control key,
+// so with JOYSTICK on -- which is the DEFAULT (globals.cpp) -- every key worked except that one,
+// with nothing on screen to suggest the emulator was eating it. A game that misreads a stray space
+// is the milder failure, and it is the one the arrows already accept.
+
+// The two paddle buttons. Alt / right-Alt are open-apple / solid-apple on a PC keyboard, but
+// the PicoCalc has one Alt and no right-Alt, so F4 and F5 are the buttons there. They are
+// continuous state (held, not tapped), which is why they are read from keys[] below rather
+// than in the key-down loop, and they work whether or not JOYSTICK mode is on -- open-apple
+// and solid-apple are ordinary Apple II keys, not just game buttons.
+static bool appleIsButtonKey(uint8_t kc)
+{
+  return kc == HID_KEY_F4 || kc == HID_KEY_F5;
+}
+
+static void appleApplyJoystick(const uint8_t *keys)
+{
+  bool l = kbContains(keys, HID_KEY_ARROW_LEFT),  r = kbContains(keys, HID_KEY_ARROW_RIGHT);
+  bool u = kbContains(keys, HID_KEY_ARROW_UP),    d = kbContains(keys, HID_KEY_ARROW_DOWN);
+  timerpdl0 = l ? JOY_MIN : r ? JOY_MAX : JOY_MID;   // paddle 0 = X
+  timerpdl1 = u ? JOY_MIN : d ? JOY_MAX : JOY_MID;   // paddle 1 = Y
+  if (kbContains(keys, HID_KEY_SPACE)) Pb0 = true;   // fire (also open-apple; Alt still works)
+}
+
 // ============================ C64 keyboard matrix ========================================
 // Map a HID keycode to a CIA1 matrix position in this codebase's (col,row) convention
 // (the same one the touch keyboard feeds to c64KeyMatrix(row, col, down)). col < 0 = unmapped.
@@ -131,28 +170,48 @@ static void c64KeyUp(uint8_t kc)
   C64Pos p = c64Map(kc);
   if (p.col >= 0) c64KeyMatrix(p.row, p.col, false);
 }
+
+// On the PicoCalc, either SHIFT key is fire as well: the cursor cluster sits at the bottom right and
+// the space bar is a long reach from it, while the two shifts flank that same bottom row. The keyboard
+// reports both shifts as one modifier bit (input_picocalc.cpp), so the plain `shift` flag covers left
+// and right. Space still fires. SHIFT is the one key JOYSTICK mode withholds from the C64 matrix --
+// a fire button that also shifted whatever you typed would be no use to either side. Other boards
+// have a full keyboard within reach of the arrows and keep SHIFT for typing.
+#if defined(BOARD_PICOCALC)
+#define C64_SHIFT_IS_FIRE 1
+#else
+#define C64_SHIFT_IS_FIRE 0
+#endif
+
+// JOYSTICK mode takes nothing away from the C64 keyboard: the arrows and Space drive the stick AND
+// still reach the matrix, the double duty the Apple II paddles already give their arrows. It used
+// to hold the arrows exclusively, which left the C64 with no cursor keys at the BASIC prompt --
+// and since JOYSTICK is ON by default, the only way to get them back was to open the menu and turn
+// it off. The one key that is still withheld is the PicoCalc's SHIFT (see below): it is the fire
+// button there, and a fire button that also shifts whatever you type is no use to either side.
+
 // Refresh the modifier matrix lines from the live report each call. Cursor LEFT/UP are SHIFT+CRSR
 // on the C64, so a held LEFT or UP also asserts SHIFT.
 static void c64ApplyModifiers(bool shift, bool ctrl, bool alt, const uint8_t *keys)
 {
-  // Cursor LEFT/UP are SHIFT+CRSR on the C64 -- but only while the arrows act as cursor keys. With the
-  // JOYSTICK option ON they drive the joystick instead, so don't force SHIFT then.
   bool wantShift = shift;
-  if (!joystick) wantShift = wantShift || kbContains(keys, HID_KEY_ARROW_LEFT) || kbContains(keys, HID_KEY_ARROW_UP);
+  // The PicoCalc's SHIFT keys are the fire button while JOYSTICK is on, so they must not press the
+  // C64's SHIFT line -- every shot would otherwise arrive as a shifted keystroke. Dropped first, so
+  // the cursor-derived SHIFT below still gets applied.
+  if (C64_SHIFT_IS_FIRE && joystick) wantShift = false;
+  // Cursor LEFT/UP are SHIFT+CRSR on the C64, so a held LEFT or UP also asserts SHIFT. The arrows
+  // are cursor keys in every mode now, so this applies whether or not the stick is reading them.
+  wantShift = wantShift || kbContains(keys, HID_KEY_ARROW_LEFT) || kbContains(keys, HID_KEY_ARROW_UP);
   c64KeyMatrix(7, 1, wantShift);  // left SHIFT  (col1,row7)
   c64KeyMatrix(2, 7, ctrl);       // CTRL        (col7,row2)
   c64KeyMatrix(5, 7, alt);        // Commodore   (col7,row5)
 }
 
-// C64 keyboard-as-joystick. With the JOYSTICK option ON, the arrow keys + Space drive the C64
-// joystick (routed to port 1/2 per joyPort) instead of the cursor matrix, so games are playable from
-// a USB keyboard. CIA bits are active-low: bit0=up,1=down,2=left,3=right,4=fire (0xff = idle).
-static bool c64IsJoyKey(uint8_t kc)
-{
-  return kc == HID_KEY_ARROW_UP || kc == HID_KEY_ARROW_DOWN ||
-         kc == HID_KEY_ARROW_LEFT || kc == HID_KEY_ARROW_RIGHT || kc == HID_KEY_SPACE;
-}
-static void c64ApplyJoystick(const uint8_t *keys)
+// C64 keyboard-as-joystick. With the JOYSTICK option ON, the arrow keys + Space (+ either SHIFT on
+// the PicoCalc) drive the C64 joystick, routed to port 1/2 per joyPort. This runs alongside the
+// keyboard matrix rather than replacing it, so the same arrows still move the BASIC cursor.
+// CIA bits are active-low: bit0=up, 1=down, 2=left, 3=right, 4=fire (0xff = idle).
+static void c64ApplyJoystick(const uint8_t *keys, bool shift)
 {
   uint8_t m = 0xff;
   if (kbContains(keys, HID_KEY_ARROW_UP))    m &= ~0x01;
@@ -160,6 +219,7 @@ static void c64ApplyJoystick(const uint8_t *keys)
   if (kbContains(keys, HID_KEY_ARROW_LEFT))  m &= ~0x04;
   if (kbContains(keys, HID_KEY_ARROW_RIGHT)) m &= ~0x08;
   if (kbContains(keys, HID_KEY_SPACE))       m &= ~0x10;   // fire
+  if (C64_SHIFT_IS_FIRE && shift)            m &= ~0x10;   // PicoCalc: either SHIFT is fire too
   c64SetJoystick(m);
 }
 
@@ -173,10 +233,14 @@ static uint8_t nesBit(uint8_t kc)
     case HID_KEY_ARROW_DOWN:  return 0x20;
     case HID_KEY_ARROW_LEFT:  return 0x40;
     case HID_KEY_ARROW_RIGHT: return 0x80;
-    case HID_KEY_X:           return 0x01;   // A
-    case HID_KEY_Z:           return 0x02;   // B
-    case HID_KEY_TAB:         return 0x04;   // Select
-    case HID_KEY_ENTER:       return 0x08;   // Start
+    case HID_KEY_X:
+    case HID_KEY_F4:          return 0x01;   // A
+    case HID_KEY_Z:
+    case HID_KEY_F5:          return 0x02;   // B
+    case HID_KEY_TAB:
+    case HID_KEY_F3:          return 0x04;   // Select
+    case HID_KEY_ENTER:
+    case HID_KEY_F2:          return 0x08;   // Start
   }
   return 0;
 }
@@ -197,6 +261,13 @@ static bool atariKey(uint8_t kc, bool down)   // returns true if it was an Atari
     case HID_KEY_X:           atariFire   = down; return true;
     case HID_KEY_TAB:         atariSelect = down; return true;
     case HID_KEY_ENTER:       atariReset  = down; return true;
+#if defined(BOARD_PICOCALC)
+    // PicoCalc function row (input_picocalc.cpp sends its F3 as HID F12): F5 = fire,
+    // F3 = Reset switch, F4 = Select switch.
+    case HID_KEY_F5:          atariFire   = down; return true;
+    case HID_KEY_F12:         atariReset  = down; return true;
+    case HID_KEY_F4:          atariSelect = down; return true;
+#endif
   }
   return false;
 }
@@ -302,15 +373,19 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
     if (!kc || kbContains(last, kc)) continue;
 
     // Settings menu: F10 toggles; while open, the keyboard drives the menu (all platforms).
+    // All four arrows browse; Enter flips a toggle, or opens VOLUME / the file list so the
+    // arrows then change the value inside it; Escape backs out of whatever Enter opened, and
+    // Escape with nothing open closes the window. The joystick keeps its own simpler scheme
+    // (optionsUiNav/Adjust/Activate) -- see the note in optionsui.cpp.
     if (OptionsWindow) {
       switch (kc) {
-        case HID_KEY_ARROW_LEFT:   optionsUiNav(-1);    break;
-        case HID_KEY_ARROW_RIGHT:  optionsUiNav(+1);    break;
-        case HID_KEY_ARROW_UP:     optionsUiAdjust(-1); break;
-        case HID_KEY_ARROW_DOWN:   optionsUiAdjust(+1); break;
+        case HID_KEY_ARROW_LEFT:   optionsUiKeyArrow(-1,  0); break;
+        case HID_KEY_ARROW_RIGHT:  optionsUiKeyArrow(+1,  0); break;
+        case HID_KEY_ARROW_UP:     optionsUiKeyArrow( 0, -1); break;
+        case HID_KEY_ARROW_DOWN:   optionsUiKeyArrow( 0, +1); break;
         case HID_KEY_ENTER:
-        case HID_KEY_KEYPAD_ENTER: optionsUiActivate(); break;
-        case HID_KEY_ESCAPE:
+        case HID_KEY_KEYPAD_ENTER: optionsUiKeyEnter(ctrl); break;
+        case HID_KEY_ESCAPE:       if (!optionsUiKeyEscape()) showHideOptionsWindow(); break;
         case HID_KEY_F10:          showHideOptionsWindow(); break;
       }
       continue;   // menu swallows every key
@@ -329,8 +404,9 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
 
     switch (currentPlatform) {
       case PLATFORM_APPLE2:
-      case PLATFORM_IIGS:  appleKeyDown(kc, shift, ctrl); break;
-      case PLATFORM_C64:   if (!(joystick && c64IsJoyKey(kc))) c64KeyDown(kc); break;  // arrows+Space = joystick when JOY on
+      case PLATFORM_IIGS:  if (!appleIsButtonKey(kc)) appleKeyDown(kc, shift, ctrl);
+                           break;   // arrows/Space = paddles AND keys; F4/F5 = buttons only
+      case PLATFORM_C64:   c64KeyDown(kc); break;   // every key types; the stick reads the arrows too
       case PLATFORM_NES:   nesKbBits |= nesBit(kc); nesSetController(nesKbBits); break;
       case PLATFORM_ATARI: if (atariKey(kc, true)) atariApply(); break;
       case PLATFORM_MSX:   if (!(joystick && msxIsJoyKey(kc))) msxKeyDown(kc); break;  // arrows+Space = joystick when JOY on
@@ -347,7 +423,7 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
     uint8_t kc = last[i];
     if (!kc || kbContains(keys, kc)) continue;
     switch (currentPlatform) {
-      case PLATFORM_C64:   if (!(joystick && c64IsJoyKey(kc))) c64KeyUp(kc); break;
+      case PLATFORM_C64:   c64KeyUp(kc); break;
       case PLATFORM_NES:   nesKbBits &= ~nesBit(kc); nesSetController(nesKbBits); break;
       case PLATFORM_ATARI: if (atariKey(kc, false)) atariApply(); break;
       case PLATFORM_MSX:   if (!(joystick && msxIsJoyKey(kc))) msxKeyUp(kc); break;
@@ -360,7 +436,7 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
   // --- continuous modifier state ---
   if (currentPlatform == PLATFORM_C64) {
     c64ApplyModifiers(shift, ctrl, alt, keys);
-    if (joystick) c64ApplyJoystick(keys);   // arrows + Space -> joystick
+    if (joystick) c64ApplyJoystick(keys, shift);   // arrows + Space (+ SHIFT on PicoCalc) -> joystick
     else          c64SetJoystick(0xff);     // typing mode: keep the joystick released
   } else if (currentPlatform == PLATFORM_MSX) {
     msxApplyModifiers(shift, ctrl, alt);
@@ -380,8 +456,11 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
     }
     prevMod = modifier;
   } else if (currentPlatform == PLATFORM_APPLE2 || currentPlatform == PLATFORM_IIGS) {
-    Pb0 = (modifier & KEYBOARD_MODIFIER_LEFTALT)  != 0;   // open-apple  (paddle button 0)
-    Pb1 = (modifier & KEYBOARD_MODIFIER_RIGHTALT) != 0;   // solid-apple (paddle button 1)
+    // open-apple / solid-apple: Alt and right-Alt on a PC keyboard, F4 and F5 on the PicoCalc.
+    Pb0 = (modifier & KEYBOARD_MODIFIER_LEFTALT)  != 0 || kbContains(keys, HID_KEY_F4);
+    Pb1 = (modifier & KEYBOARD_MODIFIER_RIGHTALT) != 0 || kbContains(keys, HID_KEY_F5);
+    if (joystick) appleApplyJoystick(keys);               // arrows -> paddles, Space -> button 0
+    else { timerpdl0 = JOY_MID; timerpdl1 = JOY_MID; }    // typing mode: paddles centred
   }
 }
 

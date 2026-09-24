@@ -1,4 +1,4 @@
-#if !defined(BOARD_JC4827W543)  // tiny386 is not built for the S3 board (too big; vendored core not wired for the device toolchain)
+#if !defined(BOARD_JC4827W543) && !defined(BOARD_PICOCALC)  // tiny386 is not built for the S3 board (too big; vendored core not wired for the device toolchain) or the PicoCalc (RP2350: 520KB SRAM, no memory-mapped PSRAM)
 /*
 **
 ** File: fmopl.c -- software implementation of FM sound generator
@@ -1262,4 +1262,4 @@ int main(int argc, char *argv[])
 }
 #endif
 
-#endif // !defined(BOARD_JC4827W543)
+#endif // !defined(BOARD_JC4827W543) && !defined(BOARD_PICOCALC)

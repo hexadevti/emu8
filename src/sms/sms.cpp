@@ -1,3 +1,10 @@
+// This SMS translation unit is compiled out entirely on boards that clear
+// BOARD_HAS_Z80_CORES (the PicoCalc's original RP2040 mainboard -- see board.h for why).
+// emu.h must be included FIRST because it is what pulls in board.h and defines the macro;
+// the guard below then empties the file, handing this core's static RAM to the Apple II.
+#include "../../emu.h"
+#if BOARD_HAS_Z80_CORES
+
 // sms.cpp - device-side glue for the Sega Master System platform: allocation, ROM load from SD, the
 // core-0 render push, the core-1 run loop, input injection, and the settings (file browser / load)
 // hooks. This is the only SMS file that pulls in emu.h (Arduino/board), keeping the rest of src/sms/
@@ -9,7 +16,7 @@
 #include "../../emu.h"
 #include "sms.h"
 #include "sms_cart.h"
-#include <dirent.h>
+#include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
 
 static uint16_t* smsScratch = nullptr;   // per-frame RGB565 conversion band (like nesScratch/msxScratch)
 static uint8_t*  g_romBuf   = nullptr;   // device cartridge image (PSRAM); freed on reload
@@ -29,25 +36,15 @@ static bool smsEndsCI(const std::string& s, const char* suf) {
 
 // Scan SD root for *.sms / *.bin into smsFiles.
 #define SMS_MAX_FILES 200
-void loadSmsFilesSync() {
-  smsFiles.clear();
-  smsFiles.reserve(SMS_MAX_FILES);
-  DIR* dp = opendir(SD_VFS_ROOT);
-  if (dp) {
-    struct dirent* de; int scanned = 0;
-    while ((de = readdir(dp)) != nullptr) {
-      if (de->d_type == DT_DIR) continue;
-      std::string nm = de->d_name;
-      if (smsEndsCI(nm, ".sms") || smsEndsCI(nm, ".bin"))
-        smsFiles.push_back(std::string("/") + nm);
-      if ((++scanned & 0x3f) == 0) ::uiDirScanProgress((int)smsFiles.size());
-      if ((int)smsFiles.size() >= SMS_MAX_FILES) break;
-    }
-    closedir(dp);
-  }
-  sprintf(buf, "SMS: %d ROM file(s) on SD root", (int)smsFiles.size());
-  printLog(buf);
+// SD ROM browser (.sms/.bin + subdirectories); see src/shared/filebrowser.h.
+static bool smsAccept(const std::string &n) {
+  return smsEndsCI(n, ".sms") || smsEndsCI(n, ".bin");
 }
+static FileBrowser smsBrowser = { "SMS", &smsFiles, smsAccept, nullptr, SMS_MAX_FILES, "/" };
+
+void loadSmsFilesSync()      { fbScan(smsBrowser); }
+void smsBrowseEnter(const char *path) { fbEnter(smsBrowser, path); }
+void smsBrowseUp()           { fbUp(smsBrowser); }
 
 // ============================ platform entry points =============================================
 void smsSetup() {
@@ -208,3 +205,5 @@ bool smsRenderLoadWarning() {
   }
   return true;
 }
+
+#endif  // BOARD_HAS_Z80_CORES

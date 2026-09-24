@@ -17,7 +17,11 @@ const uint16_t colors16[16] = {tft.color565(0, 0, 0), tft.color565(147, 11, 124)
                                tft.color565(7, 168, 224), tft.color565(157, 172, 255), tft.color565(93, 247, 132), tft.color565(255, 255, 255)};
 int margin_x = 20;
 int margin_y = 24;
+#if defined(BOARD_PICOCALC)
+PicoMutex page_lock;          // arm-none-eabi libstdc++ has no std::mutex; see pico_shim.h
+#else
 std::mutex page_lock;
+#endif
 uint16_t tx = 0, ty = 0;
 
 // FS / misc

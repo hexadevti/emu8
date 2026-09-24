@@ -111,6 +111,9 @@ public:
   bool remove(const char *path) { return ::remove(sdHostPath(path).c_str()) == 0; }
   bool mkdir(const char *path);
   bool rmdir(const char *path) { return ::rmdir(sdHostPath(path).c_str()) == 0; }
+  bool rename(const char *from, const char *to) {
+    return ::rename(sdHostPath(from).c_str(), sdHostPath(to).c_str()) == 0;
+  }
 };
 
 // --- inline out-of-class definitions (header-only; inline = no ODR clash across TUs) ---

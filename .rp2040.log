@@ -1,0 +1,14 @@
+In file included from C:\Users\lucia\repos\emu8\emu.h:11,
+                 from C:\Users\lucia\repos\emu8\emu8.ino:1:
+C:\Users\lucia\repos\emu8\board.h:86:9: warning: 'BOARD_NAME' redefined
+   86 | #define BOARD_NAME            "ClockworkPi PicoCalc (RP2350)"
+      |         ^~~~~~~~~~
+<command-line>: note: this is the location of the previous definition
+In file included from C:\Users\lucia\repos\emu8\emu.h:11,
+                 from C:\Users\lucia\repos\emu8\src\shared\optionsui.cpp:1:
+C:\Users\lucia\repos\emu8\board.h:86:9: warning: 'BOARD_NAME' redefined
+   86 | #define BOARD_NAME            "ClockworkPi PicoCalc (RP2350)"
+      |         ^~~~~~~~~~
+<command-line>: note: this is the location of the previous definition
+Sketch uses 435588 bytes (21%) of program storage space. Maximum is 2027520 bytes.
+Global variables use 131148 bytes (50%) of dynamic memory, leaving 130996 bytes for local variables. Maximum is 262144 bytes.

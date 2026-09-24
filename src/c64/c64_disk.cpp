@@ -3,7 +3,7 @@
 #include "../desktop/debug_bridge.h"   // dbgDiskRead: desktop disk-read heat map (no-op on device)
 #endif
 #include "c64.h"
-#include <dirent.h>   // raw POSIX directory enumeration (fast browser scan; see loadC64FilesSync)
+#include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
 // SD_VFS_ROOT (the SD mount path) is defined in emu.h.
 
 // C64 program / disk loading.
@@ -48,100 +48,22 @@ static void c64QueueRun() {
 // The browser shows the current directory: a ".." up-entry, subdirectories (stored with a
 // trailing "/"), then matching files - all as full paths. The options UI navigates into a
 // directory entry / ".." instead of selecting it.
-static String c64BrowseDir = "/";
 
 // Cap the entry count so a huge directory can't exhaust the fragmented C64 heap (each entry
 // is a heap-backed std::string). Beyond this, the listing is truncated - organise into
 // subfolders to see the rest.
 #define C64_MAX_FILES 250
 
-// Add one browser entry (skips "."/".." and self), given its basename + dir flag. `prefix`
-// is the current directory's path prefix; dirs are stored with a trailing "/", files are
-// filtered to .prg/.d64/.crt. Shared by the fast readdir path and the openNextFile fallback.
-static void c64AddEntry(const std::string &prefix, const char *name, bool isDir) {
-  if (!name || !*name || !strcmp(name, ".") || !strcmp(name, "..")) return;
-  std::string full = prefix + name;
-  if (isDir) c64Files.push_back(full + "/");                   // dir marker = trailing slash
-  else if (endsWithCI(full, ".prg") || endsWithCI(full, ".d64") || endsWithCI(full, ".crt"))
-    c64Files.push_back(full);
+// Entry filter. Everything else -- the ".." entry, subdirectories, the readdir fast path, the
+// openNextFile fallback, the entry cap and the sort -- lives in the shared browser.
+static bool c64Accept(const std::string &n) {
+  return endsWithCI(n, ".prg") || endsWithCI(n, ".d64") || endsWithCI(n, ".crt");
 }
+static FileBrowser c64Browser = { "C64", &c64Files, c64Accept, nullptr, C64_MAX_FILES, "/" };
 
-void loadC64FilesSync()
-{
-  c64Files.clear();
-  c64Files.reserve(C64_MAX_FILES);                            // allocate the array once
-  if (c64BrowseDir != "/") c64Files.push_back("..");          // go-up entry
-
-  std::string prefix = (c64BrowseDir == "/") ? "/" : (std::string(c64BrowseDir.c_str()) + "/");
-  bool truncated = false;
-  int scanned = 0;
-  unsigned long t0 = millis();
-
-  // Fast path: enumerate with raw POSIX readdir(). Each call returns the entry name AND a
-  // file/dir flag (d_type) directly from the FAT directory record, advancing the directory
-  // read once (O(n) total). Arduino's File::openNextFile() instead does a full fopen()+stat()
-  // per entry, which re-walks the path from the FS root every time - 0.2-2s each on this 4MHz
-  // SPI SD, so listing a folder took *seconds* and tripped the watchdog. readdir avoids all
-  // of that. (FatFS skips "."/".." itself; we guard anyway.)
-  String vfsPath = SD_VFS_ROOT;
-  if (c64BrowseDir != "/") vfsPath += c64BrowseDir;
-  DIR *dp = opendir(vfsPath.c_str());
-  if (dp) {
-    struct dirent *de;
-    while ((de = readdir(dp)) != nullptr) {
-      c64AddEntry(prefix, de->d_name, de->d_type == DT_DIR);
-      if ((++scanned & 0x3f) == 0) ::uiDirScanProgress((int)c64Files.size());  // progress + yield
-      if ((int)c64Files.size() >= C64_MAX_FILES) { truncated = true; break; }
-    }
-    closedir(dp);
-  } else {
-    // Fallback: the mountpoint isn't the assumed "/sd". Use the (slow) Arduino API so the
-    // browser still works; the core-0 watchdog is disabled (see videoSetup) so it can't reboot.
-    File dir = FSTYPE.open(c64BrowseDir.c_str());
-    if (!dir || !dir.isDirectory()) {
-      if (dir) dir.close();
-      sprintf(buf, "C64: cannot open %s", c64BrowseDir.c_str());
-      printLog(buf);
-      return;
-    }
-    File file = dir.openNextFile();
-    while (file) {
-      const char *nmc = file.name();                           // can be a full path on some cores
-      if (nmc && *nmc) {
-        const char *base = strrchr(nmc, '/');
-        c64AddEntry(prefix, base ? base + 1 : nmc, file.isDirectory());
-      }
-      file = dir.openNextFile();
-      if ((++scanned & 0x0f) == 0) ::uiDirScanProgress((int)c64Files.size());
-      else                          vTaskDelay(1);
-      if ((int)c64Files.size() >= C64_MAX_FILES) { truncated = true; break; }
-    }
-    file.close();
-    dir.close();
-  }
-
-  sprintf(buf, "C64: %s -> %d entr(ies) in %lums (scanned %d)%s", c64BrowseDir.c_str(),
-          (int)c64Files.size(), millis() - t0, scanned, truncated ? " (TRUNCATED)" : "");
-  printLog(buf);
-}
-
-// Navigate into a directory entry (full path, optional trailing "/") and rescan.
-void c64BrowseEnter(const char *path)
-{
-  c64BrowseDir = path;
-  while (c64BrowseDir.length() > 1 && c64BrowseDir.endsWith("/"))
-    c64BrowseDir.remove(c64BrowseDir.length() - 1);
-  loadC64FilesSync();
-}
-
-// Navigate to the parent directory and rescan.
-void c64BrowseUp()
-{
-  if (c64BrowseDir == "/") return;
-  int sl = c64BrowseDir.lastIndexOf('/');
-  c64BrowseDir = (sl <= 0) ? "/" : c64BrowseDir.substring(0, sl);
-  loadC64FilesSync();
-}
+void loadC64FilesSync()      { fbScan(c64Browser); }
+void c64BrowseEnter(const char *path) { fbEnter(c64Browser, path); }
+void c64BrowseUp()           { fbUp(c64Browser); }
 
 // ---------------------------------------------------------------------------
 // .prg loader
@@ -367,6 +289,10 @@ bool c64D64LoadDirectory(uint16_t altAddr, uint16_t *endAddr)
 // ---------------------------------------------------------------------------
 // Menu dispatch: load the highlighted image (.crt mounts & resets into the cartridge;
 // .d64 mounts and auto-loads/runs the first program "*"; .prg loads & runs).
+//
+// This is the IMMEDIATE loader: it writes straight into c64::ram and queues RUN in the KERNAL
+// keyboard buffer, both of which only make sense at a clean BASIC prompt. Call it from the
+// BASIC-READY trap (cpuLoop) or at boot -- everything else goes through c64LoadAndRun() below.
 // ---------------------------------------------------------------------------
 bool c64LoadSelected(const char *path)
 {
@@ -389,4 +315,30 @@ bool c64LoadSelected(const char *path)
     return true;
   }
   return c64LoadPRG(path);
+}
+
+// Swap in a different image while the machine is already running something. The immediate loader
+// above assumes a machine sitting at READY: a game that is already running owns the memory map
+// ($01), the IRQ vectors and the VIC bank, and it never reads the keyboard buffer c64QueueRun()
+// writes "RUN" into. Dropping a second image on top of that is what made every load after the
+// first one misbehave -- and made loading it twice (the first attempt crashing back to BASIC,
+// the second landing on a clean prompt) the only way through.
+//
+// So reset the machine and hand the load to the same BASIC-READY trap the boot autoload uses:
+// the KERNAL re-inits itself, reaches $A480, and cpuLoop then calls c64LoadSelected() on a clean
+// machine. A .crt is unchanged -- it mounts and autostarts through its own reset.
+bool c64LoadAndRun(const char *path)
+{
+  std::string p = path;
+  if (endsWithCI(p, ".crt")) return c64LoadCRT(path);
+
+  // Unmount before the reset, not after: with a cart still mapped the KERNAL would autostart it
+  // instead of booting to BASIC, and the deferred load would never see its READY prompt.
+  c64CartUnmount();
+  selectedC64FileName = path;          // what the trap (and AUTOLOAD) will load
+  c64AutoloadPending  = true;          // cpuLoop loads it once the KERNAL reaches $A480 (READY)
+  c64::c64ResetReq    = true;
+  sprintf(buf, "C64: reset, then load %s at READY", path);
+  printLog(buf);
+  return true;
 }

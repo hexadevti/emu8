@@ -1,4 +1,4 @@
-#if !defined(BOARD_JC4827W543)  // tiny386 is not built for the S3 board (too big; vendored core not wired for the device toolchain)
+#if !defined(BOARD_JC4827W543) && !defined(BOARD_PICOCALC)  // tiny386 is not built for the S3 board (too big; vendored core not wired for the device toolchain) or the PicoCalc (RP2350: 520KB SRAM, no memory-mapped PSRAM)
 // tiny386.cpp — emu8 glue for the vendored tiny386 i386 PC emulator (hchunhui/tiny386, BSD-3).
 //
 // This TU includes emu.h (tft / printLog / dispatch surface) and drives the machine through the
@@ -10,10 +10,10 @@
 // render loop (src/shared/video.cpp). The VGA core renders RGB565 directly (vga.h BPP=16); we
 // nearest-scale that framebuffer to the panel, like pcxtRenderFrame() pushes CGA bands.
 
-#include "emu.h"
+#include "../../emu.h"
 #include "tiny386.h"
 #include "tiny386_core.h"
-#include <dirent.h>
+#include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
 #include <ctype.h>
 
 // Read a whole file from the SD card into a freshly malloc'd buffer (caller frees). load_rom() in
@@ -354,26 +354,16 @@ static bool t386EndsCI(const std::string &s, const char *ext)
     if (tolower((unsigned char)s[s.size() - n + i]) != tolower((unsigned char)ext[i])) return false;
   return true;
 }
-void loadTiny386FilesSync()
-{
-  tiny386Files.clear();
-  DIR *dp = opendir(SD_VFS_ROOT);
-  if (dp) {
-    struct dirent *de; int scanned = 0;
-    while ((de = readdir(dp)) != nullptr) {
-      if (de->d_type == DT_DIR) continue;
-      std::string nm = de->d_name;
-      if (t386EndsCI(nm, ".img") || t386EndsCI(nm, ".ima") ||
-          t386EndsCI(nm, ".vhd") || t386EndsCI(nm, ".hdd"))
-        tiny386Files.push_back(std::string("/") + nm);
-      if ((++scanned & 0x3f) == 0) ::uiDirScanProgress((int)tiny386Files.size());
-      if ((int)tiny386Files.size() >= TINY386_MAX_FILES) break;
-    }
-    closedir(dp);
-  }
-  sprintf(buf, "TINY386: %d disk image(s) on SD root", (int)tiny386Files.size());
-  printLog(buf);
+// SD disk-image browser (.img/.ima/.vhd/.hdd + subdirectories); see src/shared/filebrowser.h.
+static bool t386Accept(const std::string &n) {
+  return t386EndsCI(n, ".img") || t386EndsCI(n, ".ima") ||
+         t386EndsCI(n, ".vhd") || t386EndsCI(n, ".hdd");
 }
+static FileBrowser t386Browser = { "TINY386", &tiny386Files, t386Accept, nullptr, TINY386_MAX_FILES, "/" };
+
+void loadTiny386FilesSync()      { fbScan(t386Browser); }
+void tiny386BrowseEnter(const char *path) { fbEnter(t386Browser, path); }
+void tiny386BrowseUp()           { fbUp(t386Browser); }
 void tiny386ScanFiles() { loadTiny386FilesSync(); }
 
-#endif // !defined(BOARD_JC4827W543)
+#endif // !defined(BOARD_JC4827W543) && !defined(BOARD_PICOCALC)

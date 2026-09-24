@@ -1,3 +1,7 @@
+// Not built for the PicoCalc (RP2350): this core needs multi-megabyte ps_malloc'd guest RAM,
+// and the board has 520KB of SRAM with its 8MB PSRAM on plain GPIOs (not memory-mapped). The
+// shared dispatch/render/UI code links against src/picocalc/bigram_stubs.cpp instead.
+#if !defined(BOARD_PICOCALC)
 // pcxt_machine.cpp - PC-XT machine glue (8086 + PIC x2 + PIT + i8042 + MC146818 + CGA).
 //
 // Trimmed port of FabGL's PCEmulator Machine. Memory-agnostic: the 1MB RAM and
@@ -480,3 +484,4 @@ void Machine::autoDetectDriveGeometry(int drive)
   m_diskHeads[drive]     = h;
   m_diskSectors[drive]   = s;
 }
+#endif // !defined(BOARD_PICOCALC)

@@ -1,7 +1,5 @@
 #include "../../emu.h"
 
-
-
 #include "bootlogo.h"   // embedded boot-splash logo (RGB565)
 #include <esp_system.h>          // esp_reset_reason()
 #include <esp_attr.h>            // RTC_NOINIT_ATTR
@@ -9,12 +7,21 @@
 #include "esp_task_wdt.h"        // esp_task_wdt_reconfigure (core 3.x TWDT, replaces disableCore0WDT)
 #endif
 bool splashActive = true; // true until the boot splash times out or is dismissed
+#if defined(BOARD_PICOCALC)
+// Keyboard-driven splash navigation (this board has no touch panel). input_picocalc.cpp posts
+// one of SPLASH_KEY_* here while splashActive is set, instead of dispatching that key to the
+// core; splashService() consumes it on the next render pass. Single producer (the input pump,
+// which runs from displayFlush() on this very task) and single consumer, so a plain volatile
+// byte is enough -- no queue needed.
+volatile int8_t splashKeyEvent = 0;
+#endif
 
 // Boot-splash policy. The SELECT SYSTEM banner only appears on a hardware reset (power-on / RST
 // button) or when the user explicitly asks for it via the "Reboot" settings button / Ctrl-F5 --
 // which call requestSplashOnNextBoot() to stash a magic in RTC memory (it survives the soft reset)
 // just before restarting. Selecting a platform on the splash, and the mount+reboot paths, restart
 // WITHOUT the magic, so they boot straight into the chosen system without re-showing the banner.
+
 RTC_NOINIT_ATTR static uint32_t splashOnBootMagic;
 #define SPLASH_ON_BOOT_MAGIC 0x5350A5AAu
 void requestSplashOnNextBoot() { splashOnBootMagic = SPLASH_ON_BOOT_MAGIC; }
@@ -29,20 +36,125 @@ int height = 192;
 // (no contiguous 8K block) -> black screen. Static can't fail. Fits the static budget now that
 // the framebuffer shares Apple's RAM buffer (see sharedBigBuf). 8K: SD scan + TFT run here.
 static StaticTask_t renderTaskTCB;
-static StackType_t  renderTaskStack[8192];
+// Arduino-ESP32 sizes task stacks in BYTES; vanilla FreeRTOS (the PicoCalc's RP2350 core) sizes
+// them in 4-byte WORDS. The number below is used BOTH as the array length and as the depth passed
+// to xTaskCreateStatic*, so on the Pico the same 8192 would silently reserve 32KB out of 520KB.
+// 2048 words = the same 8KB this task has always had.
+#if defined(BOARD_PICOCALC)
+#define RENDER_TASK_STACK 2048
+#else
+#define RENDER_TASK_STACK 8192
+#endif
+static StackType_t  renderTaskStack[RENDER_TASK_STACK];
 
-#if !BOARD_DISPLAY_GFX && !defined(BOARD_DESKTOP)
+#if !BOARD_DISPLAY_GFX && !defined(BOARD_DESKTOP) && !defined(BOARD_PICOCALC)
 // On TFT_eSPI boards drawing goes straight to the 320x240 panel; the canvas flush and the
 // UI/video mode switch are no-ops. (The Arduino_GFX boards define these in display_gfx.cpp;
-// the desktop SDL backend defines them in src/desktop/display_sdl.cpp.)
+// the desktop SDL backend defines them in src/desktop/display_sdl.cpp; the PicoCalc in
+// src/picocalc/display_picocalc.cpp, where displayFlush() also polls the I2C keyboard.)
 void displayFlush() {}
 void displaySetUiMode(bool) {}
 void displaySetVideoRect(int, int) {}
 void displaySetVideoFill(int, int, bool) {}
 #endif
 
+// ---- boot progress screen ------------------------------------------------------------------
+// What this replaced: a console that mirrored every printLog() line onto the panel. It made
+// bring-up debuggable, but to anyone who had just switched the unit on it was a wall of log spam
+// -- and it did not cover the two longest pauses in the boot AT ALL, because both happen before
+// it could exist. picocalcWaitForMainboard() can sit there for seconds, and logSetup() waits up
+// to five more for a USB terminal that is usually not coming. THAT was the black screen. So the
+// panel now comes up ahead of both waits and shows one line naming the step the firmware is
+// actually on. The full log still goes to USB CDC, which is where a log belongs.
+#if defined(BOARD_PICOCALC)
+static bool s_bootProg = false;
+static const int kBootMsgY = 152;      // clear of the logo, which occupies rows 38..119
+
+void bootProgressBegin()
+{
+  tft.begin();                         // idempotent -- videoSetup() calls it again below
+  tft.fillScreen(TFT_BLACK);
+  tft.fillPanelBlack();                // the bars too, or a warm reboot leaves the old frame in them
+  tft.setSwapBytes(true);
+  tft.pushImage((DISP_LOGICAL_W - BOOT_LOGO_W) / 2, 38, BOOT_LOGO_W, BOOT_LOGO_H, bootLogo);
+  tft.setSwapBytes(false);
+  s_bootProg = true;
+  bootProgressStep("Starting up");
+}
+
+void bootProgressStep(const char *what)
+{
+  if (!s_bootProg || !what) return;
+  Serial.println(what);                // deliberately not printLog(): no longer mirrored anywhere
+  tft.fillRect(0, kBootMsgY - 11, DISP_LOGICAL_W, 22, TFT_BLACK);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(tft.color565(0, 200, 120), TFT_BLACK);
+  tft.drawString(what, DISP_LOGICAL_W / 2, kBootMsgY, 2);
+}
+
+void bootProgressEnd()
+{
+  if (!s_bootProg) return;
+  s_bootProg = false;
+  // The one thing the old console did that is worth keeping: say so when the card did not mount.
+  // Without it a missing SD is silent until the emulator arrives with an empty disk list.
+  if (!diskAttached && !hdAttached) {
+    tft.fillRect(0, kBootMsgY - 11, DISP_LOGICAL_W, 22, TFT_BLACK);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(tft.color565(255, 70, 70), TFT_BLACK);
+    tft.drawString("SD card not found", DISP_LOGICAL_W / 2, kBootMsgY, 2);
+    delay(1500);
+  }
+}
+#else
+// Other boards put the panel up inside videoSetup() and have no letterbox bars to draw in;
+// the calls in emu8.ino stay unconditional so the boot sequence reads the same everywhere.
+void bootProgressBegin() {}
+void bootProgressStep(const char *) {}
+void bootProgressEnd() {}
+#endif
+
+// ---- "Ctrl-F1 for options" hint ------------------------------------------------------------
+// Lives in the TOP letterbox bar (panel rows 0..39), which no core and no menu ever draws in, so
+// it cannot cover the emulated screen and the emulator's own clear-screen -- which writes exactly
+// 320x240 through the addr window -- cannot erase it early. The bottom bar was the other option
+// and is taken by the Disk II drive light further down this file.
+#if defined(BOARD_PICOCALC)
+static uint8_t  s_hintState = 0;              // 0 = waiting for the splash, 1 = showing, 2 = done
+static uint32_t s_hintUntil = 0;
+static volatile bool s_hintKeyed = false;     // set from the keyboard task, read here
+
+static void hintClearBar() { tft.fillPanelRect(0, 0, PANEL_NATIVE_W, DISP_OFFSET_Y, TFT_BLACK); }
+
+void bootHintDismiss() { s_hintKeyed = true; }   // no drawing: this runs on the keyboard's task
+
+void bootHintTick()
+{
+  if (s_hintState == 2) return;
+  if (s_hintState == 0) {
+    // Armed on the first frame after the splash closes, not in videoSetup(), because the splash
+    // owns the whole panel and would be sitting on top of the hint for as long as it is up.
+    s_hintKeyed = false;                      // the keypress that dismissed the splash is not ours
+    hintClearBar();
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(tft.color565(190, 190, 90));
+    tft.drawPanelString("Ctrl-F1 for options", PANEL_NATIVE_W / 2, DISP_OFFSET_Y / 2, 2);
+    s_hintUntil = millis() + 5000;
+    s_hintState = 1;
+    return;
+  }
+  if (!s_hintKeyed && (int32_t)(millis() - s_hintUntil) < 0) return;
+  hintClearBar();
+  s_hintState = 2;
+}
+#else
+void bootHintTick() {}
+void bootHintDismiss() {}
+#endif
+
 void videoSetup()
 {
+  bootProgressEnd();   // the render loop below owns the panel from here on
   printLog("Video Setup...");
   // Decide whether the boot splash shows this run (see splashOnBootMagic above): a soft reboot
   // (ESP.restart) skips it UNLESS the magic was set; any hardware reset (power-on / RST) shows it.
@@ -59,7 +171,7 @@ void videoSetup()
   // main() calls renderLoop(NULL) after spawning the CPU thread. Don't spawn it as a task here.
   printLog("video: renderLoop runs on main thread (desktop)");
 #else
-  TaskHandle_t h = xTaskCreateStaticPinnedToCore(renderLoop, "renderLoop", 8192, NULL, 1,
+  TaskHandle_t h = xTaskCreateStaticPinnedToCore(renderLoop, "renderLoop", RENDER_TASK_STACK, NULL, 1,
                                                  renderTaskStack, &renderTaskTCB, 0); // core 0
   printLog(h ? "video: renderLoop started" : "video: renderLoop FAILED");
 #endif
@@ -102,31 +214,92 @@ float screen_height = 192;
 uint16_t last_y = 0;
 uint16_t last_x = 0;
 
-// Boot splash + platform selector. Shows the logo and three platform buttons; the
-// current platform is highlighted. Apple II is implemented and default; C64/NES are
-// placeholders ("SOON") until their cores are added. Tapping a platform selects it
-// (switching to a different one saves to EEPROM and reboots so setup() can init it);
-// tapping elsewhere, a joystick button, or the timeout boots the current platform.
+// Boot splash + system selector. Shows the logo and one button per system; the running one is
+// highlighted. Tapping a system selects it (switching saves to EEPROM and reboots so setup() can
+// init the new core); tapping elsewhere, a joystick button, or the timeout boots the current one.
 // Runs on core 0 from renderLoop (which owns the TFT).
-#define SPLASH_MS    12000   // generous: time to read the menu and tap a platform
+//
+// The button list is NOT the Platform enum any more. Apple II+ and Apple IIe are two entries on
+// one core: they differ only in which memory map memoryAlloc() builds and whether iie.bin is
+// loaded, and since that is now decided once at startup for the selected machine -- rather than
+// both maps being allocated so a MACHINE toggle could flip between them -- the model has to be
+// chosen here, like any other system. Every other entry is one platform with iie = -1 ("n/a").
+#define SPLASH_MS    12000   // generous: time to read the menu and tap a system
 #define SPLASH_BTN_Y 164
 #define SPLASH_BTN_H 44
-static const int splashBtnX[9] = {2, 37, 72, 107, 142, 177, 212, 247, 282};  // nine platforms across the 320px panel
-static const int splashBtnW    = 33;                                    // (33px + 2px gap at 35px pitch)
-static const char *splashLabels[9] = {"APPLE", "C64", "NES", "ATARI", "IIGS", "MSX", "SMS", "PCXT", "386"};
+struct SplashSystem { const char *label; uint8_t platform; int8_t iie; const char *why; };
+static const SplashSystem splashSystems[] = {
+  { "II+",   PLATFORM_APPLE2,   0, "SOON"   },
+  { "IIe",   PLATFORM_APPLE2,   1, "NO RAM" },   // greyed once memoryAlloc has found it does not fit
+  { "C64",   PLATFORM_C64,     -1, "SOON"   },
+  { "NES",   PLATFORM_NES,     -1, "SOON"   },
+  { "ATARI", PLATFORM_ATARI,   -1, "SOON"   },
+  { "IIGS",  PLATFORM_IIGS,    -1, "SOON"   },
+  { "MSX",   PLATFORM_MSX,     -1, "SOON"   },
+  { "SMS",   PLATFORM_SMS,     -1, "SOON"   },
+  { "PCXT",  PLATFORM_PCXT,    -1, "SOON"   },
+  { "386",   PLATFORM_TINY386, -1, "SOON"   },
+};
+#define SPLASH_N     ((int)(sizeof(splashSystems) / sizeof(splashSystems[0])))
+#define SPLASH_PITCH (320 / SPLASH_N)      // ten buttons across the 320px panel: 32px pitch,
+#define SPLASH_BTN_W (SPLASH_PITCH - 1)    // 31px wide, 1px gap
 
 static int splashHitTest(int16_t x, int16_t y)
 {
   if (y < SPLASH_BTN_Y || y >= SPLASH_BTN_Y + SPLASH_BTN_H) return -1;
-  for (int i = 0; i < 9; i++)
-    if (x >= splashBtnX[i] && x < splashBtnX[i] + splashBtnW) return i;
+  for (int i = 0; i < SPLASH_N; i++)
+    if (x >= i * SPLASH_PITCH && x < i * SPLASH_PITCH + SPLASH_BTN_W) return i;
   return -1;
 }
 
-static void splashDrawBtn(int i, const char *label, bool enabled)
+// Which platforms this BOARD can actually run. IIGS / PC-XT / tiny386 each want 1-4MB of
+// ps_malloc'd guest RAM, so they only exist where BOARD_HAS_BIGRAM_CORES is set (see the
+// matching #if gates in emu8.ino, which also keep their cores out of the link); tiny386
+// additionally only builds on the P4 / desktop. MSX / SMS go the same way wherever
+// BOARD_HAS_Z80_CORES is clear. Disabled buttons draw greyed with "SOON" and ignore taps.
+static bool splashEnabled(int i)
 {
-  bool active = (i == currentPlatform);
-  int x = splashBtnX[i], w = splashBtnW, y = SPLASH_BTN_Y, h = SPLASH_BTN_H;
+  // The Apple IIe is the one entry whose availability is not a property of the build: its map plus
+  // 30K of system ROM is ~119K of heap, which some boards have and the RP2040 does not. memoryAlloc()
+  // is what finds out, by trying, so the first IIe boot on a board that cannot hold one comes up as
+  // a II+ and sets this; from then on the button is greyed "NO RAM" instead of lying.
+  if (splashSystems[i].iie > 0 && apple2IIeUnavailable) return false;
+  switch (splashSystems[i].platform) {
+    case PLATFORM_IIGS:
+    case PLATFORM_PCXT:     return BOARD_HAS_BIGRAM_CORES;
+    case PLATFORM_MSX:
+    case PLATFORM_SMS:      return BOARD_HAS_Z80_CORES;   // 34K of static RAM the RP2040 needs back
+    case PLATFORM_TINY386:
+#if defined(BOARD_JC1060P470) || defined(BOARD_DESKTOP)
+      return BOARD_HAS_BIGRAM_CORES;   // i386 PC: P4 / desktop only
+#else
+      return false;                    // S3 (not built here) / CYD (no PSRAM)
+#endif
+    default:                return true;
+  }
+}
+
+// Which button the running system is. The Apple entries match on AppleIIe as well, so a II+
+// session highlights II+ and a IIe session highlights IIe.
+static int splashCurrentIndex()
+{
+  for (int i = 0; i < SPLASH_N; i++)
+    if (splashSystems[i].platform == currentPlatform &&
+        (splashSystems[i].iie < 0 || (splashSystems[i].iie != 0) == (bool)AppleIIe))
+      return i;
+  return 0;
+}
+
+// Which button is highlighted. -1 means "follow the running system", which is what touch boards
+// always use; the PicoCalc's keyboard nav below moves it independently before committing.
+static int splashCursor = -1;
+static inline int splashHighlight() { return splashCursor < 0 ? splashCurrentIndex() : splashCursor; }
+
+static void splashDrawBtn(int i, bool enabled)
+{
+  const char *label = splashSystems[i].label;
+  bool active = (i == splashHighlight());
+  int x = i * SPLASH_PITCH, w = SPLASH_BTN_W, y = SPLASH_BTN_Y, h = SPLASH_BTN_H;
   uint16_t face = !enabled ? tft.color565(28, 30, 38)
                 : active   ? tft.color565(0, 120, 215)
                            : tft.color565(44, 48, 60);
@@ -134,11 +307,11 @@ static void splashDrawBtn(int i, const char *label, bool enabled)
   tft.drawRoundRect(x, y, w, h, 6, active ? TFT_WHITE : tft.color565(70, 78, 92));
   tft.setTextDatum(MC_DATUM);
   tft.setTextColor(enabled ? TFT_WHITE : tft.color565(110, 118, 130), face);
-  int lblFont = (strlen(label) >= 4) ? 1 : 2;   // 44px buttons: shrink 4+ char labels (APPLE/ATARI/IIGS) to fit
+  int lblFont = ((int)strlen(label) * 12 <= w - 2) ? 2 : 1;   // font 2 is 12px/char, font 1 is 6px
   tft.drawString(label, x + w / 2, enabled ? y + h / 2 : y + h / 2 - 6, lblFont);
   if (!enabled) {
     tft.setTextColor(tft.color565(110, 118, 130), face);
-    tft.drawString("SOON", x + w / 2, y + h - 12, 1);
+    tft.drawString(splashSystems[i].why, x + w / 2, y + h - 12, 1);
   }
 }
 
@@ -148,15 +321,19 @@ static void splashFinish()           // boot the current platform
   clearScr = true;                   // wipe the whole panel before the emulator video starts
 }
 
-static void splashSelect(uint8_t platform)
+static void splashSelect(int idx)
 {
   // Deselect the previously highlighted button and mark the tapped one, swap the subtitle for a
-  // loading message, hold it for a second, then close the splash (or reboot if the platform
-  // changed, since setup() must re-init the new core).
-  uint8_t prev = currentPlatform;
-  currentPlatform = platform;          // drives the highlight in splashDrawBtn below
-  if (prev != platform) splashDrawBtn(prev, splashLabels[prev], true);   // redraw old as inactive
-  splashDrawBtn(platform, splashLabels[platform], true);                 // redraw new as active
+  // loading message, hold it for a second, then close the splash (or reboot if the system
+  // changed, since setup() must re-init the new core / rebuild the Apple memory map).
+  int     prevIdx  = splashCurrentIndex();
+  uint8_t prevPlat = currentPlatform;
+  bool    prevIIe  = AppleIIe;
+  currentPlatform = splashSystems[idx].platform;   // drives the highlight in splashDrawBtn below
+  if (splashSystems[idx].iie >= 0) AppleIIe = (splashSystems[idx].iie != 0);
+  splashCursor = -1;                   // ...so stop overriding it with the keyboard cursor
+  if (prevIdx != idx) splashDrawBtn(prevIdx, splashEnabled(prevIdx));
+  splashDrawBtn(idx, splashEnabled(idx));
   tft.fillRect(0, 140, 320, 20, TFT_BLACK);            // wipe the "SELECT SYSTEM" subtitle
   tft.setTextDatum(MC_DATUM);
   tft.setTextColor(tft.color565(0, 200, 120), TFT_BLACK);
@@ -164,10 +341,10 @@ static void splashSelect(uint8_t platform)
   displayFlush();
   delay(1000);
 
-  if (prev == platform) { splashFinish(); return; }
-  // Switching platforms needs a reboot to re-init. ESP.restart() (an on-chip reset from firmware)
-  // reboots this board cleanly - unlike the host-side RTS reset which wedges it. currentPlatform is
-  // already the new platform; persist it so setup() inits the saved platform after the restart.
+  if (prevPlat == currentPlatform && prevIIe == (bool)AppleIIe) { splashFinish(); return; }
+  // Switching systems needs a reboot to re-init. ESP.restart() (an on-chip reset from firmware)
+  // reboots this board cleanly - unlike the host-side RTS reset which wedges it. currentPlatform
+  // and AppleIIe are already the new ones; persist them so setup() builds the saved system.
   saveConfig();
   ESP.restart();
 }
@@ -185,45 +362,77 @@ static void splashService()
     tft.setTextDatum(MC_DATUM);
     tft.setTextColor(tft.color565(150, 160, 175), TFT_BLACK);
     tft.drawString("SELECT SYSTEM", 160, 150, 2);
-    splashDrawBtn(PLATFORM_APPLE2, "APPLE",  true);
-    splashDrawBtn(PLATFORM_C64,    "C64",    true);
-    splashDrawBtn(PLATFORM_NES,    "NES",    true);
-    splashDrawBtn(PLATFORM_ATARI,  "ATARI",  true);
-    splashDrawBtn(PLATFORM_IIGS,   "IIGS",   true);
-    splashDrawBtn(PLATFORM_MSX,    "MSX",    true);
-    splashDrawBtn(PLATFORM_SMS,    "SMS",    true);
-    splashDrawBtn(PLATFORM_PCXT,   "PCXT",   true);
-#if defined(BOARD_JC1060P470) || defined(BOARD_DESKTOP)
-    splashDrawBtn(PLATFORM_TINY386, "386",   true);    // i386 PC: P4 / desktop only
-#else
-    splashDrawBtn(PLATFORM_TINY386, "386",   false);   // S3 (not built here) / CYD (no PSRAM) -> shown as SOON
-#endif
+    for (int i = 0; i < SPLASH_N; i++) splashDrawBtn(i, splashEnabled(i));
     drawn = true;
   }
 
   int16_t tx, ty;
   if (touchRead(&tx, &ty)) {
     int b = splashHitTest(tx, ty);
-    if (b == PLATFORM_APPLE2)     splashSelect(PLATFORM_APPLE2);
-    else if (b == PLATFORM_C64)   splashSelect(PLATFORM_C64);
-    else if (b == PLATFORM_NES)   splashSelect(PLATFORM_NES);
-    else if (b == PLATFORM_ATARI) splashSelect(PLATFORM_ATARI);
-    else if (b == PLATFORM_IIGS)  splashSelect(PLATFORM_IIGS);
-    else if (b == PLATFORM_MSX)   splashSelect(PLATFORM_MSX);
-    else if (b == PLATFORM_SMS)   splashSelect(PLATFORM_SMS);
-    else if (b == PLATFORM_PCXT)  splashSelect(PLATFORM_PCXT);
-    else if (b == PLATFORM_TINY386) splashSelect(PLATFORM_TINY386);
-    else if (b < 0)               splashFinish();   // tapped outside -> boot current
+    if (b < 0)                 splashFinish();      // tapped outside -> boot current
+    else if (splashEnabled(b)) splashSelect(b);     // a "SOON" button just ignores the tap
     return;
   }
+
+#if defined(BOARD_PICOCALC)
+  // No touch panel here, so the splash is driven from the keyboard instead: left/right move
+  // the highlight over the enabled platforms, Enter commits (the same path a tap takes). Any
+  // nav key also restarts the timeout, so browsing the list cannot boot out from under you.
+  int8_t ev = splashKeyEvent;
+  splashKeyEvent = 0;
+  if (ev) {
+    int cur = splashHighlight();
+    if (ev == SPLASH_KEY_SELECT) { if (splashEnabled(cur)) splashSelect(cur); return; }
+    int n = cur;
+    do { n = (n + ev + SPLASH_N) % SPLASH_N; } while (!splashEnabled(n) && n != cur);   // skip SOON
+    if (n != cur) {
+      splashCursor = n;
+      splashDrawBtn(cur, splashEnabled(cur));
+      splashDrawBtn(n,   splashEnabled(n));
+    }
+    startMs = millis();
+    return;
+  }
+#endif
   if (millis() - startMs >= SPLASH_MS || Pb0 || Pb1 || Pb2 || Pb3) splashFinish();
 }
 
+#if defined(BOARD_PICOCALC)
+// Bring-up instrumentation. A black panel with a live emulator (audio playing, 6502 running)
+// is indistinguishable from a render task that was created but never scheduled, so say once a
+// second which core this task is actually on, how many passes it completed, and which branch
+// of the loop below it is taking. Costs one sprintf per second.
+static void renderHeartbeat()
+{
+  static uint32_t frames = 0, lastMs = 0;
+  frames++;
+  uint32_t now = millis();
+  if (now - lastMs < 1000) return;
+  lastMs = now;
+  char m[96];   // local, not the shared `buf`: this runs on the other core from setup()/loop()
+  sprintf(m, "video: %lu fps core=%u splash=%d opts=%d plat=%d clr=%d",
+          (unsigned long)frames, (unsigned)get_core_num(), (int)splashActive,
+          (int)OptionsWindow, (int)currentPlatform, (int)clearScr);
+  printLog(m);
+  frames = 0;
+}
+#endif
+
 void renderLoop(void *pvParameters)
 {
+#if defined(BOARD_PICOCALC)
+  {
+    char m[64];
+    sprintf(m, "video: renderLoop task entered on core %u", (unsigned)get_core_num());
+    printLog(m);
+  }
+#endif
 
   while (running)
   {
+#if defined(BOARD_PICOCALC)
+    renderHeartbeat();   // FIRST in the body: a heartbeat that stops tells us where it hung
+#endif
     // Push the previous iteration's frame to the panel. On Arduino_GFX boards the cores draw
     // into a PSRAM canvas and this streams it over QSPI; on TFT_eSPI boards it is a no-op
     // (drawing went straight to the panel). Flushing at the top covers every render path below,
@@ -241,6 +450,12 @@ void renderLoop(void *pvParameters)
     // direct NES draw (nothing in the canvas to flush) but runs normally for UI / menus / C64 / Atari.
     tft.setBypassCanvas(false);
 #endif
+#if defined(BOARD_PICOCALC)
+    // The settings menu draws on the whole 320x320 panel (optionsui.cpp). Once it has closed, go
+    // back to the letterboxed 320x240 and blacken the bars it drew over; the logical area is
+    // repainted by the platform code below (showHideOptionsWindow() already set clearScr).
+    if (!OptionsWindow && tft.setFullPanel(false)) tft.fillPanelBlack();
+#endif
 
     Vertical_blankingOn_Off = false;
     unsigned long startTime = millis();
@@ -253,6 +468,8 @@ void renderLoop(void *pvParameters)
       vTaskDelay(pdMS_TO_TICKS(15));
       continue;
     }
+
+    bootHintTick();    // first frame past the splash puts the hint up; five seconds later, down
 
     // Everything below the splash draws in UI mode by default (full-screen menus, warnings, the
     // on-screen keyboard); the per-platform emulator-video sections switch to video mode (centered
@@ -283,7 +500,6 @@ void renderLoop(void *pvParameters)
       vTaskDelay(pdMS_TO_TICKS(20));
       continue;
     }
-
 
     // SMS startup overlay: held while no .sms/.bin ROM is loaded. Still poll touch so a tap opens
     // SETTINGS (to pick a ROM); smsRenderLoadWarning() yields to the options window once it opens.
@@ -360,11 +576,14 @@ void renderLoop(void *pvParameters)
       else tft.setBypassCanvas(true);    // skipped frame: keep the flush a no-op, leave the last frame up
 #endif
       Vertical_blankingOn_Off = true;
-      vTaskDelay(pdMS_TO_TICKS(10));
+      // Unlike the other cores, nesRenderFrame() already blocks until the PPU hands over a fresh
+      // picture, so it paces this loop by itself. A fixed 10ms nap on top of that was pure latency
+      // -- a fifth of the whole display frame time. Yield one tick so the idle task still runs.
+      vTaskDelay(1);
       continue;
     }
 
-    // Atari 2600 core renders its own 160x192 framebuffer (filled by the TIA on the CPU core);
+    // Atari 2600 core renders its own 160x192+ framebuffer (filled by the TIA on the CPU core);
     // convert + push it here, doubled to 320 wide with top/bottom borders.
     if (currentPlatform == PLATFORM_ATARI)
     {
@@ -413,6 +632,7 @@ void renderLoop(void *pvParameters)
       continue;
     }
 
+#if BOARD_HAS_BIGRAM_CORES
     // Apple IIGS: the 65C816 (core 1) runs the firmware; draw its 40-col text page here.
     if (currentPlatform == PLATFORM_IIGS)
     {
@@ -484,6 +704,7 @@ void renderLoop(void *pvParameters)
 #endif
       continue;
     }
+#endif // BOARD_HAS_BIGRAM_CORES
 
     // 320x240 TFT: center the 280x192 raster (overriding the S3/VGA margins below).
     // When the touch keyboard is open, squeeze the raster into the top rows so the
@@ -505,12 +726,16 @@ void renderLoop(void *pvParameters)
 
     int rasterH = (int)screen_height; // matches the line count produced by coef192
 
-    if (!OptionsWindow && AppleIIe && !Cols40_80 && !DHiResOn_Off)
-    tft.setAddrWindow(0, margin_y, 320, rasterH); // Set the area to draw
-    else if (!OptionsWindow && AppleIIe && DHiResOn_Off && !videoColor)
-    tft.setAddrWindow(margin_x, margin_y, 280, rasterH); // DHiRes mono (centered 280)
-    else if (OptionsWindow || clearScr)
+    // clearScr is tested FIRST: the wipe below writes exactly 320*240 pixels, so the window has
+    // to be the full 320x240 or the surplus wraps back to the window origin and shifts the frame
+    // down by the overrun. The 40-col branch used to win this race on an AppleIIe at boot (its
+    // window is 320x192 = 61,440 px, 15,360 short of the clear) and cost a 48-row offset.
+    if (OptionsWindow || clearScr)
     tft.setAddrWindow(0, 0, 320, 240);
+    else if (AppleIIe && !Cols40_80 && !DHiResOn_Off)
+    tft.setAddrWindow(0, margin_y, 320, rasterH); // Set the area to draw
+    else if (AppleIIe && DHiResOn_Off && !videoColor)
+    tft.setAddrWindow(margin_x, margin_y, 280, rasterH); // DHiRes mono (centered 280)
     else
     tft.setAddrWindow(margin_x, margin_y, 280, rasterH);
     // fill-screen: stretch the raster to 100% of the panel (no 4:3 aspect, no side bars). Mirror the
@@ -1015,6 +1240,26 @@ void renderLoop(void *pvParameters)
     
     unsigned long endTime2 = millis();
     tft.endWrite();
+#if defined(BOARD_PICOCALC)
+    // Disk II drive light. It sits in the bottom letterbox bar, BELOW the 320x240 emulated
+    // screen, which is the one piece of panel the Apple raster does not own -- so it can never
+    // land on top of the picture, and the clear-screen path above (which writes exactly
+    // 320x240) never erases it. DriveMotorON_OFF is set by the $C0E8/$C0E9 soft switches in
+    // src/apple2/disk.cpp, so it lights when the real drive's lamp would.
+    //
+    // Redrawn only when it changes. The frame rate here is ~18fps and this is a 12x12 square
+    // that is usually not changing, so an unconditional write would be an SPI transaction and a
+    // pxFlush() per frame for nothing.
+    {
+      static int8_t ledOn = -1;                       // -1 = never drawn
+      int8_t want = DriveMotorON_OFF ? 1 : 0;
+      if (want != ledOn) {
+        ledOn = want;
+        tft.fillPanelRect(PANEL_NATIVE_W - 20, PANEL_NATIVE_H - 20, 12, 12,
+                          want ? tft.color565(255, 40, 40) : TFT_BLACK);
+      }
+    }
+#endif
     // Draw the touch keyboard over the bottom rows (only when it changed). The
     // squeezed raster above never touches this region, so one draw per change is
     // enough and there is no flicker.

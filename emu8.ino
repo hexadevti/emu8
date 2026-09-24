@@ -9,6 +9,18 @@ void setup() {
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, HIGH); // Turn off green LED (boards without an LED define LED_PIN = -1)
   }
+#if defined(BOARD_PICOCALC)
+  // Order matters twice over. The panel, the SD slot and the keyboard are all on the PicoCalc
+  // mainboard, which the Pico's own USB does NOT power, so nothing may be initialised until the
+  // unit is switched on. And the loading screen goes up BEFORE logSetup(), because that waits up
+  // to five seconds for a USB terminal to attach -- five seconds that used to be a black screen
+  // with no way to tell a slow boot from a dead one. Serial.begin() comes first so the waits can
+  // still log; logSetup() calls it again, which is harmless.
+  Serial.begin(115200);
+  picocalcWaitForMainboard();
+  bootProgressBegin();
+  bootProgressStep("Waiting for USB serial");
+#endif
   logSetup();
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
   // Arduino-ESP32 core 3.x (ESP32-P4): the loop task feeds the Task WDT each iteration but isn't
@@ -36,7 +48,27 @@ void setup() {
     delay(4000);
   }
 #endif
+  bootProgressStep("Reading settings");
   epromSetup();   // loads currentPlatform (and all saved settings) from EEPROM
+
+#if !BOARD_HAS_BIGRAM_CORES
+  // EEPROM (or an /emu8.cfg copied from a PSRAM board) can name a platform this build does not
+  // link. Normalise it here, before anything reads it: otherwise setup() falls through to the
+  // Apple II while loop() and renderLoop still dispatch on the stale value.
+  if (currentPlatform == PLATFORM_IIGS || currentPlatform == PLATFORM_PCXT ||
+      currentPlatform == PLATFORM_TINY386) {
+    printLog("Platform needs PSRAM and this board has none -> falling back to Apple II");
+    currentPlatform = PLATFORM_APPLE2;
+  }
+#endif
+#if !BOARD_HAS_Z80_CORES
+  // Same story for the Z80 cores: this board does not link MSX/SMS (board.h), but EEPROM can
+  // still name one from a build that did, and loop() would dispatch into a core that is gone.
+  if (currentPlatform == PLATFORM_MSX || currentPlatform == PLATFORM_SMS) {
+    printLog("Platform has no RAM budget on this board -> falling back to Apple II");
+    currentPlatform = PLATFORM_APPLE2;
+  }
+#endif
   c64FreeBtMem();   // BOTH platforms: reclaim the unused BT controller DRAM (~36K) up front so
                     // tasks/buffers have heap room (Apple's render/joystick tasks were failing).
 
@@ -44,8 +76,10 @@ void setup() {
   // and touch keyboard (oskSetup) are shared; each core initialises before videoSetup
   // so the render loop has valid state to draw (C64's render is null-guarded anyway).
   if (currentPlatform == PLATFORM_C64) {
+    bootProgressStep("Mounting SD card");
     FSSetup();         // SD next: its DMA buffer needs the contiguous low-DRAM region before
                        // the big C64 allocations (64K RAM + framebuffer) fragment it.
+    bootProgressStep("Starting the C64");
     c64Setup();        // 64K RAM, ROMs, VIC/CIA, reset 6510
     videoSetup();      // TFT + render loop (+ splash)
     oskSetup();
@@ -53,19 +87,27 @@ void setup() {
     sidSetup();        // 3-voice SID -> I2S DAC (GPIO26), LAST so its I2S DMA comes after SD
     c64Autostart();    // boot-autoload the saved image, if enabled
   } else if (currentPlatform == PLATFORM_NES) {
+    bootProgressStep("Mounting SD card");
     FSSetup();         // SD first: nesSetup loads the first .nes off the card
+    bootProgressStep("Loading the NES cartridge");
     nesSetup();        // 2K RAM, PPU, iNES loader (mappers 0-4), framebuffer = sharedBigBuf
     videoSetup();      // TFT + render loop (+ splash)
     oskSetup();
     joystickSetup();   // analog stick + buttons -> NES controller 1
     nesApuSetup();     // APU -> I2S DAC (GPIO26), LAST so its I2S DMA comes after SD (like SID)
   } else if (currentPlatform == PLATFORM_ATARI) {
+    bootProgressStep("Mounting SD card");
     FSSetup();         // SD first: atariSetup loads the first .a26/.bin off the card
+    bootProgressStep("Loading the Atari cartridge");
     atariSetup();      // 128B RAM, TIA, RIOT, cartridge loader, framebuffer = sharedBigBuf
     videoSetup();      // TFT + render loop (+ splash)
     oskSetup();
     joystickSetup();   // analog stick + buttons -> 2600 joystick + console switches
     atariAudioSetup(); // TIA audio -> I2S DAC (GPIO26), LAST so its I2S DMA comes after SD
+  // IIGS / PC-XT / tiny386 need 1-4MB of ps_malloc guest RAM. On boards without PSRAM
+  // (BOARD_HAS_BIGRAM_CORES 0, e.g. the PicoCalc's 520KB RP2350) they are neither selectable
+  // on the splash nor linked, so their cores cost nothing in flash or RAM.
+#if BOARD_HAS_BIGRAM_CORES
   } else if (currentPlatform == PLATFORM_IIGS) {
     FSSetup();          // SD FIRST: ROM 01 loads from /roms/iigs, plus the 5.25" .dsk / HD images
     iigsSetup();        // alloc banks + load ROM 01 from SD + reset 65C816
@@ -81,6 +123,8 @@ void setup() {
     oskSetup();
     joystickSetup();
     speakerSetup();     // Apple II-compatible 1-bit speaker ($C030) -> I2S amp, LAST (I2S DMA after SD)
+#endif
+#if BOARD_HAS_Z80_CORES
   } else if (currentPlatform == PLATFORM_MSX) {
     FSSetup();          // SD first: msxSetup loads the BIOS / first cart off the card
     msxSetup();         // 64K RAM + 16K VRAM + BIOS (SD or C-BIOS) + reset Z80/VDP/PPI/PSG
@@ -97,6 +141,8 @@ void setup() {
     oskSetup();
     joystickSetup();    // analog stick + buttons -> SMS controller port 1
     smsPsgSetup();      // SN76489 -> I2S, LAST so its I2S DMA comes after SD
+#endif
+#if BOARD_HAS_BIGRAM_CORES
   } else if (currentPlatform == PLATFORM_PCXT) {
     FSSetup();          // SD first: pcxtSetup auto-mounts the saved A:/C: disk images
     pcxtSetup();        // 1MB RAM (PSRAM) + 64K video RAM + install BIOS ROM + wire 8086/PIC/PIT/i8042/CGA
@@ -113,18 +159,32 @@ void setup() {
     oskSetup();
     joystickSetup();    // gamepad -> arrow/enter scancodes (M4)
     speakerSetup();     // PC-speaker -> I2S amp, LAST so its I2S DMA comes after SD
+#endif
   } else {             // Apple II
+    bootProgressStep(AppleIIe ? "Building the Apple IIe memory map"
+                              : "Building the Apple II+ memory map");
     memoryAlloc();
+    bootProgressStep("Mounting SD card");
     FSSetup();
     apple2LoadRoms();  // system ROMs from /roms/apple2 (sets apple2RomLoadFailed -> halt on failure)
-    diskSetup();
-    HDSetup();
+    // Either failure means the 6502 is not going to run, so skip the two SD scans and go straight
+    // to the warning screen. apple2RomLoadFailed belongs in this test as much as the alloc one: a
+    // ROM that would not fit leaves the heap nearly empty, and scanning the card from there ran it
+    // down far enough that FreeRTOS could not allocate a task stack -- a hard hang, not a message.
+    if (!apple2MemAllocFailed && !apple2RomLoadFailed) {
+      bootProgressStep("Scanning disk images");
+      diskSetup();
+      bootProgressStep("Scanning hard disk images");
+      HDSetup();
+    }
+    bootProgressStep("Starting the emulator");
     videoSetup();
     keyboardSetup();
     oskSetup();
     speakerSetup();
     joystickSetup();
   }
+  sdSerialSetup();     // SD file manager over this serial port (tools/sdmanager); idle until a host talks
   printLog("Ready.");
 }
 
@@ -137,11 +197,17 @@ void loop() {
     case PLATFORM_C64:    c64Loop(); break;
     case PLATFORM_NES:    nesLoop(); break;
     case PLATFORM_ATARI:  atariLoop(); break;
+#if BOARD_HAS_BIGRAM_CORES
     case PLATFORM_IIGS:   iigsLoop(); break;
+#endif
+#if BOARD_HAS_Z80_CORES
     case PLATFORM_MSX:    msxLoop(); break;
     case PLATFORM_SMS:    smsLoop(); break;
+#endif
+#if BOARD_HAS_BIGRAM_CORES
     case PLATFORM_PCXT:   pcxtLoop(); break;
     case PLATFORM_TINY386: tiny386Loop(); break;
+#endif
     default:              cpuLoop(); break;
   }
 }

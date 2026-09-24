@@ -1,3 +1,7 @@
+// Not built for the PicoCalc (RP2350): this core needs multi-megabyte ps_malloc'd guest RAM,
+// and the board has 520KB of SRAM with its 8MB PSRAM on plain GPIOs (not memory-mapped). The
+// shared dispatch/render/UI code links against src/picocalc/bigram_stubs.cpp instead.
+#if !defined(BOARD_PICOCALC)
 // cpu65816.cpp - WDC 65C816 CPU core (M1). See cpu65816.h for the model and status-bit layout.
 //
 // Correctness-first interpreter (not yet cycle-exact). Covers the full 256-opcode set: the 6502 /
@@ -482,3 +486,4 @@ int CPU65816::step() {
   cycles += 2;
   return 2;
 }
+#endif // !defined(BOARD_PICOCALC)

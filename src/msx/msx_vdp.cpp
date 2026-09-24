@@ -1,3 +1,10 @@
+// This MSX translation unit is compiled out entirely on boards that clear
+// BOARD_HAS_Z80_CORES (the PicoCalc's original RP2040 mainboard -- see board.h for why).
+// emu.h must be included FIRST because it is what pulls in board.h and defines the macro;
+// the guard below then empties the file, handing this core's static RAM to the Apple II.
+#include "../../emu.h"
+#if BOARD_HAS_Z80_CORES
+
 // msx_vdp.cpp - TMS9918A VDP for the MSX1 core. Ports $98 (data) / $99 (address+register / status).
 // Implements the address-latch state machine, the read-ahead buffer, the VBlank interrupt, and
 // background rendering for Text Mode 1 (40x24), Graphic Mode 1 (32x24) and Graphic Mode 2 (256x192).
@@ -209,3 +216,5 @@ void vdpRender() {
 }
 
 } // namespace msx
+
+#endif  // BOARD_HAS_Z80_CORES

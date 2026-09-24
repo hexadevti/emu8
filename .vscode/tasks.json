@@ -1,13 +1,17 @@
 {
   // Build / upload tasks for arduino-cli.
   //
-  // TWO targets share this repo, selected only by which task you run:
-  //   * "Arduino: Build [& Upload]"            -> ESP32 Cheap Yellow Display (plain ESP32), COM4.
+  // SEVERAL targets share this repo, selected only by which task you run:
+  //   * "Arduino: Build [& Upload]"              -> ESP32 Cheap Yellow Display (plain ESP32), COM4.
   //   * "Arduino: Build [& Upload] (JC4827W543)" -> Guition JC4827W543 (ESP32-S3), COM5.
+  //   * "Arduino: Build [& Upload] (JC1060P470)" -> Guition JC1060P470 (ESP32-P4), COM6.
+  //   * "Arduino: Build [& Upload] (PicoCalc)"   -> ClockworkPi PicoCalc + Pico 2 (RP2350), COM7.
+  //   * "desktop: build"                         -> Windows/Linux SDL2 debug build (CMake).
   //
-  // The JC4827W543 tasks pass -DBOARD_JC4827W543 (via compiler.cpp.extra_flags) which flips
-  // board.h to the ESP32-S3 / Arduino_GFX / USB / I2S-amp configuration. The CYD tasks pass
-  // no such define, so board.h defaults to the original CYD setup and that firmware is unchanged.
+  // Each non-default task passes its board macro (via compiler.cpp.extra_flags) which flips
+  // board.h to that configuration. The CYD tasks pass no such define, so board.h defaults to the
+  // original CYD setup and that firmware is unchanged. Note the PicoCalc task uses a DIFFERENT
+  // core entirely (rp2040:rp2040 from earlephilhower, not esp32:esp32).
   //
   // Run with: Terminal > Run Task…  (Build is the default build task: Ctrl+Shift+B)
   "version": "2.0.0",
@@ -167,6 +171,119 @@
       "presentation": { "reveal": "always", "panel": "shared", "clear": true }
     },
     {
+      // ClockworkPi PicoCalc + Raspberry Pi Pico 2 (RP2350). Uses the earlephilhower arduino-pico
+      // core, NOT Arduino-ESP32 -- the ESP-only APIs the shared code calls are shimmed in
+      // src/picocalc/pico_shim/. One-time setup:
+      //   arduino-cli config add board_manager.additional_urls \
+      //       https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
+      //   arduino-cli core update-index
+      //   arduino-cli core install rp2040:rp2040
+      // FQBN options that are NOT optional:
+      //   arch=arm      FreeRTOS SMP does not work in RISC-V mode.
+      //   os=freertos   selects the FreeRTOS SMP kernel (defines __FREERTOS); the shared code is
+      //                 built around FreeRTOS tasks/semaphores.
+      //   freq=200      the RP2350 SPI baud divider is quantised: at the stock 150MHz sysclk the
+      //                 panel can only run at 37.5MHz, but 200MHz sysclk yields an exact 50MHz.
+      // The -I puts src/picocalc/pico_shim first on the include path, so the sources that reach for
+      // <esp_system.h> / <dirent.h> / "driver/i2s.h" / "EspUsbHost.h" by name resolve to the shims
+      // (see pico_shim.h). BOARD_PICOCALC goes to the C compiler too -- the tiny386 core's .c files
+      // are excluded by that macro and never include board.h.
+      // exceptions=Enabled is needed because arduino-pico builds with -fno-exceptions while
+      // src/apple2/hd.cpp::loadBlock() wraps its memory write in try/catch. Use the BOARD MENU,
+      // not a bare -fexceptions in extra_flags: the menu option also selects -lstdc++-exc, the
+      // libstdc++ variant built WITH exception support. Nothing in the tree ever throws, so this
+      // only costs the unwind tables -- it does not change any behaviour.
+      // Upload is over UF2 (hold BOOTSEL, or let arduino-cli reset via the serial port below).
+      "label": "Arduino: Build (PicoCalc)",
+      "type": "shell",
+      "command": "arduino-cli",
+      "args": [
+        "compile",
+        "--fqbn",
+        "rp2040:rp2040:rpipico2:arch=arm,os=freertos,freq=200,flash=4194304_65536,usbstack=picosdk,opt=Optimize2,exceptions=Enabled",
+        "--verbose",
+        "--build-property",
+        "compiler.cpp.extra_flags=-DBOARD_PICOCALC -I${workspaceFolder}/src/picocalc/pico_shim",
+        "--build-property",
+        "compiler.c.extra_flags=-DBOARD_PICOCALC -I${workspaceFolder}/src/picocalc/pico_shim",
+        "--build-path",
+        "${workspaceFolder}/.picocalc-rp2350-build",
+        "--output-dir",
+        "${workspaceFolder}/build-picocalc",
+        "${workspaceFolder}"
+      ],
+      "group": "build",
+      "problemMatcher": ["$gcc"],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Arduino: Build & Upload (PicoCalc)",
+      "type": "shell",
+      "command": "arduino-cli",
+      "args": [
+        "upload",
+        "-p",
+        "COM7",
+        "--fqbn",
+        "rp2040:rp2040:rpipico2:arch=arm,os=freertos,freq=200,flash=4194304_65536,usbstack=picosdk,opt=Optimize2,exceptions=Enabled",
+        "--verbose",
+        "--input-dir",
+        "${workspaceFolder}/build-picocalc",
+        "${workspaceFolder}"
+      ],
+      "dependsOn": "Arduino: Build (PicoCalc)",
+      "dependsOrder": "sequence",
+      "group": "build",
+      "problemMatcher": ["$gcc"],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      // SAME PicoCalc board, but on the ORIGINAL Raspberry Pi Pico (RP2040) mainboard rather than
+      // a Pico 2. The PicoCalc is sold both ways, and the two are NOT interchangeable here:
+      //   * RP2040 has 264KB SRAM, of which this firmware leaves ~100KB of heap. The Apple II
+      //     memory map alone needs ~131KB (see src/apple2/memory.cpp + apple2_roms.cpp), so the
+      //     core cannot start -- it now says so on the panel instead of hard-faulting.
+      //   * RP2350 has 520KB and leaves ~355KB free, which is what the port was sized for.
+      // This task exists so the RP2040 can still be built and flashed (for bring-up of the panel,
+      // keyboard and SD, all of which work) and so the size report is reproducible.
+      // FQBN differences from the Pico 2 task: board rpipico, no arch menu (RP2040 is ARM only),
+      // 2MB flash, and freq=200.
+      //
+      // freq=200 (was 133, the RP2040 stock clock) buys BOTH halves of the frame budget at once:
+      //   * the 6502 interpreter is purely CPU-bound here -- it paces against real microseconds
+      //     (src/apple2/cpu.cpp), so below 1MHz it never even reaches its spin-wait and the
+      //     measured rate IS the host clock divided by the cost of an instruction. 133 -> 200
+      //     is a straight 1.5x on that number.
+      //   * the PL022 baud divider rounds DOWN, so LCD_SPI_HZ (50MHz) landed on 133/4 = 33.25MHz.
+      //     At 200MHz sysclk clk_peri gives 200/4 = exactly 50MHz, so the panel gets its full
+      //     rate too and the render task stops being the other half of the bottleneck.
+      // 200MHz is a supported menu entry, not one of the '(Overclock)' ones: the core raises
+      // VREG to 1.15V for anything above 133MHz before switching the PLL (cores/rp2040/main.cpp).
+      // If the panel shows tearing/garbage at 50MHz on your ribbon, lower LCD_SPI_HZ in board.h
+      // rather than the sysclk -- the CPU gain is the point of this setting.
+      "label": "Arduino: Build (PicoCalc RP2040)",
+      "type": "shell",
+      "command": "arduino-cli",
+      "args": [
+        "compile",
+        "--fqbn",
+        "rp2040:rp2040:rpipico:os=freertos,freq=200,flash=2097152_65536,usbstack=picosdk,opt=Optimize2,exceptions=Enabled",
+        "--verbose",
+        "--build-property",
+        "compiler.cpp.extra_flags=-DBOARD_PICOCALC -I${workspaceFolder}/src/picocalc/pico_shim",
+        "--build-property",
+        "compiler.c.extra_flags=-DBOARD_PICOCALC -I${workspaceFolder}/src/picocalc/pico_shim",
+        "--build-path",
+        "${workspaceFolder}/.picocalc-rp2040-build",
+        "--output-dir",
+        "${workspaceFolder}/build-picocalc-rp2040",
+        "${workspaceFolder}"
+      ],
+      "group": "build",
+      "problemMatcher": ["$gcc"],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
       // DESKTOP (SDL2) debug build via MSYS2 MinGW32. Used as the preLaunchTask for F5
       // (.vscode/launch.json). Configures CMake on first run, then builds build/emu8.exe.
       "label": "desktop: build",
@@ -184,6 +301,56 @@
         "panel": "shared",
         "clear": true
       }
+    },
+    {
+      // SD Manager web app (tools/sdmanager/web): installs the Vite dev dependency. Quick when
+      // node_modules is already up to date. Needs Node.js 20.19+.
+      "label": "sdmanager: install",
+      "type": "shell",
+      "command": "npm install --no-audit --no-fund",
+      "options": { "cwd": "${workspaceFolder}/tools/sdmanager/web" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "silent", "panel": "dedicated" }
+    },
+    {
+      // Vite dev server for the SD Manager on http://localhost:5180, left running in the background.
+      // preLaunchTask of the "SD Manager" launch configs. The begins/ends patterns tell VS Code
+      // when the server is ready so the browser opens only after that.
+      "label": "sdmanager: dev server",
+      "type": "shell",
+      "command": "npm run dev -- --strictPort",
+      "options": {
+        "cwd": "${workspaceFolder}/tools/sdmanager/web",
+        "env": { "SDM_NO_OPEN": "1", "NO_COLOR": "1" }
+      },
+      "dependsOn": "sdmanager: install",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "vite",
+        "pattern": { "regexp": "^x{0}$" },
+        "background": {
+          "activesBegin": true,
+          "beginsPattern": "VITE",
+          "endsPattern": "ready in|Local:"
+        }
+      },
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      // postDebugTask of the "SD Manager" launch configs: stops the dev server when debugging ends.
+      "label": "sdmanager: stop dev server",
+      "command": "echo ${input:terminateSdmDev}",
+      "type": "shell",
+      "problemMatcher": [],
+      "presentation": { "reveal": "never" }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "terminateSdmDev",
+      "type": "command",
+      "command": "workbench.action.tasks.terminate",
+      "args": "sdmanager: dev server"
     }
   ]
 }

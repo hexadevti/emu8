@@ -1,5 +1,5 @@
 #include "../../emu.h"
-#include <dirent.h>   // raw POSIX readdir() for the fast SD scan (see loadDiskFilesSync)
+#include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
 #if defined(BOARD_DESKTOP)
 #include "../desktop/debug_bridge.h"   // dbgDiskRead: desktop disk-read heat map (no-op on device)
 #endif
@@ -56,8 +56,15 @@ void diskSetup()
     initializedHdDisk = false;
     printLog("DiskII Setup...");
     xTaskCreate(loadDiskAsync, "loadDiskAsync", 4096, NULL, 2, NULL);
-    sprintf(buf, "FS.freeSpace = %d bytes", FSTYPE.totalBytes() - FSTYPE.usedBytes());
+#if defined(BOARD_PICOCALC)
+    // sdFreeBytes() returns 0 on this board by design (see the note in sd.cpp): the only
+    // route to a free-space figure here walks the entire FAT, ~25s on a 32GB card over SPI.
+    // Printing "0 bytes" made a perfectly good card look like an empty or broken volume.
+    printLog("FS.freeSpace = not measured on this board");
+#else
+    sprintf(buf, "FS.freeSpace = %llu bytes", (unsigned long long)sdFreeBytes());
     printLog(buf);
+#endif
     getDiskFileInfo(FSTYPE);
     phaseBuffer = std::queue<uint8_t>();
     xTaskCreate(saveTrackAsync, "saveTrackAsync", 4096, NULL, 1, NULL);
@@ -168,7 +175,10 @@ void getDiskFileInfo(fs::FS &fs)
 {
   
   Serial.printf("selectedDiskFileName = %s\n", selectedDiskFileName.c_str());
-  if (!fs.exists(selectedDiskFileName.c_str()))
+  busTake();               // fs.exists() is a directory walk; serialise it like every other FS access
+  bool found = fs.exists(selectedDiskFileName.c_str());
+  busGive();
+  if (!found)
   {
     Serial.println("File not found");
     shownFile = 0;
@@ -280,6 +290,13 @@ void setDiskFile()
     shownFile = 0;
     selectedDiskFileName = "/";
   }
+  else if (diskFiles[shownFile] == ".." || diskFiles[shownFile].back() == '/') {
+    // A directory row: navigate instead of mounting it. The options UI intercepts these
+    // before they get here, but the PS/2 menu (keyboardPs2.cpp) calls straight through.
+    if (diskFiles[shownFile] == "..") diskBrowseUp();
+    else                              diskBrowseEnter(diskFiles[shownFile].c_str());
+    shownFile = 0; firstShowFile = 0;
+  }
   else {
     selectedDiskFileName = diskFiles[shownFile].c_str();
   }
@@ -302,36 +319,21 @@ void apple2InsertDisk(const char *path)
   paused = wasPaused;
 }
 
-// Scan the SD root for disk images into diskFiles. Synchronous so it can be called
-// directly (e.g. from the Settings device toggle) without racing the renderer.
-void loadDiskFilesSync()
-{
-  diskFiles.clear();
-  // Fast scan: raw readdir() returns each name + a file/dir flag directly, avoiding the
-  // per-entry fopen()/stat() that Arduino's openNextFile() does (which re-walks the path from
-  // the FS root for every entry - hundreds of ms each on this 4MHz-ish SPI SD).
-  DIR *dp = opendir(SD_VFS_ROOT);
-  if (!dp)
-  {
-    printLog("Failed to open directory");
-    return;
-  }
-  struct dirent *de;
-  while ((de = readdir(dp)) != nullptr)
-  {
-    if (de->d_type == DT_DIR) continue;                 // root files only (matches old behavior)
-    std::string fileName = de->d_name;
-    for (int j = 0; j < (int)diskFileExtensions.size(); j++)
-    {
-      if ((int)fileName.find(diskFileExtensions[j].c_str()) > 0)
-      {
-        diskFiles.push_back("/" + fileName);
-        break;                                          // one extension match is enough
-      }
-    }
-  }
-  closedir(dp);
+// SD image browser. Subdirectories are walked too (fbScan lists them with a trailing "/" and
+// the options UI navigates into them); the extension test is the historic substring match
+// against diskFileExtensions, kept as-is so nothing that used to appear disappears.
+static bool diskAccept(const std::string &name) {
+  for (int j = 0; j < (int)diskFileExtensions.size(); j++)
+    if ((int)name.find(diskFileExtensions[j].c_str()) > 0) return true;
+  return false;
 }
+static FileBrowser diskBrowser = { "DiskII", &diskFiles, diskAccept, nullptr, 250, "/" };
+
+// Rescan the current browse directory into diskFiles. Synchronous so it can be called
+// directly (e.g. from the Settings device toggle) without racing the renderer.
+void loadDiskFilesSync()      { fbScan(diskBrowser); }
+void diskBrowseEnter(const char *path) { fbEnter(diskBrowser, path); }
+void diskBrowseUp()           { fbUp(diskBrowser); }
 
 void loadDiskAsync(void *pvParameters)
 {

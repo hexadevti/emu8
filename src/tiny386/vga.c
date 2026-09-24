@@ -1,4 +1,4 @@
-#if !defined(BOARD_JC4827W543)  // tiny386 is not built for the S3 board (too big; vendored core not wired for the device toolchain)
+#if !defined(BOARD_JC4827W543) && !defined(BOARD_PICOCALC)  // tiny386 is not built for the S3 board (too big; vendored core not wired for the device toolchain) or the PicoCalc (RP2350: 520KB SRAM, no memory-mapped PSRAM)
 /*
  * Dummy VGA device
  * 
@@ -2495,4 +2495,4 @@ static void vga_initmode(VGAState *s)
     s->ar_index = 0x20;
 }
 
-#endif // !defined(BOARD_JC4827W543)
+#endif // !defined(BOARD_JC4827W543) && !defined(BOARD_PICOCALC)

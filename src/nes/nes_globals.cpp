@@ -46,11 +46,18 @@ uint8_t paletteRam[0x20];
 uint8_t oam[0x100];
 uint8_t *framebuffer = nullptr;          // points at sharedBigBuf (set in nesSetup)
 volatile bool frameReady = false;
+volatile bool     fbGrant     = true;    // see the framebuffer-handover note in nes.h
+volatile bool     fbRendering = false;   // first grant is consumed at the first scanline 0
+volatile uint32_t fbFrames    = 0;
+volatile bool     fbPushing   = false;   // core 0 inside a push; fbReadLine is then meaningful
+volatile int      fbReadLine  = 240;     // "all read" when idle, so the PPU is never held up
+volatile uint32_t apuQuarterTicks = 0;   // APU frame sequencer, clocked by the PPU
 volatile bool nmiPending = false;
 volatile bool irqLine = false;           // mapper IRQ line (MMC3 scanline counter), level-held
 volatile bool nesResetReq = false;       // settings: load a new ROM, then reset CPU/PPU on resume
 int dmaStallCycles = 0;
 volatile uint32_t nesFrameCount = 0;     // bumped each completed PPU frame (FPS diagnostic)
+volatile uint32_t nesPushCount  = 0;     // bumped by the render task per panel push (display fps)
 
 // On-screen startup warning: one short line per ROM skipped at load time (unsupported mapper /
 // too big for RAM). Shown by the render loop for a few seconds after boot, then cleared.

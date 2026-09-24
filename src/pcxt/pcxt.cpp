@@ -1,3 +1,7 @@
+// Not built for the PicoCalc (RP2350): this core needs multi-megabyte ps_malloc'd guest RAM,
+// and the board has 520KB of SRAM with its 8MB PSRAM on plain GPIOs (not memory-mapped). The
+// shared dispatch/render/UI code links against src/picocalc/bigram_stubs.cpp instead.
+#if !defined(BOARD_PICOCALC)
 // pcxt.cpp - device-side glue for the PC-XT (Intel 8086) platform: memory
 // allocation, the core-1 run loop, the core-0 CGA render push, USB-keyboard ->
 // XT scancode injection, and the settings (disk browser / mount) hooks. This is
@@ -11,7 +15,7 @@
 #include "../../emu.h"
 #include "pcxt.h"
 #include "fabgl/machine.h"
-#include <dirent.h>
+#include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
 #include <string>
 
 // 1 MB main RAM (PSRAM) + 64 KB CGA/video window (internal: read every frame).
@@ -88,29 +92,16 @@ static bool pcLooksLikePcDisk(const char* path) {
   return ok;
 }
 
-// Scan SD root for PC disk images into pcFiles (extension match + 0x55AA boot signature).
+// SD disk-image browser (extension match + 0x55AA boot signature + subdirectories).
+// The signature check opens the file, so it goes in the verify hook, which fbScan runs
+// AFTER releasing the bus lock -- pcLooksLikePcDisk() takes that lock itself.
 #define PCXT_MAX_FILES 200
-void loadPcxtFilesSync() {
-  pcFiles.clear();
-  pcFiles.reserve(PCXT_MAX_FILES);
-  DIR* dp = opendir(SD_VFS_ROOT);
-  if (dp) {
-    struct dirent* de; int scanned = 0;
-    while ((de = readdir(dp)) != nullptr) {
-      if (de->d_type == DT_DIR) continue;
-      std::string nm = de->d_name;
-      if (pcIsDiskImage(nm)) {
-        std::string full = std::string("/") + nm;
-        if (pcLooksLikePcDisk(full.c_str())) pcFiles.push_back(full);
-      }
-      if ((++scanned & 0x3f) == 0) ::uiDirScanProgress((int)pcFiles.size());
-      if ((int)pcFiles.size() >= PCXT_MAX_FILES) break;
-    }
-    closedir(dp);
-  }
-  sprintf(buf, "PCXT: %d PC disk image(s) on SD root", (int)pcFiles.size());
-  printLog(buf);
-}
+static bool pcxtAccept(const std::string &n) { return pcIsDiskImage(n); }
+static FileBrowser pcxtBrowser = { "PCXT", &pcFiles, pcxtAccept, pcLooksLikePcDisk, PCXT_MAX_FILES, "/" };
+
+void loadPcxtFilesSync()      { fbScan(pcxtBrowser); }
+void pcxtBrowseEnter(const char *path) { fbEnter(pcxtBrowser, path); }
+void pcxtBrowseUp()           { fbUp(pcxtBrowser); }
 
 // ---- SD/File disk backend ----
 // The stdio FILE* path (fopen/fseek/ftell over the ESP32 SD VFS) reported size 0 and
@@ -644,7 +635,7 @@ static void pcxtRenderText() {
 #elif defined(BOARD_DESKTOP)
   if (pcxtRenderTextGlyph(PCXT_DESK_W, PCXT_DESK_H)) return;          // desktop: same authentic font, 640x400 fb
 #endif
-  tft.setUiMode(true);
+  displaySetUiMode(true);
   bool osk = oskActive();
   int kbdTop = osk ? oskRasterHeight() : 240;
 
@@ -797,7 +788,7 @@ bool pcxtRenderFrame() {
 
   if (modeChanged) {                         // text <-> graphics switch: wipe canvas + panel border
     pcRenderGfx = (int)gfx;
-    tft.setUiMode(true);
+    displaySetUiMode(true);
     tft.fillScreen(TFT_BLACK);
 #if BOARD_DISPLAY_GFX
     tft.fillPanelBlack();
@@ -932,3 +923,4 @@ void pcxtUnmount(int slot) {
   pcUpdateBootDrive();
   printLog(slot == 0 ? "PCXT: ejected A:" : "PCXT: ejected C:");
 }
+#endif // !defined(BOARD_PICOCALC)

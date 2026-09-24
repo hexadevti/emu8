@@ -1,3 +1,10 @@
+// This SMS translation unit is compiled out entirely on boards that clear
+// BOARD_HAS_Z80_CORES (the PicoCalc's original RP2040 mainboard -- see board.h for why).
+// emu.h must be included FIRST because it is what pulls in board.h and defines the macro;
+// the guard below then empties the file, handing this core's static RAM to the Apple II.
+#include "../../emu.h"
+#if BOARD_HAS_Z80_CORES
+
 // sms_vdp.cpp - Sega 315-5124 VDP (Master System) for the SMS core. Ports $BE (data) / $BF (control +
 // status). It is a superset of the TMS9918: the control-port command carries a 2-bit CODE field
 // (0=VRAM read, 1=VRAM write, 2=register write, 3=CRAM write), there is a 32-byte colour RAM (two
@@ -217,3 +224,5 @@ void vdpRender() {
 }
 
 } // namespace sms
+
+#endif  // BOARD_HAS_Z80_CORES

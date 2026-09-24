@@ -189,6 +189,7 @@ void cpuLoop() {
   // uncapped. nesMeasuredMhz is derived from fps x the NES's fixed CPU cycles/frame.
   const uint32_t NES_FRAME_US = 16639;        // 1e6 / 60.0988 fps (NTSC)
   uint32_t fpsLastMs = millis(), fpsLastFrames = nesFrameCount, fpsSeenFrame = nesFrameCount;
+  uint32_t fpsLastPushes = nesPushCount;      // display fps: pictures the render task got out
   uint32_t nextFrameUs = micros();
 
   while (running) {
@@ -231,8 +232,9 @@ void cpuLoop() {
         uint32_t frames = nesFrameCount - fpsLastFrames;
         float secs = (nowMs - fpsLastMs) / 1000.0f;
         if (secs > 0) nesMeasuredMhz = (frames / secs) * (29780.5f / 1.0e6f);   // fps x CPU cycles/frame
-        sprintf(buf, "NES fps=%u %.2fMHz heap=%u", (unsigned)frames, nesMeasuredMhz,
-                (unsigned)ESP.getFreeHeap());
+        uint32_t pushes = nesPushCount - fpsLastPushes; fpsLastPushes = nesPushCount;
+        sprintf(buf, "NES fps=%u disp=%u %.2fMHz heap=%u", (unsigned)frames, (unsigned)pushes,
+                nesMeasuredMhz, (unsigned)ESP.getFreeHeap());
         printLog(buf);
         fpsLastMs = nowMs; fpsLastFrames = nesFrameCount;
       }

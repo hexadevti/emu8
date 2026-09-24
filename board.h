@@ -11,6 +11,11 @@
 //                          ES8311 codec + NS4150B amp (I2S), microSD over SD_MMC, USB-HS host.
 //                          Built against Arduino-ESP32 core 3.x (IDF 5.x) — see sketch.yaml /
 //                          the P4 build task — isolated from the 2.0.17 CYD/S3 toolchain.
+//   * BOARD_PICOCALC       ClockworkPi PicoCalc + Raspberry Pi Pico 2 (RP2350): ST7365P/ILI9488
+//                          320x320 SPI panel (spi1), STM32 QWERTY keyboard over I2C, microSD on
+//                          spi0, PWM stereo audio. Built with the earlephilhower arduino-pico
+//                          core (NOT Arduino-ESP32) -- see the PicoCalc build task. The ESP-only
+//                          APIs the shared code uses are shimmed in src/picocalc/pico_shim/.
 //   * BOARD_DESKTOP        Windows/Linux SDL2 debug target (set by CMake, never by arduino-cli).
 //
 // The non-default boards are selected by defining their macro from the build task (e.g.
@@ -61,6 +66,104 @@
 #define LED_PIN              -1
 #define SPEAKER_PIN          -1
 #define KEYBOARD_DATA_PIN    -1
+#define KEYBOARD_IRQ_PIN     -1
+#define ANALOG_X_PIN         -1
+#define ANALOG_Y_PIN         -1
+#define DIGITAL_BUTTON12_PIN -1
+
+#elif defined(BOARD_PICOCALC)
+
+// ===================== ClockworkPi PicoCalc (Raspberry Pi Pico 2 / RP2350) =====================
+// Handheld: 320x320 ST7365P (ILI9488-compatible) SPI panel, STM32F103 QWERTY keyboard over I2C,
+// microSD on its own SPI bus, PWM stereo audio, 18650 battery. The mainboard carries 8MB of PSRAM
+// but on PLAIN GPIOs (bit-bang/PIO SPI), NOT the RP2350 memory-mapped QSPI PSRAM bus -- it cannot
+// back a raw pointer, so BOARD_HAS_PSRAM is 0 and the cores that need MBs of guest RAM (IIGS,
+// PC-XT, tiny386) are compiled out. Everything else fits the 520KB SRAM.
+//
+// Toolchain: earlephilhower arduino-pico, FQBN rp2040:rp2040:rpipico2 with arch=arm + os=freertos
+// (FreeRTOS SMP is ARM-only) + freq=200 (see the SPI note below). Pin numbers below are taken from
+// clockworkpi/PicoCalc's own sources (Code/picocalc_helloworld/), not from third-party writeups.
+#define BOARD_NAME            "ClockworkPi PicoCalc (RP2350)"
+
+// --- capabilities (1 = present / use this path) ---
+#define BOARD_HAS_TFT_ESPI    0   // display: own DisplayGFX backend (src/picocalc/display_picocalc)
+#define BOARD_DISPLAY_GFX     0   // NOT the Arduino_GFX canvas backend (display_gfx.cpp stays out)
+#define BOARD_PANEL_DSI       0   // 4-wire SPI panel, not MIPI-DSI
+#define BOARD_AUDIO_DAC       0   // no internal DAC; audio is PWM (see BOARD_AUDIO_PWM)
+#define BOARD_AUDIO_CODEC     0   // no I2C codec
+#define BOARD_AUDIO_PWM       1   // NEW: PWMAudio (arduino-pico) drives the two speaker pins
+#define BOARD_INPUT_ANALOG    0   // GPIO26/27 (= A0/A1) are the audio pins -> no ADC joystick
+#define BOARD_INPUT_USB       1   // reuse usbkeyboard.cpp's HID dispatcher; input_picocalc.cpp
+                                  // translates the I2C keyboard into HID boot reports and feeds it
+#define BOARD_TOUCH_VIA_TFT   0   // no touchscreen at all
+#define BOARD_TOUCH_GT911     0
+#define BOARD_SD_MMC          0   // microSD over SPI (spi0), not SDIO
+#define BOARD_HAS_BLE         0   // plain Pico 2 has no radio
+#define BOARD_HAS_PSRAM       0   // see the header comment: PSRAM is not memory-mapped here
+
+// --- display: ST7365P/ILI9488 320x320 on spi1. CS/DC/RST are driven as plain GPIOs (the PL022
+//     hardware SSn toggles per frame, which breaks multi-byte writes -- see display_picocalc.cpp).
+//     arduino-pico's rpipico2 variant defaults spi1 to different pins, so these are applied with
+//     SPI1.setSCK/setTX/setRX before begin(). ---
+#define LCD_SCK_PIN       10
+#define LCD_MOSI_PIN      11
+#define LCD_MISO_PIN      12
+#define LCD_CS_PIN        13
+#define LCD_DC_PIN        14
+#define LCD_RST_PIN       15
+#define PANEL_NATIVE_W    320
+#define PANEL_NATIVE_H    320
+// SPI clock. The PL022 baud is clk_peri / (even_prescale * (1+SCR)) and rounds DOWN, so the
+// reachable rates are quantised and asking for 50MHz at the wrong sysclk silently gives less:
+//   RP2350 at the stock 150MHz -> only 75 / 37.5 / 25 are reachable, so 50 becomes 37.5
+//   RP2040 at the stock 133MHz -> 50 becomes 133/4 = 33.25
+// BOTH build tasks therefore select freq=200, where clk_peri/4 is exactly 50MHz (the rate proven
+// on this panel) -- see .vscode/tasks.json. If the ribbon shows artifacts, halve THIS constant
+// rather than lowering the sysclk; the 6502 interpreter is CPU-bound and wants the clock.
+#define LCD_SPI_HZ        50000000
+
+// --- keyboard: STM32F103 on i2c1, 10kHz (its firmware is slow; faster clocks drop bytes) ---
+#define KBD_I2C_SDA_PIN   6
+#define KBD_I2C_SCL_PIN   7
+#define KBD_I2C_ADDR      0x1F
+#define KBD_I2C_HZ        10000
+// How long setup() waits for the PicoCalc mainboard rail before giving up and booting anyway.
+// The Pico runs off its own USB, so it boots whether the unit is switched on or not.
+#define PICOCALC_MAINBOARD_WAIT_MS 30000
+
+// --- microSD (SPI). These match arduino-pico's DEFAULT spi0 pin assignment for rpipico2 exactly,
+//     so no setRX/setTX/setSCK remap is needed for the card. Separate bus from the panel, so the
+//     touch-vs-SD arbitration the ESP32 boards need (busTake/busGive) is a no-op here. ---
+#define SD_SCK_PIN        18
+#define SD_MISO_PIN       16
+#define SD_MOSI_PIN       19
+#define SD_CS_PIN         17
+
+// --- audio: two PWM speaker pins on the SAME slice (GPIO26 = PWM5A, GPIO27 = PWM5B), which is
+//     what PWMAudio's stereo mode expects (it muxes pin and pin+1). The emulated machines are all
+//     mono, so audio_picocalc.cpp writes each sample to both channels. ---
+#define AUDIO_PWM_L_PIN   26
+#define AUDIO_PWM_R_PIN   27
+
+// --- PSRAM (present but NOT memory-mapped; documented for a possible future PIO driver, unused) ---
+#define PSRAM_CS_PIN      20
+#define PSRAM_SCK_PIN     21
+#define PSRAM_MOSI_PIN    2
+#define PSRAM_MISO_PIN    3
+
+// --- peripherals not present on this board: harmless placeholders so shared code that references
+//     them still compiles (paths guard on capability macros and/or a < 0 pin check). ---
+#define TOUCH_SCK_PIN        -1
+#define TOUCH_MISO_PIN       -1
+#define TOUCH_MOSI_PIN       -1
+#define TOUCH_CS_PIN         -1
+#define TOUCH_INT_PIN        -1
+#define I2S_BCLK_PIN         -1
+#define I2S_LRCLK_PIN        -1
+#define I2S_DOUT_PIN         -1
+#define LED_PIN              -1   // the Pico's LED is on the module, not visible in the case
+#define SPEAKER_PIN          -1   // no DAC pin; audio goes through AUDIO_PWM_*
+#define KEYBOARD_DATA_PIN    -1   // no PS/2 header (the I2C keyboard replaces it)
 #define KEYBOARD_IRQ_PIN     -1
 #define ANALOG_X_PIN         -1
 #define ANALOG_Y_PIN         -1
@@ -253,3 +356,72 @@
 #ifndef BOARD_HAS_BLE
 #define BOARD_HAS_BLE 1
 #endif
+
+// Capabilities introduced by a later board, defaulted here so the older branches above (which
+// predate them) don't each need a line. Only the PicoCalc sets BOARD_AUDIO_PWM; only the PicoCalc
+// clears BOARD_HAS_PSRAM -- every ESP32 target here has real, memory-mapped PSRAM behind ps_malloc.
+#ifndef BOARD_AUDIO_PWM
+#define BOARD_AUDIO_PWM 0
+#endif
+#ifndef BOARD_HAS_PSRAM
+#define BOARD_HAS_PSRAM 1
+#endif
+
+// Keep the 16696-byte enhanced IIe ROM in flash (src/apple2/iie_rom_flash.cpp) instead of reading
+// it off the SD card into the heap. Only the PicoCalc needs this, and only because the IIe memory
+// map leaves it 25404 bytes to work with: paying 16696 of them for a ROM that is never written to
+// is what kept the IIe from booting there. The ESP32 boards have the heap for it and load the same
+// image from /roms/apple2/iie.bin as before, so their flash stays as it is.
+#ifndef BOARD_A2_ROM_IN_FLASH
+#if defined(BOARD_PICOCALC)
+#define BOARD_A2_ROM_IN_FLASH 1
+#else
+#define BOARD_A2_ROM_IN_FLASH 0
+#endif
+#endif
+
+// Cores that need megabytes of contiguous, pointer-addressable guest RAM (Apple IIGS banks, the
+// PC-XT's 1MB, tiny386's guest+VGA memory) only exist on boards with real PSRAM. On the others
+// they are compiled out of the platform switch entirely -- see emu8.ino and the boot splash.
+#define BOARD_HAS_BIGRAM_CORES BOARD_HAS_PSRAM
+
+// The two Z80 cores (MSX, SMS) carry ~34KB of static RAM of their own on top of the shared
+// framebuffer -- sms::cartRam alone is 32KB. That is affordable everywhere except the PicoCalc's
+// ORIGINAL RP2040 mainboard: its 264KB leaves ~102KB of heap once statics are placed, while the
+// Apple II's memoryAlloc() needs ~101KB before the ROMs and task stacks are counted, so the 6502
+// never starts and the panel shows the NOT ENOUGH RAM warning instead. Neither core could run
+// there anyway -- both load a whole cartridge image into RAM, and SMS ROMs alone reach 512KB.
+// So on that one board they are compiled out and the 34KB goes back to the Apple II. The RP2350
+// mainboard has 520KB and keeps all nine cores; PICO_RP2040/PICO_RP2350 come from the arduino-pico
+// core on the command line, so this resolves before any header is read.
+#if defined(BOARD_PICOCALC) && defined(PICO_RP2040)
+#define BOARD_HAS_Z80_CORES 0
+#else
+#define BOARD_HAS_Z80_CORES 1
+#endif
+
+// (The Apple II used to need a third gate here -- BOARD_APPLE2_LEAN -- because memoryAlloc()
+// built the II+ and the IIe map at the same time so a settings toggle could switch between them
+// live, and both together do not fit in 264KB. The splash now offers II+ and IIe as two separate
+// systems and exactly one map is ever allocated, so the gate is gone: see src/apple2/memory.cpp.)
+
+// The PicoCalc is built with the earlephilhower arduino-pico core instead of Arduino-ESP32, so the
+// ESP-IDF APIs the shared sources call (IRAM_ATTR, heap_caps_*, esp_reset_reason, the core-pinned
+// task helpers, ...) do not exist. Pulling the shim in HERE gives every translation unit the
+// replacements automatically -- board.h is the one header the whole tree already includes.
+#if defined(BOARD_PICOCALC)
+#include "src/picocalc/pico_shim/pico_shim.h"
+#endif
+
+// NOTE on relocating code into SRAM (IRAM_ATTR) on PicoCalc -- there is a hard budget.
+//
+// The RP2040 executes from external flash through a 16 KB XIP cache shared by BOTH cores, so the
+// 6502 interpreter and the raster loop evict each other continuously. Moving cpuLoop and the
+// three opcode tables into SRAM is worth ~19% on 6502 throughput and is done (see cpu.cpp).
+//
+// Going further is NOT free: every byte relocated comes straight out of the FreeRTOS heap.
+// Adding renderLoop (4,356 B) and processSoftSwitches (1,136 B) dropped free RAM from 132,808 to
+// 126,556 bytes and the CORE0 task then died at startup with
+//     FATAL: FreeRTOS pvPortMalloc failed (out of heap) in task 'CORE0'
+// which presents as a black screen, because the emulator never starts. Measure the heap before
+// relocating anything else.

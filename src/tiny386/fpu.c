@@ -1,4 +1,4 @@
-#if !defined(BOARD_JC4827W543)  // tiny386 is not built for the S3 board (too big; vendored core not wired for the device toolchain)
+#if !defined(BOARD_JC4827W543) && !defined(BOARD_PICOCALC)  // tiny386 is not built for the S3 board (too big; vendored core not wired for the device toolchain) or the PicoCalc (RP2350: 520KB SRAM, no memory-mapped PSRAM)
 // incomplete x87 emulation, use at your own risk!
 // no exception, no tag word, no float80
 #if defined(USE_AMD64)
@@ -1248,4 +1248,4 @@ bool fpu_exec1(FPU *fpu, void *cpu, int op, int group, unsigned int i)
 #undef SIMD_fpu_c
 #endif
 
-#endif // !defined(BOARD_JC4827W543)
+#endif // !defined(BOARD_JC4827W543) && !defined(BOARD_PICOCALC)

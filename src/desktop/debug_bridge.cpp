@@ -181,9 +181,12 @@ bool dbgGetAppleIIe() { return AppleIIe; }
 void dbgSetAppleIIe(bool iie) {
   if (currentPlatform != PLATFORM_APPLE2 || iie == (bool)AppleIIe) return;
   AppleIIe = iie;
-  activeFlags = AppleIIe ? flagsIIe : flagsIIplus;   // 6502 flag behavior differs (IIe vs II+)
   saveConfig();
-  a2ColdReboot();                                    // re-boot so it comes up as the selected model
+  // A cold reboot is not enough any more: memoryAlloc() builds the map for ONE machine at startup
+  // (a II+ has no aux RAM and no IIe banks at all, src/apple2/memory.cpp), so changing the model
+  // means re-running setup() -- the same re-exec dbgReset() uses for the cores it cannot reset
+  // in process. On the device this choice is made on the boot splash instead.
+  rebootInto(currentPlatform);
 }
 bool  dbgClockSupported()  { return currentPlatform == PLATFORM_APPLE2; }
 bool  dbgGetThrottle()     { return !Fast1MhzSpeed; }              // throttled = the paced 1 MHz path
@@ -334,7 +337,7 @@ void dbgSwitchPlatform(int p) {
 bool dbgLoadFile(const char *path) {
   bool ok = false;
   switch (currentPlatform) {
-    case PLATFORM_C64:     ok = c64LoadSelected(path); break;
+    case PLATFORM_C64:     ok = c64LoadAndRun(path); break;   // resets, then loads at READY
     case PLATFORM_NES:     ok = nesLoadSelected(path); break;
     case PLATFORM_ATARI:   ok = atariLoadSelected(path); break;
     case PLATFORM_MSX:     ok = msxLoadSelected(path); break;

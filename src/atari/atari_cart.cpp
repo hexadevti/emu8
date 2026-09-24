@@ -1,6 +1,6 @@
 #include "../../emu.h"
 #include "atari.h"
-#include <dirent.h>   // raw POSIX directory enumeration (fast browser scan; see loadC64FilesSync)
+#include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
 
 // Atari 2600 cartridge loader. ROMs are raw images (no header) identified purely by size:
 //   2K / 4K  -> not bank-switched (2K mirrors into the 4K window)
@@ -122,26 +122,15 @@ bool atariLoadROM(const char *path) {
 
 // Scan the SD root for *.a26 / *.bin files into the global atariFiles list (full paths).
 #define ATARI_MAX_FILES 200
-void loadAtariFilesSync() {
-  atariFiles.clear();
-  atariFiles.reserve(ATARI_MAX_FILES);
-  DIR *dp = opendir(SD_VFS_ROOT);
-  if (dp) {
-    struct dirent *de;
-    int scanned = 0;
-    while ((de = readdir(dp)) != nullptr) {
-      if (de->d_type == DT_DIR) continue;
-      std::string nm = de->d_name;
-      if (endsWithCI(nm, ".a26") || endsWithCI(nm, ".bin"))
-        atariFiles.push_back(std::string("/") + nm);
-      if ((++scanned & 0x3f) == 0) ::uiDirScanProgress((int)atariFiles.size());
-      if ((int)atariFiles.size() >= ATARI_MAX_FILES) break;
-    }
-    closedir(dp);
-  }
-  sprintf(buf, "Atari: %d ROM(s) on SD root", (int)atariFiles.size());
-  printLog(buf);
+// SD ROM browser (.a26/.bin + subdirectories); see src/shared/filebrowser.h.
+static bool atariAccept(const std::string &n) {
+  return endsWithCI(n, ".a26") || endsWithCI(n, ".bin");
 }
+static FileBrowser atariBrowser = { "Atari", &atariFiles, atariAccept, nullptr, ATARI_MAX_FILES, "/" };
+
+void loadAtariFilesSync()      { fbScan(atariBrowser); }
+void browseEnter(const char *path) { fbEnter(atariBrowser, path); }
+void browseUp()                { fbUp(atariBrowser); }
 
 bool atariLoadFirstRom() {
   if (loadWarn) loadWarn[0] = 0;

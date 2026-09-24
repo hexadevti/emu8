@@ -1,6 +1,6 @@
 #include "../../emu.h"
 #include "nes.h"
-#include <dirent.h>   // raw POSIX directory enumeration (fast browser scan; see loadC64FilesSync)
+#include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
 
 // iNES (.nes) cartridge loader. Header (16 bytes):
 //   [0..3] "NES\x1A"   [4] PRG size /16K   [5] CHR size /8K
@@ -227,25 +227,14 @@ bool nesLoadROM(const char *path) {
 
 // Scan the SD root for *.nes files into the global nesFiles list (full paths).
 #define NES_MAX_FILES 200
-void loadNesFilesSync() {
-  nesFiles.clear();
-  nesFiles.reserve(NES_MAX_FILES);
-  DIR *dp = opendir(SD_VFS_ROOT);
-  if (dp) {
-    struct dirent *de;
-    int scanned = 0;
-    while ((de = readdir(dp)) != nullptr) {
-      if (de->d_type == DT_DIR) continue;
-      std::string nm = de->d_name;
-      if (endsWithCI(nm, ".nes")) nesFiles.push_back(std::string("/") + nm);
-      if ((++scanned & 0x3f) == 0) ::uiDirScanProgress((int)nesFiles.size());
-      if ((int)nesFiles.size() >= NES_MAX_FILES) break;
-    }
-    closedir(dp);
-  }
-  sprintf(buf, "NES: %d .nes file(s) on SD root", (int)nesFiles.size());
-  printLog(buf);
-}
+// SD ROM browser (.nes + subdirectories). fbScan lists directories with a trailing "/" and
+// the options UI navigates into them; see src/shared/filebrowser.h.
+static bool nesAccept(const std::string &n) { return endsWithCI(n, ".nes"); }
+static FileBrowser nesBrowser = { "NES", &nesFiles, nesAccept, nullptr, NES_MAX_FILES, "/" };
+
+void loadNesFilesSync()      { fbScan(nesBrowser); }
+void browseEnter(const char *path) { fbEnter(nesBrowser, path); }
+void browseUp()              { fbUp(nesBrowser); }
 
 // Load the first .nes on the SD root that actually loads — skip ones refused for an
 // unsupported mapper or because they don't fit the heap, so one big/odd ROM doesn't block

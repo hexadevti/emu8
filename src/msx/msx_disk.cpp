@@ -1,3 +1,10 @@
+// This MSX translation unit is compiled out entirely on boards that clear
+// BOARD_HAS_Z80_CORES (the PicoCalc's original RP2040 mainboard -- see board.h for why).
+// emu.h must be included FIRST because it is what pulls in board.h and defines the macro;
+// the guard below then empties the file, handing this core's static RAM to the Apple II.
+#include "../../emu.h"
+#if BOARD_HAS_Z80_CORES
+
 // msx_disk.cpp - MSX disk drive: the HB3600 disk ROM (slot 2) + a WD2793 FDC emulated memory-mapped
 // at $7FF8-$7FFF (the disk interface decodes the top 8 bytes of the ROM space as FDC registers):
 //   $7FF8 command(W)/status(R)   $7FF9 track   $7FFA sector   $7FFB data
@@ -204,3 +211,5 @@ int diskTrackCount() {
 #endif
 
 } // namespace msx
+
+#endif  // BOARD_HAS_Z80_CORES

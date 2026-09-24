@@ -404,7 +404,7 @@ void optionsScreenRender()
   print(" DISK ", !HdDisk);
 
   setCursor(8,12);
-  print("< F2 >", fnSelected == 2);
+  print("MODEL ", false);   // read-only: the II+/IIe choice is made on the boot splash now
   setCursor(8,13);
   print(" IIe  ", AppleIIe);
   setCursor(8,14);

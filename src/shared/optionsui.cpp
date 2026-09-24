@@ -12,7 +12,30 @@
 // disk/HD file lists, setDiskFile/setHdFile, saveEEPROM, ESP.restart), so PS/2 and
 // touch stay interchangeable. PS/2 changes call optionsUiMarkDirty() to refresh it.
 
+#if defined(BOARD_PICOCALC)
+// ---- Layout (320 x 320) ----
+// The PicoCalc panel is square: the emulators letterbox into its middle 320x240, but the menu
+// switches the display to full-panel mode (tft.setFullPanel) and spends the extra 80 rows on a
+// taller grid and, mostly, on more and taller file rows drawn in the larger list font (font 3).
+#define OUI_SCR_H     320
+#define OUI_TITLE_H   28
+#define OUI_TG_TOP    30          // toggle grid: 4 columns x 2 rows
+#define OUI_TG_W      80
+#define OUI_TG_H      38
+#define OUI_VOL_TOP   108
+#define OUI_VOL_H     22
+#define OUI_FB_TOP    132         // file browser header
+#define OUI_FB_HDR_H  16
+#define OUI_FB_LIST   148         // file rows
+#define OUI_FB_ROWH   17
+#define OUI_FB_ROWS   8
+#define OUI_FB_FONT   3           // display_picocalc.cpp: FreeSans at 4/5, between fonts 1 and 2
+#define OUI_ACT_TOP   288         // action buttons
+#define OUI_ACT_H     30
+#define OUI_HELP_ROWH 15
+#else
 // ---- Layout (320 x 240) ----
+#define OUI_SCR_H     240
 #define OUI_TITLE_H   26
 #define OUI_TG_TOP    28          // toggle grid: 4 columns x 2 rows
 #define OUI_TG_W      80
@@ -24,8 +47,11 @@
 #define OUI_FB_LIST   134         // file rows
 #define OUI_FB_ROWH   14
 #define OUI_FB_ROWS   5
+#define OUI_FB_FONT   1
 #define OUI_ACT_TOP   208         // action buttons
 #define OUI_ACT_H     30
+#define OUI_HELP_ROWH 12
+#endif
 
 // ---- Palette (macros: evaluated at runtime so tft is already constructed) ----
 #define OUI_BG      tft.color565(18, 20, 26)
@@ -47,6 +73,7 @@ static bool optionsUiFirstDraw   = false;
 static bool optionsUiPrevDown    = false;
 static bool optionsUiWaitRelease = false;
 static bool ouiHelpOpen          = false;   // HELP overlay (controls cheat-sheet) is showing
+static bool ouiEditing           = false;   // keyboard: inside VOL / the file list, arrows change the value
 static void ouiOpenHelp();                  // (defined below; forward-declared for the nav handlers)
 static void ouiCloseHelp();
 
@@ -73,6 +100,12 @@ static void ouiCloseHelp();
 #define OUI_FOC_REBOOT    10  // both:  REBOOT
 #define OUI_FOC_COUNT     11
 #endif
+// HELP sits at OUI_FOC_COUNT, i.e. deliberately OUTSIDE the ring optionsUiNav() walks
+// (it wraps modulo OUI_FOC_COUNT). The analog stick and the touch handler therefore behave
+// exactly as before -- on those boards HELP is a tap away. The keyboard row map below does
+// include it, because the PicoCalc has no touchscreen and this was the one control on the
+// page that no key could reach.
+#define OUI_FOC_HELP      OUI_FOC_COUNT
 static int optionsUiFocus = 0;
 
 // The settings window is shared by every platform. These accessors pick the active
@@ -132,11 +165,22 @@ static std::string ouiDisplayName(const std::string &e)
   return dir ? ("[" + base + "]") : base;
 }
 
-// Navigate the C64 browser into a directory entry (or up via "..") and refresh the list.
+// Navigate the active browser into a directory entry (or up via "..") and refresh the list.
+// Every core keeps its own browse directory, so this mirrors the ouiFiles() dispatch above.
+// IIGS is absent on purpose: it shares the Apple II disk/HD lists, so it takes the last line.
 static void ouiBrowse(const std::string &entry)
 {
-  if (entry == "..") c64BrowseUp();
-  else               c64BrowseEnter(entry.c_str());
+  const bool up = (entry == "..");
+  const char *p = entry.c_str();
+  if      (ouiIsC64())     { if (up) c64BrowseUp();     else c64BrowseEnter(p); }
+  else if (ouiIsNES())     { if (up) nesBrowseUp();     else nesBrowseEnter(p); }
+  else if (ouiIsAtari())   { if (up) atariBrowseUp();   else atariBrowseEnter(p); }
+  else if (ouiIsMsx())     { if (up) msxBrowseUp();     else msxBrowseEnter(p); }
+  else if (ouiIsSms())     { if (up) smsBrowseUp();     else smsBrowseEnter(p); }
+  else if (ouiIsPcxt())    { if (up) pcxtBrowseUp();    else pcxtBrowseEnter(p); }
+  else if (ouiIsTiny386()) { if (up) tiny386BrowseUp(); else tiny386BrowseEnter(p); }
+  else if (HdDisk)         { if (up) hdBrowseUp();      else hdBrowseEnter(p); }
+  else                     { if (up) diskBrowseUp();    else diskBrowseEnter(p); }
   shownFile = 0xff; firstShowFile = 0;
   optionsUiSyncSelection();
   optionsUiDirty = true;
@@ -171,11 +215,14 @@ static void ouiSmallBtn(int x, int y, int w, int h, const char *s, uint16_t face
   tft.drawString(s, x + w / 2, y + h / 2, 2);
 }
 
-// 2px white outline marking the control the joystick is focused on.
+// 2px outline marking the control the joystick/keyboard is focused on. Green instead of white
+// while that control is being edited (keyboard only), so it is obvious that the arrows are
+// changing a value rather than moving the focus -- and therefore that Escape backs out.
 static void ouiFocusRing(int x, int y, int w, int h, int r)
 {
-  tft.drawRoundRect(x,     y,     w,     h,     r, TFT_WHITE);
-  tft.drawRoundRect(x + 1, y + 1, w - 2, h - 2, r, TFT_WHITE);
+  uint16_t c = ouiEditing ? OUI_ON : TFT_WHITE;
+  tft.drawRoundRect(x,     y,     w,     h,     r, c);
+  tft.drawRoundRect(x + 1, y + 1, w - 2, h - 2, r, c);
 }
 
 static void ouiDrawToggle(int idx, const char *label, const char *value, uint16_t valColor)
@@ -295,12 +342,16 @@ static void ouiDrawToggles()
     ouiDrawScreenToggle();
     return;
   }
+  // No MACHINE card: II+ and IIe are two separate systems on the boot splash now, and the memory
+  // map is built for the chosen one at startup (src/apple2/memory.cpp), so the model cannot be
+  // flipped from here any more. Which one is running is in the title bar instead. The grid is
+  // therefore the IIGS one: DEVICE SPEED SOUND JOYSTICK VIDEO, slot 5 empty, 6 SCREEN, 7 HELP.
   ouiDrawToggle(0, "DEVICE",   HdDisk ? "HD" : "DISK",          OUI_TXT);
-  ouiDrawToggle(1, "MACHINE",  AppleIIe ? "IIe" : "II+",        OUI_TXT);
-  ouiDrawToggle(2, "SPEED",    Fast1MhzSpeed ? "FAST" : "1MHz", OUI_TXT);
-  ouiDrawToggle(3, "SOUND",    sound ? "ON" : "MUTE",           OUI_TXT);
-  ouiDrawToggle(4, "JOYSTICK", joystick ? "ON" : "OFF",         OUI_TXT);
-  ouiDrawToggle(5, "VIDEO",    videoColor ? "COLOR" : "MONO",   OUI_TXT);
+  ouiDrawToggle(1, "SPEED",    Fast1MhzSpeed ? "FAST" : "1MHz", OUI_TXT);
+  ouiDrawToggle(2, "SOUND",    sound ? "ON" : "MUTE",           OUI_TXT);
+  ouiDrawToggle(3, "JOYSTICK", joystick ? "ON" : "OFF",         OUI_TXT);
+  ouiDrawToggle(4, "VIDEO",    videoColor ? "COLOR" : "MONO",   OUI_TXT);
+  ouiClearToggle(5);
   ouiDrawScreenToggle();   // slot 6: SCREEN (FILL/ORIG); slot 7 = HELP. 6502 MHz shows in the title bar.
 }
 
@@ -366,15 +417,25 @@ static void ouiDrawFiles()
       tft.fillRect(0, ry, 300, OUI_FB_ROWH, rowbg);
       if (mounted) tft.fillRect(0, ry, 3, OUI_FB_ROWH, OUI_ON);
 
-      std::string nm = ouiIsC64() ? ouiDisplayName(files[idx]) : files[idx];
-      if (!ouiIsC64() && !nm.empty() && nm[0] == '/') nm = nm.substr(1);
+      // Every browser can now be inside a subdirectory, so every row gets the same treatment:
+      // ".." as-is, "[name]" for a directory, otherwise the basename with the path stripped.
+      std::string nm = ouiDisplayName(files[idx]);
+#if defined(BOARD_PICOCALC)
+      // Proportional list font: truncate by measured width, not character count.
+      const int maxw = (mntA || mntC) ? 262 : 286;   // leave room for the A:/C: chip on mounted rows
+      if (tft.textWidth(nm.c_str(), OUI_FB_FONT) > maxw) {
+        while (nm.size() > 1 && tft.textWidth((nm + "...").c_str(), OUI_FB_FONT) > maxw) nm.pop_back();
+        nm += "...";
+      }
+#else
       size_t maxlen = (mntA || mntC) ? 40 : 46;   // leave room for the A:/C: chip on mounted rows
       if (nm.size() > maxlen) nm = nm.substr(0, maxlen - 3) + "...";
+#endif
       tft.setTextDatum(ML_DATUM);
-      uint16_t txtcol = ouiIsC64() && ouiIsDir(files[idx]) ? tft.color565(120, 200, 255)
+      uint16_t txtcol = ouiIsDir(files[idx]) ? tft.color565(120, 200, 255)
                       : (selected ? OUI_TXT : tft.color565(200, 205, 215));
       tft.setTextColor(txtcol, rowbg);
-      tft.drawString(nm.c_str(), 9, ry + OUI_FB_ROWH / 2, 1);
+      tft.drawString(nm.c_str(), 9, ry + OUI_FB_ROWH / 2, OUI_FB_FONT);
       if (mntA || mntC) {                         // chip showing which drive this image is mounted in
         const char *tag = (mntA && mntC) ? "AC" : mntA ? "A" : "C";
         tft.fillRoundRect(278, ry + 2, 20, OUI_FB_ROWH - 4, 3, OUI_ON);
@@ -423,8 +484,62 @@ static void ouiActBtn(int x, int w, const char *label, uint16_t face, uint16_t t
   if (optionsUiFocus == focusId) ouiFocusRing(x, y, w, h, 6);
 }
 
+#if defined(BOARD_PICOCALC)
+// Keyboard-only board: while the file list has the focus, the action-button row is replaced by
+// the keys that act on the highlighted row (the buttons are unreachable from there anyway -- the
+// arrows are browsing the list). Drawn as runs of {key, what it does} pairs, keys in green.
+static void ouiHintLine(int y, const char *const *seg, int n)
+{
+  int w = 0;
+  for (int i = 0; i < n; i++) w += tft.textWidth(seg[i], OUI_FB_FONT);
+  int x = 160 - w / 2;
+  tft.setTextDatum(ML_DATUM);
+  for (int i = 0; i < n; i++) {
+    tft.setTextColor((i & 1) ? OUI_TXT : OUI_ON, OUI_CARD2);
+    x += tft.drawString(seg[i], x, y, OUI_FB_FONT);
+  }
+}
+
+static void ouiDrawFileHints()
+{
+  std::vector<std::string> &fl = ouiFiles();
+  const bool dir = shownFile < fl.size() && ouiIsDir(fl[shownFile]);
+  // What Enter (inside the list) and Ctrl-Enter do -- mirrors optionsUiKeyEnter / ouiMount.
+  const char *enterAct = dir               ? "open folder"
+                       : ouiIsTiny386()    ? "mount C:"
+                       : ouiIsPcxt()       ? "mount A:"
+                       : ouiIsIIgs()       ? "mount + reboot"
+                       : (ouiIsC64() || ouiIsNES() || ouiIsAtari() || ouiIsMsx() || ouiIsSms())
+                                           ? "load & run" : "mount";
+  const char *ctrlAct  = dir               ? NULL
+                       : ouiIsPC()         ? "mount C:"
+                       : (currentPlatform == PLATFORM_APPLE2) ? "mount + reboot" : NULL;
+
+  const int y = OUI_ACT_TOP, h = OUI_ACT_H;
+  tft.fillRect(0, y, 320, h, OUI_BG);
+  tft.fillRoundRect(4, y, 312, h, 6, OUI_CARD2);
+  tft.drawRoundRect(4, y, 312, h, 6, OUI_BORDER);
+  const int y1 = y + h / 4 + 1, y2 = y + (3 * h) / 4 - 1;
+  if (ouiEditing) {
+    const char *l1[] = { "Enter ", enterAct, "    Ctrl+Enter ", ctrlAct };
+    ouiHintLine(y1, l1, ctrlAct ? 4 : 2);
+    const char *l2[] = { "Arrows ", "select", "    Esc ", "back" };
+    ouiHintLine(y2, l2, 4);
+  } else {
+    const char *l1[] = { "Enter ", "browse list", "    Ctrl+Enter ", ctrlAct };
+    ouiHintLine(y1, l1, ctrlAct ? 4 : 2);
+    const char *l2[] = { "Arrows ", "move to other controls" };
+    ouiHintLine(y2, l2, 2);
+  }
+}
+#endif
+
 static void ouiDrawActions()
 {
+#if defined(BOARD_PICOCALC)
+  if (optionsUiFocus == OUI_FOC_FILES) { ouiDrawFileHints(); return; }
+  tft.fillRect(0, OUI_ACT_TOP, 320, OUI_ACT_H, OUI_BG);   // wipe the hint panel from the gaps
+#endif
   bool canMount = !ouiFiles().empty();
   uint16_t mc = canMount ? OUI_MOUNT : OUI_CARD2;
   uint16_t mt = canMount ? OUI_TXT : OUI_LBL;
@@ -460,7 +575,8 @@ static void ouiDrawTitle()
                : ouiIsMsx() ? "MSX1  SETTINGS"
                : ouiIsSms() ? "MASTER SYSTEM  SETTINGS"
                : ouiIsPcxt() ? "PC-XT (8086)  SETTINGS"
-               : ouiIsTiny386() ? "PC 386  SETTINGS" : "APPLE II  SETTINGS",
+               : ouiIsTiny386() ? "PC 386  SETTINGS"
+               : AppleIIe ? "APPLE IIe  SETTINGS" : "APPLE II+  SETTINGS",
                  10, OUI_TITLE_H / 2, 2);
   int cw = OUI_TITLE_H, cx = 320 - cw;
   if (currentPlatform == PLATFORM_APPLE2) {     // 6502 speed readout (its grid slot is now SCREEN)
@@ -487,6 +603,8 @@ static void ouiDrawHelpButton()
   tft.setTextDatum(MC_DATUM);
   tft.setTextColor(OUI_TXT, face);
   tft.drawString("HELP", x + OUI_TG_W / 2, y + OUI_TG_H / 2, 2);
+  if (optionsUiFocus == OUI_FOC_HELP)
+    ouiFocusRing(x + 2, y + 2, OUI_TG_W - 4, OUI_TG_H - 4, 5);
 }
 
 // --- HELP overlay (per-platform controls cheat-sheet) ---
@@ -504,7 +622,7 @@ static void ouiHelpRow(int &y, const char *k, const char *v)
   tft.drawString(k, 14, y, 1);
   tft.setTextColor(tft.color565(205, 210, 220), OUI_BG);
   tft.drawString(v, 120, y, 1);
-  y += 12;
+  y += OUI_HELP_ROWH;
 }
 
 static void ouiDrawHelp()
@@ -523,49 +641,76 @@ static void ouiDrawHelp()
 
   int y = OUI_TITLE_H + 6;
   ouiHelpHdr(y, "GLOBAL");
+#if defined(BOARD_PICOCALC)
+  ouiHelpRow(y, "Ctrl-F1",       "Open / close menu");
+  ouiHelpRow(y, "Ctrl-F8",       "System menu (Ct-Sh-F3)");
+  ouiHelpRow(y, "Ctrl-Shift-F1", "Reboot the device");
+#else
   ouiHelpRow(y, "F10",           "Open / close menu");
   ouiHelpRow(y, "Vol +/-",       "Volume (media keys)");
   ouiHelpRow(y, "Pad SEL+START", "Open / close menu");
+#endif
+  ouiHelpHdr(y, "IN THIS MENU");
+  ouiHelpRow(y, "Arrows",        "Browse");
+  ouiHelpRow(y, "Enter",         "Toggle / open / mount");
+  ouiHelpRow(y, "Ctrl-Enter",    "Mount + reboot");
+  ouiHelpRow(y, "Esc",           "Back, then close");
 
   if (ouiIsNES()) {
     ouiHelpHdr(y, "NES  -  KEYBOARD");
     ouiHelpRow(y, "Arrows",      "D-pad");
     ouiHelpRow(y, "X / Z",       "A / B");
     ouiHelpRow(y, "Enter / Tab", "Start / Select");
+#if !defined(BOARD_PICOCALC)   // no gamepad port on this board; see the note at the Apple section
     ouiHelpHdr(y, "NES  -  GAMEPAD");
     ouiHelpRow(y, "D-pad",       "D-pad");
     ouiHelpRow(y, "A / B",       "A / B");
     ouiHelpRow(y, "Start / Sel", "Start / Select");
+#endif
   } else if (ouiIsAtari()) {
     ouiHelpHdr(y, "ATARI  -  KEYBOARD");
     ouiHelpRow(y, "Arrows",    "Joystick");
+#if defined(BOARD_PICOCALC)
+    ouiHelpRow(y, "F5 / Space", "Fire");
+    ouiHelpRow(y, "F3 / Enter", "Reset switch");
+    ouiHelpRow(y, "F4 / Tab",   "Select switch");
+#else
     ouiHelpRow(y, "Space / X", "Fire");
     ouiHelpRow(y, "Enter",     "Reset switch");
     ouiHelpRow(y, "Tab",       "Select switch");
+#endif
+#if !defined(BOARD_PICOCALC)   // no gamepad port on this board; see the note at the Apple section
     ouiHelpHdr(y, "ATARI  -  GAMEPAD");
     ouiHelpRow(y, "D-pad", "Joystick");
     ouiHelpRow(y, "A / B", "Fire / Select");
     ouiHelpRow(y, "Start", "Reset");
+#endif
   } else if (ouiIsC64()) {
     ouiHelpHdr(y, "C64  -  KEYBOARD");
     ouiHelpRow(y, "Keys",      "C64 layout");
     ouiHelpRow(y, "Arrows",    "Cursor (JOY off)");
     ouiHelpRow(y, "Arr+Space", "Joystick (JOY on)");
+#if !defined(BOARD_PICOCALC)   // no gamepad port on this board; see the note at the Apple section
     ouiHelpHdr(y, "C64  -  GAMEPAD");
     ouiHelpRow(y, "D-pad", "Stick");
     ouiHelpRow(y, "A",     "Fire");
+#endif
   } else if (ouiIsMsx()) {
     ouiHelpHdr(y, "MSX  -  KEYBOARD");
     ouiHelpRow(y, "Keys",      "MSX layout");
     ouiHelpRow(y, "Arrows",    "Cursor / Joystick");
     ouiHelpRow(y, "Space",     "Trigger / Space");
+#if !defined(BOARD_PICOCALC)   // no gamepad port on this board; see the note at the Apple section
     ouiHelpHdr(y, "MSX  -  GAMEPAD");
     ouiHelpRow(y, "D-pad", "Stick");
     ouiHelpRow(y, "A / B", "Trigger A / B");
+#endif
   } else if (ouiIsSms()) {
+#if !defined(BOARD_PICOCALC)   // no gamepad port on this board; see the note at the Apple section
     ouiHelpHdr(y, "MASTER SYSTEM  -  GAMEPAD");
     ouiHelpRow(y, "D-pad",  "D-pad");
     ouiHelpRow(y, "A / B",  "Button 1 / 2");
+#endif
     ouiHelpHdr(y, "SMS  -  KEYBOARD");
     ouiHelpRow(y, "Arrows", "D-pad");
     ouiHelpRow(y, "Z / X",  "Button 1 / 2");
@@ -573,9 +718,11 @@ static void ouiDrawHelp()
     ouiHelpHdr(y, "PC-XT  -  KEYBOARD");
     ouiHelpRow(y, "Keys",   "Type into DOS");
     ouiHelpRow(y, "F12",    "Reboot PC");
+#if !defined(BOARD_PICOCALC)   // no gamepad port on this board; see the note at the Apple section
     ouiHelpHdr(y, "PC-XT  -  GAMEPAD");
     ouiHelpRow(y, "D-pad",  "Arrow keys");
     ouiHelpRow(y, "A / B",  "Enter / Esc");
+#endif
   } else if (ouiIsTiny386()) {
     ouiHelpHdr(y, "PC 386  -  DISK");
     ouiHelpRow(y, "Tap img", "Boot it (reboots)");
@@ -585,20 +732,39 @@ static void ouiDrawHelp()
   } else {   // Apple II / IIGS
     ouiHelpHdr(y, "APPLE  -  KEYBOARD");
     ouiHelpRow(y, "Keys",   "Type into Apple");
-    ouiHelpRow(y, "Arrows", "Cursor");
+    ouiHelpRow(y, "Arrows", "Cursor / paddles");
+#if defined(BOARD_PICOCALC)
+    ouiHelpRow(y, "F4 / F5", "Button 0 / 1");
+    ouiHelpRow(y, "Ctrl-F3", "Reset the Apple");
+#else
+    ouiHelpRow(y, "Alt / AltGr", "Button 0 / 1");
     ouiHelpRow(y, "F11",    "Reset");
+#endif
+#if !defined(BOARD_PICOCALC)
+    // Omitted on the PicoCalc: it has no gamepad port (see the "no USB gamepad" line in
+    // input_picocalc.cpp), so this section documented hardware that cannot be attached -- and
+    // the page used to have only 240 rows, which this section and the row added above overran.
     ouiHelpHdr(y, "APPLE  -  GAMEPAD");
     ouiHelpRow(y, "D-pad", "Paddle / stick");
     ouiHelpRow(y, "A / B", "Button 0 / 1");
+#endif
   }
 
   tft.setTextDatum(BC_DATUM);
   tft.setTextColor(OUI_LBL, OUI_BG);
+#if defined(BOARD_PICOCALC)
+  tft.drawString("Press any key to close", 160, OUI_SCR_H - 4, 1);
+#else
   tft.drawString("Tap anywhere to close", 160, 236, 1);
+#endif
 }
 
 void optionsUiRender()
 {
+#if defined(BOARD_PICOCALC)
+  // Normally already on from optionsUiOpen(); if anything switched it off, repaint all of it.
+  if (tft.setFullPanel(true)) { optionsUiFirstDraw = true; optionsUiDirty = true; }
+#endif
   if (!optionsUiDirty) return;
   if (optionsUiFirstDraw) { tft.fillScreen(OUI_BG); optionsUiFirstDraw = false; }
   if (ouiHelpOpen) { ouiDrawHelp(); optionsUiDirty = false; return; }
@@ -711,15 +877,21 @@ static void ouiToggle(int idx)
       HdDisk = !HdDisk;
       // Only the boot device's image list is loaded at startup; scan the other on
       // demand (synchronously) so HD/DISK mode always shows its files.
+      // free heap on this line too: the scan below is the thing that runs out of it, and if it
+      // dies before printing its own figure this is the last number we get.
+      sprintf(buf, "DEVICE toggle -> %s (hdFiles=%d diskFiles=%d free heap=%u)",
+              HdDisk ? "HD" : "DISK", (int)hdFiles.size(), (int)diskFiles.size(),
+              (unsigned)ESP.getFreeHeap());
+      printLog(buf);
       if (HdDisk) { if (hdFiles.empty())   loadHdFilesSync();   }
       else        { if (diskFiles.empty()) loadDiskFilesSync(); }
+      printLog("DEVICE toggle done");
       shownFile = 0xff; firstShowFile = 0; optionsUiSyncSelection();
       break;
-    case 1: AppleIIe = !AppleIIe; activeFlags = AppleIIe ? flagsIIe : flagsIIplus; break;
-    case 2: Fast1MhzSpeed = !Fast1MhzSpeed; break;
-    case 3: sound = !sound; break;
-    case 4: joystick = !joystick; break;
-    case 5: videoColor = !videoColor; break;
+    case 1: Fast1MhzSpeed = !Fast1MhzSpeed; break;
+    case 2: sound = !sound; break;
+    case 3: joystick = !joystick; break;
+    case 4: videoColor = !videoColor; break;
     default: return;
   }
   optionsUiDirty = true;
@@ -740,13 +912,15 @@ static void ouiScroll(int dir)
 static void ouiMount()
 {
   std::vector<std::string> &files = ouiFiles();
-  if (files.empty()) return;
+  if (files.empty() || shownFile >= files.size()) return;
+  // Every browser can be sitting inside a subdirectory now, so a highlighted ".." or "name/"
+  // row means navigate, never mount. Checked once here instead of in each per-core branch.
+  if (ouiIsDir(files[shownFile])) { ouiBrowse(files[shownFile]); return; }
   if (ouiIsC64()) {                       // C64: load the highlighted image (.prg/.d64/.crt) + run
     if (shownFile >= files.size()) return;
-    if (ouiIsDir(files[shownFile])) { ouiBrowse(files[shownFile]); return; }  // dir -> navigate
     selectedC64FileName = files[shownFile].c_str();
-    c64LoadSelected(selectedC64FileName.c_str());
-    showHideOptionsWindow();              // close -> CPU resumes -> BASIC autoruns
+    c64LoadAndRun(selectedC64FileName.c_str());
+    showHideOptionsWindow();              // close -> CPU resumes -> reset -> loads at READY
     return;
   }
   if (ouiIsNES()) {                       // NES: load the highlighted .nes + reset into it
@@ -781,14 +955,12 @@ static void ouiMount()
   }
   if (ouiIsTiny386()) {                     // tiny386: double-tap mounts the image as C: (re-attach + PC re-POST)
     if (shownFile >= files.size()) return;
-    if (ouiIsDir(files[shownFile])) { ouiBrowse(files[shownFile]); return; }
     tiny386MountC(files[shownFile].c_str());
     showHideOptionsWindow();
     return;
   }
   if (ouiIsIIgs()) {                       // IIGS: persist the highlighted image + reboot -> auto-mounted on boot
     if (shownFile >= files.size()) return;
-    if (ouiIsDir(files[shownFile])) { ouiBrowse(files[shownFile]); return; }
     if (HdDisk) setHdFile(); else setDiskFile();   // selectedHd/DiskFileName = highlighted image
     saveConfig();         // persist so the boot auto-load (emu8.ino) mounts it
     ESP.restart();        // reboot -> iigsSetup loads it -> firmware boots (slot 7 HD / slot 6 disk)
@@ -805,6 +977,7 @@ static void ouiPcMountA()   // A: floppy
 {
   std::vector<std::string> &files = ouiFiles();
   if (files.empty() || shownFile >= files.size()) return;
+  if (ouiIsDir(files[shownFile])) { ouiBrowse(files[shownFile]); return; }  // dir row -> navigate
   bool isCur = ouiPcA().length() && files[shownFile] == std::string(ouiPcA().c_str());
   if (ouiIsTiny386()) {                            // tiny386: live mount/eject, NO device reboot
     tiny386MountA(isCur ? "" : files[shownFile].c_str());
@@ -818,6 +991,7 @@ static void ouiPcMountC()   // C: hard disk
 {
   std::vector<std::string> &files = ouiFiles();
   if (files.empty() || shownFile >= files.size()) return;
+  if (ouiIsDir(files[shownFile])) { ouiBrowse(files[shownFile]); return; }  // dir row -> navigate
   bool isCur = ouiPcC().length() && files[shownFile] == std::string(ouiPcC().c_str());
   if (ouiIsTiny386()) {                            // tiny386: re-attach C: + soft-reboot the PC (not the device)
     tiny386MountC(isCur ? "" : files[shownFile].c_str());
@@ -832,7 +1006,11 @@ static void ouiPcMountC()   // C: hard disk
 static void ouiMountReboot()
 {
   if (ouiIsC64()) return;                 // C64 has no such button
-  if (!ouiFiles().empty()) { if (HdDisk) setHdFile(); else setDiskFile(); }
+  std::vector<std::string> &files = ouiFiles();
+  // A directory row navigates instead: rebooting into a folder is not a thing.
+  if (!files.empty() && shownFile < files.size() && ouiIsDir(files[shownFile]))
+    { ouiBrowse(files[shownFile]); return; }
+  if (!files.empty()) { if (HdDisk) setHdFile(); else setDiskFile(); }
   saveConfig();
   ESP.restart();
 }
@@ -896,7 +1074,116 @@ void optionsUiActivate()              // joystick fire button on the focused con
   else if (f == OUI_FOC_MOUNT)     { if (ouiIsPC()) ouiPcMountA(); else ouiMount(); }       // PC: MOUNT A:
   else if (f == OUI_FOC_MNTREBOOT) { if (ouiIsPC()) ouiPcMountC(); else ouiMountReboot(); } // PC: MOUNT C:
   else if (f == OUI_FOC_REBOOT)    ouiReboot();
+  else if (f == OUI_FOC_HELP)      ouiOpenHelp();
   // FOC_VOL: nothing (adjust with up/down)
+}
+
+// ---- Keyboard navigation -------------------------------------------------------------------
+// Deliberately separate from the three joystick entry points above rather than a change to
+// them. A joystick has two axes and one button and no Escape, so it uses left/right to move and
+// up/down to change the focused value in place -- there is nothing to back out of. A keyboard
+// has four arrows and an Escape, so it can afford the more conventional model asked for here:
+// all four arrows browse, Enter opens (or toggles) the focused control, Escape leaves a control
+// that was opened, and Escape with nothing open closes the window. Keeping the two apart means
+// the CYD's analog stick and the touch handler keep behaving exactly as before.
+//
+// The rows mirror the drawn layout: a 4-wide toggle grid, then VOLUME, then the file list,
+// then the action buttons side by side.
+static const uint8_t ouiRow0[] = { 0, 1, 2, 3 };
+#if BOARD_HAS_SCREENFILL
+static const uint8_t ouiRow1[] = { 4, 5, OUI_FOC_SCREEN, OUI_FOC_HELP };
+#else
+static const uint8_t ouiRow1[] = { 4, 5, OUI_FOC_HELP };
+#endif
+static const uint8_t ouiRow2[] = { OUI_FOC_VOL };
+static const uint8_t ouiRow3[] = { OUI_FOC_FILES };
+static const uint8_t ouiRow4[] = { OUI_FOC_MOUNT, OUI_FOC_MNTREBOOT, OUI_FOC_REBOOT };
+static const uint8_t *const ouiRows[]  = { ouiRow0, ouiRow1, ouiRow2, ouiRow3, ouiRow4 };
+static const uint8_t        ouiRowLen[] = { (uint8_t)(sizeof(ouiRow0)), (uint8_t)(sizeof(ouiRow1)),
+                                            (uint8_t)(sizeof(ouiRow2)), (uint8_t)(sizeof(ouiRow3)),
+                                            (uint8_t)(sizeof(ouiRow4)) };
+#define OUI_ROW_COUNT ((int)(sizeof(ouiRows) / sizeof(ouiRows[0])))
+
+static void ouiFindCell(int &row, int &col)
+{
+  for (int r = 0; r < OUI_ROW_COUNT; r++)
+    for (int c = 0; c < (int)ouiRowLen[r]; c++)
+      if (ouiRows[r][c] == optionsUiFocus) { row = r; col = c; return; }
+  row = 0; col = 0;                       // focus is on something not in the map: start over
+}
+
+// dx/dy: -1 = left/up, +1 = right/down (0 = no movement on that axis).
+void optionsUiKeyArrow(int dx, int dy)
+{
+  if (ouiHelpOpen) { ouiCloseHelp(); return; }
+
+  if (ouiEditing) {
+    if (optionsUiFocus == OUI_FOC_VOL) {
+      // Up and Right both mean "more", which is the only arrangement that feels right against
+      // a horizontal slider drawn left-to-right. optionsUiAdjust takes -1 as "louder".
+      if (dy < 0 || dx > 0) optionsUiAdjust(-1);
+      else if (dy > 0 || dx < 0) optionsUiAdjust(+1);
+      return;
+    }
+    if (optionsUiFocus == OUI_FOC_FILES) {
+      if (dy) optionsUiAdjust(dy);
+      else if (dx) for (int i = 0; i < OUI_FB_ROWS; i++) optionsUiAdjust(dx);   // page; clamps
+      return;
+    }
+    ouiEditing = false;                   // nothing editable under the focus any more
+  }
+
+  int row = 0, col = 0;
+  ouiFindCell(row, col);
+  if (dx) {
+    col += dx;
+    if (col < 0) col = (int)ouiRowLen[row] - 1;           // wrap within the row
+    if (col >= (int)ouiRowLen[row]) col = 0;
+  }
+  if (dy) {
+    row = (row + dy + OUI_ROW_COUNT) % OUI_ROW_COUNT;     // wrap between rows
+    if (col >= (int)ouiRowLen[row]) col = (int)ouiRowLen[row] - 1;   // keep the column if it exists
+  }
+  optionsUiFocus = ouiRows[row][col];
+  optionsUiDirty = true;
+}
+
+void optionsUiKeyEnter(bool ctrl)
+{
+  if (ouiHelpOpen) { ouiCloseHelp(); return; }
+  int f = optionsUiFocus;
+
+  // Ctrl-Enter on the file list is the MOUNT+REBOOT button without leaving the list -- the same
+  // call the button makes, so the two can never drift apart. Deliberately does NOT require the
+  // list to be opened with a plain Enter first: the highlight is drawn either way, so demanding
+  // an Enter before the Ctrl-Enter would be a keystroke with nothing behind it. A directory row
+  // still just navigates, which ouiMountReboot/ouiPcMountC check for themselves -- rebooting
+  // into a folder is not a thing.
+  if (f == OUI_FOC_FILES && ctrl) {
+    if (ouiIsPC()) ouiPcMountC();
+    else if (currentPlatform == PLATFORM_APPLE2 || ouiIsIIgs()) ouiMountReboot();
+    else ouiMount();      // C64/NES/Atari/MSX/SMS: no reboot variant, Ctrl-Enter = LOAD & RUN
+    return;
+  }
+
+  // VOLUME and the file list hold a value rather than perform an action, so Enter opens them
+  // and the arrows then work inside them.
+  if (f == OUI_FOC_VOL || f == OUI_FOC_FILES) {
+    if (!ouiEditing) { ouiEditing = true; optionsUiDirty = true; return; }
+    if (f == OUI_FOC_VOL) { ouiEditing = false; optionsUiDirty = true; return; }   // done
+    ouiMount();       // file list: a directory row navigates, a file row mounts (and closes)
+    return;
+  }
+  optionsUiActivate();   // toggles flip, action buttons fire -- no mode to enter
+}
+
+// Returns true if Escape was consumed here. False means "nothing was open" and the caller
+// should close the settings window.
+bool optionsUiKeyEscape()
+{
+  if (ouiHelpOpen) { ouiCloseHelp(); return true; }
+  if (ouiEditing)  { ouiEditing = false; optionsUiDirty = true; return true; }
+  return false;
 }
 
 // HELP overlay open/close. Opening/closing forces a full repaint (the pages don't overlap).
@@ -937,7 +1224,7 @@ static void ouiHandleTap(int16_t x, int16_t y)
       std::vector<std::string> &files = ouiFiles();
       int idx = firstShowFile + (y - OUI_FB_LIST) / OUI_FB_ROWH;
       if (idx < (int)files.size()) {
-        if (ouiIsC64() && ouiIsDir(files[idx])) ouiBrowse(files[idx]);   // enter dir / go up
+        if (ouiIsDir(files[idx])) ouiBrowse(files[idx]);   // enter dir / go up
         else { shownFile = (uint8_t)idx; optionsUiDirty = true; }
       }
       return;
@@ -979,6 +1266,9 @@ void optionsUiPoll()
 
 void optionsUiOpen()
 {
+#if defined(BOARD_PICOCALC)
+  tft.setFullPanel(true);   // before the scans below: their progress bar draws in the list area
+#endif
   if (ouiIsC64() && c64Files.empty()) loadC64FilesSync();   // populate the .prg browser
   if (ouiIsNES() && nesFiles.empty()) nesScanFiles();       // populate the .nes browser
   if (ouiIsAtari() && atariFiles.empty()) atariScanFiles(); // populate the .a26/.bin browser
@@ -986,8 +1276,16 @@ void optionsUiOpen()
   if (ouiIsSms() && smsFiles.empty()) smsScanFiles();       // populate the .sms/.bin browser
   if (ouiIsPcxt() && pcFiles.empty()) pcxtScanFiles();      // populate the disk-image browser
   if (ouiIsTiny386() && tiny386Files.empty()) tiny386ScanFiles();  // populate the 386 disk-image browser
-  optionsUiSyncSelection();
-  optionsUiFocus       = 0;
+  // Reopen where the menu was left: same focused control (and still inside VOL / the file list if
+  // it was closed from there), same highlighted row. Only the very first open, or a list that no
+  // longer has that row, falls back to the mounted file.
+  static bool opened = false;
+  std::vector<std::string> &files = ouiFiles();
+  if (!opened || shownFile >= files.size()) optionsUiSyncSelection();
+  else if (shownFile < firstShowFile || shownFile >= firstShowFile + OUI_FB_ROWS)
+    firstShowFile = (shownFile >= OUI_FB_ROWS) ? shownFile - OUI_FB_ROWS + 1 : 0;
+  opened = true;
+  if (optionsUiFocus != OUI_FOC_VOL && optionsUiFocus != OUI_FOC_FILES) ouiEditing = false;
   ouiHelpOpen          = false;  // always open on the settings page, not the help overlay
   optionsUiFirstDraw   = true;
   optionsUiDirty       = true;

@@ -1,0 +1,19 @@
+{
+  "name": "emu8-sdmanager",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Browse, upload and download files on an emu8 board's microSD card over USB serial (Web Serial).",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node ../test/protocol.test.mjs"
+  },
+  "devDependencies": {
+    "vite": "^8.3.1"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}

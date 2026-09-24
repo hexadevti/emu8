@@ -1,3 +1,7 @@
+// Not built for the PicoCalc (RP2350): this core needs multi-megabyte ps_malloc'd guest RAM,
+// and the board has 520KB of SRAM with its 8MB PSRAM on plain GPIOs (not memory-mapped). The
+// shared dispatch/render/UI code links against src/picocalc/bigram_stubs.cpp instead.
+#if !defined(BOARD_PICOCALC)
 /*
   Created by Fabrizio Di Vittorio (fdivitto2013@gmail.com) - <http://www.fabgl.com>
   Copyright (c) 2019-2022 Fabrizio Di Vittorio.
@@ -220,3 +224,4 @@ void PIC8259::performEOI()
 
 
 } // namespace fabgl
+#endif // !defined(BOARD_PICOCALC)

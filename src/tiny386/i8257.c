@@ -1,4 +1,4 @@
-#if !defined(BOARD_JC4827W543)  // tiny386 is not built for the S3 board (too big; vendored core not wired for the device toolchain)
+#if !defined(BOARD_JC4827W543) && !defined(BOARD_PICOCALC)  // tiny386 is not built for the S3 board (too big; vendored core not wired for the device toolchain) or the PicoCalc (RP2350: 520KB SRAM, no memory-mapped PSRAM)
 /*
  * QEMU DMA emulation
  *
@@ -689,4 +689,4 @@ I8257State *i8257_new(
     return d;
 }
 
-#endif // !defined(BOARD_JC4827W543)
+#endif // !defined(BOARD_JC4827W543) && !defined(BOARD_PICOCALC)

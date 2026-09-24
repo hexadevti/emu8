@@ -6,6 +6,23 @@
 // log.cpp
 void logSetup();
 void printLog(String txt);
+// Boot progress screen: the panel comes up before the emulator does and names the step the
+// firmware is on, so the seconds spent waiting for the mainboard rail, waiting for a USB
+// terminal, reading ROMs and scanning the card are not a black screen. No-ops off the PicoCalc.
+void bootProgressBegin();               // panel up + logo + the first step
+void bootProgressStep(const char *what);// replace the status line ("Loading iie.bin", ...)
+void bootProgressEnd();                 // hand the panel to the render loop
+
+// "Ctrl-F1 for options" hint: five seconds in the TOP letterbox bar once the emulator is up, so
+// the one key you cannot guess is on screen at least once per boot without ever covering the
+// picture. bootHintTick() is the render task's per-frame poke (it owns all drawing);
+// bootHintDismiss() is the keyboard's, and only sets a flag. No-ops off the PicoCalc.
+void bootHintTick();
+void bootHintDismiss();
+#if defined(BOARD_PICOCALC)
+bool picocalcWaitForMainboard();   // block until the PicoCalc's own power rail is up
+bool picocalcWaitAnyKey(uint32_t timeoutMs);   // hold the screen until a key is pressed
+#endif
 void printSequence(int seq);
 void printProgress(size_t prg, size_t sz);
 void printCPUStatus();
@@ -13,6 +30,17 @@ void PrintHex(uint8_t data[], int length);
 
 // sd.cpp
 void FSSetup();
+uint64_t sdFreeBytes();   // free space on the mounted card (see sd.cpp for the per-core FS split)
+extern bool sdCardMounted;   // FSSetup() mounted a card
+
+// sdserial.cpp - SD card file manager over the serial port (host side: tools/sdmanager)
+void sdSerialSetup();                 // start the server task (after FSSetup)
+extern volatile bool sdSerialActive;  // a host session is live: printLog() stays quiet
+#if defined(BOARD_JC4827W543) || defined(BOARD_JC1060P470)
+#define SDSERIAL_MAX_PAYLOAD 4096     // largest frame payload; the UART RX buffer holds two
+#else
+#define SDSERIAL_MAX_PAYLOAD 1024     // CYD (no PSRAM, tight heap) and PicoCalc
+#endif
 
 // eprom.cpp
 void epromSetup();
@@ -38,7 +66,9 @@ void optionsScreenRender();
 
 // speaker.cpp
 void speakerSetup();
-void speakerToggle();
+// Hot: the 6502 hits $C030 about every 9 emulated cycles in a noise loop, so this is declared
+// IRAM_ATTR (a RAM section on every board that defines it) to keep the call off the flash/XIP path.
+void IRAM_ATTR speakerToggle();
 
 // audio_amp.cpp (no-DAC boards / ESP32-S3): external I2S amp output the audio cores feed into
 void ampBegin(int sampleRate);
@@ -98,6 +128,16 @@ void uiDirScanProgress(int count);    // draw a "Loading…" bar while a directo
 // video.cpp
 void videoSetup();
 void requestSplashOnNextBoot();       // arrange for the boot splash to show after the next reboot
+extern bool splashActive;             // true until the boot splash times out or is dismissed
+#if defined(BOARD_PICOCALC)
+// Keyboard-driven splash navigation: the PicoCalc has no touch panel, so input_picocalc.cpp
+// swallows left/right/Enter while splashActive and posts one of these instead. Defined in
+// video.cpp, which consumes and clears it on the next render pass.
+#define SPLASH_KEY_LEFT   (-1)
+#define SPLASH_KEY_RIGHT  (1)
+#define SPLASH_KEY_SELECT (2)
+extern volatile int8_t splashKeyEvent;
+#endif
 int red(int color);
 int green(int color);
 int blue(int color);
@@ -122,6 +162,12 @@ bool apple2LoadRoms();            // load all 5 ROMs; false if any is missing or
 bool apple2EnsureHdRom();         // load just /roms/apple2/hd.bin (shared with the IIGS slot 7); cached
 bool apple2RenderLoadWarning();   // renderLoop hook: draw the "ROMs not found" screen while halted
 extern bool apple2RomLoadFailed;  // set when apple2LoadRoms() failed -> the 6502 stays halted
+extern bool apple2MemAllocFailed; // set when memoryAlloc() ran out of heap -> same halt, other message
+extern bool apple2IIeUnavailable; // set when the IIe map did not fit and II+ was substituted
+void apple2FallbackToIIplus(const char* why);  // hand the IIe map back and come up as a II+
+#if BOARD_A2_ROM_IN_FLASH
+extern const unsigned char apple2IIeRomFlash[16696];  // iie.bin, in flash (src/apple2/iie_rom_flash.cpp)
+#endif
 
 // memory.cpp
 void memoryAlloc();
@@ -150,6 +196,8 @@ void saveDiskFile();
 void setDiskFile();
 void apple2InsertDisk(const char *path);   // hot-swap the floppy by path (no reboot)
 void loadDiskFilesSync();
+void diskBrowseEnter(const char *path); // navigate into a subdirectory and rescan
+void diskBrowseUp();              // navigate to the parent directory and rescan
 void loadDiskAsync(void *pvParameters);
 int getOffset(int track, int sector);
 int getSectorOffset(int sector);
@@ -164,6 +212,8 @@ char processSwitchc0e0(ushort address, char value);
 // hd.cpp
 void HDSetup();
 void loadHdFilesSync();
+void hdBrowseEnter(const char *path); // navigate into a subdirectory and rescan
+void hdBrowseUp();                // navigate to the parent directory and rescan
 void loadHdAsync(void *pvParameters);
 void getBlockAsync(void *pvParameters);
 void loadHD();
@@ -177,6 +227,7 @@ void setHdFile();
 char loadBlock(unsigned short address, unsigned short block);
 ushort getBlockQty();
 void getBlock(fs::FS &fs, ushort block);
+void closeHdFile();
 void loadHDDir(fs::FS &fs, const char *dirname, uint8_t levels);
 
 // languagecard.cpp
@@ -238,6 +289,8 @@ bool msxLoadSelected(const char *path);   // settings: load a .rom cartridge + r
 void msxScanFiles();                      // settings: rescan SD root for *.rom / *.dsk
 bool msxRenderLoadWarning();              // startup no-BIOS / C-BIOS note overlay (true while showing)
 void loadMsxFilesSync();                  // scan SD root -> msxFiles (ROM/disk browser)
+void msxBrowseEnter(const char *path); // navigate into a subdirectory and rescan
+void msxBrowseUp();               // navigate to the parent directory and rescan
 
 // SMS (Sega Master System) core entry points (src/sms/sms.cpp), called by the platform dispatch
 void smsSetup();                          // alloc RAM/VRAM + reset Z80/VDP/PSG; auto-load saved ROM
@@ -251,6 +304,8 @@ bool smsLoadSelected(const char *path);   // settings: load a .sms/.bin ROM + re
 void smsScanFiles();                      // settings: rescan SD root for *.sms / *.bin
 bool smsRenderLoadWarning();              // startup no-ROM warning overlay (true while showing)
 void loadSmsFilesSync();                  // scan SD root -> smsFiles (ROM browser)
+void smsBrowseEnter(const char *path); // navigate into a subdirectory and rescan
+void smsBrowseUp();               // navigate to the parent directory and rescan
 
 // PC-XT (Intel 8086 + CGA) core entry points (src/pcxt/pcxt.cpp), called by the platform dispatch
 void pcxtSetup();                          // alloc 1MB RAM (PSRAM) + 64K video RAM; install BIOS + wire chipset
@@ -269,6 +324,8 @@ void pcxtUnmount(int slot);                // settings: eject the disk in slot 0
 void pcxtScanFiles();                      // settings: rescan SD root for *.img/.ima/.dsk/.vhd
 bool pcxtRenderLoadWarning();              // startup overlay (always false: BIOS shows its own POST)
 void loadPcxtFilesSync();                  // scan SD root -> pcFiles (disk browser)
+void pcxtBrowseEnter(const char *path); // navigate into a subdirectory and rescan
+void pcxtBrowseUp();              // navigate to the parent directory and rescan
 
 // tiny386 (Intel i386 + VGA) core entry points (src/tiny386/tiny386.cpp), called by the dispatch.
 // Declared in src/tiny386/tiny386.h; mirrored here so the shared dispatch/render/UI can call them.
@@ -286,6 +343,8 @@ bool tiny386MountA(const char *sel);   // A: floppy: live mount/eject (no reboot
 bool tiny386MountC(const char *sel);   // C: hard disk: re-attach + soft-reboot the PC (no device restart)
 void tiny386ScanFiles();
 void loadTiny386FilesSync();
+void tiny386BrowseEnter(const char *path); // navigate into a subdirectory and rescan
+void tiny386BrowseUp();           // navigate to the parent directory and rescan
 bool tiny386RenderLoadWarning();
 
 // SID sound (src/c64/c64_sid.cpp)
@@ -299,10 +358,17 @@ void sidDebugVoice(int v, float *env, uint8_t *state); // live per-voice envelop
 
 // C64 program / disk loading (src/c64/c64_disk.cpp)
 void loadC64FilesSync();              // scan the current browse dir -> c64Files (dirs + images)
+// NES / Atari keep their scanners in src/nes/nes.h and src/atari/atari.h, but the shared
+// options UI needs the navigation entry points, so they are declared here with the rest.
+void nesBrowseEnter(const char *path);  // navigate into a subdirectory and rescan
+void nesBrowseUp();                     // navigate to the parent directory and rescan
+void atariBrowseEnter(const char *path);
+void atariBrowseUp();
 void c64BrowseEnter(const char *path);// navigate into a subdirectory and rescan
 void c64BrowseUp();                   // navigate to the parent directory and rescan
 bool c64LoadPRG(const char *path);    // load a .prg into the running C64 (autorun if BASIC)
 bool c64LoadSelected(const char *path); // menu dispatch: .prg loads&runs, .d64 mounts+runs "*"
+bool c64LoadAndRun(const char *path);   // same, but resets first and loads at the BASIC prompt
 void c64MountD64(const char *path);   // mount a .d64 as the virtual drive (device 8)
 bool c64DiskMounted();                // is a .d64 currently mounted?
 bool c64LoadCRT(const char *path);    // mount & launch a .crt cartridge (generic 8K/16K/Ultimax)
@@ -324,6 +390,10 @@ bool c64D64LoadDirectory(uint16_t altAddr, uint16_t *endAddr);
 void optionsUiNav(int dir);
 void optionsUiAdjust(int dir);
 void optionsUiActivate();
+// Keyboard menu navigation (separate from the joystick trio above -- see optionsui.cpp).
+void optionsUiKeyArrow(int dx, int dy);   // -1 = left/up, +1 = right/down
+void optionsUiKeyEnter(bool ctrl = false);   // ctrl: file list -> mount AND reboot
+bool optionsUiKeyEscape();                // false = nothing was open, caller closes the window
 
 // --- Globals defined inside a platform .cpp (declared here for cross-file access).
 //     The matching definition's first declaration here also gives the const arrays

@@ -43,3 +43,8 @@ build/*
 .iigsbuild/
 
 sdcard/
+build-picocalc/
+
+build-picocalc-rp2040/
+.picocalc-rp2350-build/
+.picocalc-rp2040-build/

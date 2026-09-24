@@ -15,14 +15,33 @@
   #include <TFT_eSPI.h>
 #elif defined(BOARD_DESKTOP)
   #include "src/desktop/display_sdl.h"  // DisplayGFX: TFT_eSPI-compatible SDL2 backend (desktop)
+#elif defined(BOARD_PICOCALC)
+  #include "src/picocalc/display_picocalc.h"  // DisplayGFX: ST7365P 320x320 over spi1+DMA (PicoCalc)
 #else
   #include "src/shared/display_gfx.h"   // DisplayGFX: TFT_eSPI-compatible Arduino_GFX backend
 #endif
 #if BOARD_SD_MMC
 #include "SD_MMC.h"     // ESP32-P4: microSD over the SDMMC (SDIO) peripheral, not SPI
+#elif defined(BOARD_PICOCALC)
+#include <SDFS.h>       // arduino-pico: SDFS is the SPI SD filesystem (its SD.h wrapper cannot
+                        // take a bus/speed, and has no cardType()/cardSize())
 #else
 #include "SD.h"
 #endif
+#if defined(BOARD_PICOCALC)
+// arduino-pico inherits FILE_READ / FILE_WRITE from SdFat, where they are integer open() flags
+// (O_RDONLY and O_RDWR|O_CREAT|O_AT_END). But fs::FS::open() here takes a MODE STRING, and
+// O_RDONLY is 0 -- so every open(path, FILE_READ) in the shared core code was quietly handing it
+// a null mode pointer. The card mounted, reported its size, and then "found" nothing on it: not
+// one ROM, disk or cart image would open. Redefine both to the fopen-style strings the rest of
+// the tree already means by these names (ESP32 SD.h and the desktop shim both spell them "r"/"w").
+// This has to come AFTER the SD include above, which is what drags the SdFat definitions in.
+#undef  FILE_READ
+#define FILE_READ  "r"
+#undef  FILE_WRITE
+#define FILE_WRITE "w"
+#endif
+
 #include <EEPROM.h>
 #include "rom.h"
 #include <string>
@@ -60,6 +79,8 @@ extern int freeSpace;
 // SD storage
 #if BOARD_SD_MMC
 #define FSTYPE SD_MMC
+#elif defined(BOARD_PICOCALC)
+#define FSTYPE SDFS
 #else
 #define FSTYPE SD
 #endif
@@ -68,13 +89,16 @@ extern int freeSpace;
 // SD-relative directory with this. If FSSetup() ever passes a different mountpoint, update it.
 #if defined(BOARD_DESKTOP)
 #define SD_VFS_ROOT "./sdcard"   // desktop: the emulated SD card is this host dir (see sd_host.cpp).
+#elif defined(BOARD_PICOCALC)
+#define SD_VFS_ROOT ""           // arduino-pico has no global VFS: SDFS paths ARE SD-relative.
 #else
 #define SD_VFS_ROOT "/sd"
 #endif
 #define SD_SPI_HZ   20000000   // SD SPI clock (Hz). 20MHz >> the 4MHz default -> ~5x faster reads.
-#if !BOARD_SD_MMC
+#if !BOARD_SD_MMC && !defined(BOARD_PICOCALC)
 extern SPIClass hspi;          // SD HSPI bus (shared with the XPT2046 touch on the JC4827W543).
-                               // Absent on the P4 (SD is SD_MMC, touch is I2C — no shared SPI bus).
+                               // Absent on the P4 (SD is SD_MMC, touch is I2C — no shared SPI bus)
+                               // and on the PicoCalc (panel and card are on different buses).
 #endif
 // Serializes XPT2046 touch reads against SD-card operations: both use the same HSPI bus, and the
 // SPIClass mutex only protects ONE transaction, not the SD library's multi-transaction
@@ -111,7 +135,11 @@ extern int margin_x;
 extern int margin_y;
 static const uint16_t screenWidth  = 240;
 static const uint16_t screenHeight = 320;
+#if defined(BOARD_PICOCALC)
+extern PicoMutex page_lock;   // arm-none-eabi libstdc++ has no std::mutex; see pico_shim.h
+#else
 extern std::mutex page_lock;
+#endif
 extern const uint16_t colors[8];     // defined in globals.cpp (after tft, for init order)
 extern const uint16_t colors16[16];
 
@@ -156,6 +184,13 @@ extern bool smoothUpscale;
 extern bool screenFill;   // JC4827W543: scale the emulator video to fill the panel (keep 4:3 aspect)
 extern uint8_t nesDisplaySkip;  // JC4827W543 NES: draw 1 of every N emulated frames (1=every frame; 2-3 trade picture smoothness for game speed)
 extern bool nesFast;            // NES: false = NORMAL (paced ~60fps/1.79MHz), true = FAST (uncapped)
+// The Apple II guest's OWN clock, in microseconds, published by the pacer in src/apple2/cpu.cpp
+// and consumed by src/shared/speaker.cpp. Real time is the wrong timebase for $C030: the host
+// cannot quite sustain 1.02MHz, so real time records how fast the EMULATOR ran, not what the
+// guest asked for. 0 means "no Apple II pacing this instruction" -- the speaker then falls back
+// to the hardware timer, which is what every other core wants.
+extern volatile uint32_t appleGuestUs;
+
 extern float nesMeasuredMhz;    // NES: measured 2A03 speed (derived from fps x cycles-per-frame)
 extern bool AppleIIe;
 extern bool OptionsWindow;
@@ -294,7 +329,9 @@ extern unsigned char* IIEmemoryBankSwitchedRAM2_1;
 extern unsigned char* IIEmemoryBankSwitchedRAM2_2;
 extern unsigned char* menuScreen;
 extern unsigned char* menuColor;
-extern unsigned char sharedBigBuf[];   // C64 framebuffer / Apple main RAM (shared static 64K)
+extern unsigned char sharedBigBuf[2 * (320 * 100 + 16)];   // C64 framebuffer / Apple main RAM
+                                       // (shared static 64K). Sized here, not just declared, so
+                                       // memoryAlloc() can static_assert against its tail.
 
 // Speaker Config
 extern boolean speaker_state;

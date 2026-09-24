@@ -46,6 +46,12 @@ static void ensureDir(const std::string &p) {
 #endif
 }
 
+// The desktop "card" is an ordinary host directory, so there is no meaningful capacity to
+// report; the shim FS answers a flat 2GB total / 0 used and this keeps that same fiction.
+uint64_t sdFreeBytes() {
+  return (uint64_t)FSTYPE.totalBytes() - (uint64_t)FSTYPE.usedBytes();
+}
+
 void FSSetup() {
   if (!gBusLock) gBusLock = xSemaphoreCreateMutex();
   hdAttached  = HdDisk;

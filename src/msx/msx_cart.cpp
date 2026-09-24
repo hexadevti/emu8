@@ -1,3 +1,10 @@
+// This MSX translation unit is compiled out entirely on boards that clear
+// BOARD_HAS_Z80_CORES (the PicoCalc's original RP2040 mainboard -- see board.h for why).
+// emu.h must be included FIRST because it is what pulls in board.h and defines the macro;
+// the guard below then empties the file, handing this core's static RAM to the Apple II.
+#include "../../emu.h"
+#if BOARD_HAS_Z80_CORES
+
 // msx_cart.cpp - MSX cartridge slot read/write with the common bank-switched mappers:
 //   PLAIN   - 16K/32K linear ROM at $4000 (no banking)
 //   KONAMI  - "Konami without SCC": 8K banks, regs at $6000/$8000/$A000 ($4000 fixed bank 0)
@@ -114,3 +121,5 @@ void msxCartEject(int slot) {
   if (slot < 1 || slot > 2) return;
   msx::g_cart[slot] = msx::Cart();
 }
+
+#endif  // BOARD_HAS_Z80_CORES

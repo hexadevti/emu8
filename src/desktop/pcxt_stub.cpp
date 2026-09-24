@@ -18,6 +18,8 @@ bool pcxtMountA(const char *) { return false; }
 bool pcxtMountC(const char *) { return false; }
 void pcxtUnmount(int) {}
 void pcxtScanFiles() {}
+void pcxtBrowseEnter(const char *) {}
+void pcxtBrowseUp() {}
 bool pcxtRenderLoadWarning() { return false; }
 void loadPcxtFilesSync() {}
 

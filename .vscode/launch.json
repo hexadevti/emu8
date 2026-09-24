@@ -24,6 +24,28 @@
         { "description": "Enable pretty-printing for gdb", "text": "-enable-pretty-printing", "ignoreFailures": true }
       ],
       "preLaunchTask": "desktop: build"
+    },
+    {
+      // SD Manager web app (tools/sdmanager/web): starts the Vite dev server (tasks.json
+      // "sdmanager: dev server"), opens it in Chrome with the debugger attached (breakpoints in
+      // app.js / protocol.js work), and stops the server when the session ends.
+      // Click Connect in the page and pick the board's serial port.
+      "name": "SD Manager (web app, Chrome)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5180",
+      "webRoot": "${workspaceFolder}/tools/sdmanager/web",
+      "preLaunchTask": "sdmanager: dev server",
+      "postDebugTask": "sdmanager: stop dev server"
+    },
+    {
+      "name": "SD Manager (web app, Edge)",
+      "type": "msedge",
+      "request": "launch",
+      "url": "http://localhost:5180",
+      "webRoot": "${workspaceFolder}/tools/sdmanager/web",
+      "preLaunchTask": "sdmanager: dev server",
+      "postDebugTask": "sdmanager: stop dev server"
     }
   ],
   "inputs": [

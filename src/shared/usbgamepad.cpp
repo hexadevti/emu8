@@ -22,7 +22,9 @@
 
 #include "../../emu.h"
 
-#if BOARD_INPUT_USB
+// PicoCalc sets BOARD_INPUT_USB=1 to get usbkeyboard.cpp, but it has no USB host (and no
+// EspUsbHost library): src/picocalc/input_picocalc.cpp supplies usbGamepadSetup() instead.
+#if BOARD_INPUT_USB && !defined(BOARD_PICOCALC)
 
 #if BOARD_PANEL_DSI
 #include "p4/usb/EspUsbHost.h"   // P4: vendored EspUsbHost fork, patched for IDF 5.x (in-repo)
@@ -207,4 +209,4 @@ void usbGamepadSetup() {
   xTaskCreatePinnedToCore(usbGamepadTask, "usbGamepad", 4096, NULL, 3, NULL, 1);  // core 1
 }
 
-#endif // BOARD_INPUT_USB
+#endif // BOARD_INPUT_USB && !BOARD_PICOCALC

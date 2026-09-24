@@ -28,6 +28,7 @@ static uint8_t  readBuffer = 0; // $2007 read buffer
 // ---- frame timing ----
 static int scanline = 0;        // 0..261 (0..239 visible, 241 vblank, 261 pre-render)
 int dotAcc = 0;                 // accumulated PPU dots (global so cpuLoop can inline ppuStep)
+static int qfAcc = 0;           // accumulates toward the 4 APU quarter-frame ticks per frame
 
 #if defined(BOARD_DESKTOP)
 // Read-only snapshot of live PPU state for the desktop debug "I/O" panel. Side-effect-free (unlike
@@ -162,7 +163,16 @@ uint8_t ppuRegRead(uint16_t reg) {
 
 void oamDmaWrite(uint8_t page) {
   uint16_t base = (uint16_t)page << 8;
-  for (int i = 0; i < 256; i++) oam[(oamAddr + i) & 0xFF] = read8(base + i);
+  // Pages $00-$1F are internal RAM (mirrored every 2K) and that is where essentially every game
+  // keeps its shadow OAM, so copy straight out of it. Going through read8() 256 times per frame
+  // meant 256 full bus decodes for a copy the CPU is stalled through anyway.
+  if (page < 0x20 && cpuRam) {
+    const uint8_t *src = cpuRam + (base & 0x07FF);
+    if (oamAddr == 0) memcpy(oam, src, 256);
+    else for (int i = 0; i < 256; i++) oam[(oamAddr + i) & 0xFF] = src[i];
+  } else {
+    for (int i = 0; i < 256; i++) oam[(oamAddr + i) & 0xFF] = read8(base + i);
+  }
   dmaStallCycles += 513;            // the CPU is stalled ~513 cycles during the DMA
 }
 
@@ -181,6 +191,16 @@ static inline void incrementY() {
 static inline void reloadHorizontal() { v = (v & ~0x041F) | (t & 0x041F); }
 
 // ---- scanline rendering ----
+// Nibble -> four bytes, one per bit, leftmost bit in the LOW byte (little-endian order). renderBg
+// uses it to turn a pattern-byte pair into eight 2-bit pixels with four table reads instead of
+// eight shift/mask/or sequences -- and a zero word then means "four transparent pixels", which is
+// the common case in NES backgrounds and can be skipped outright.
+static const DRAM_ATTR uint32_t nybExpand[16] = {
+  0x00000000, 0x01000000, 0x00010000, 0x01010000,
+  0x00000100, 0x01000100, 0x00010100, 0x01010100,
+  0x00000001, 0x01000001, 0x00010001, 0x01010001,
+  0x00000101, 0x01000101, 0x00010101, 0x01010101 };
+
 static void renderBg(int /*line*/, uint8_t *fb) {
   uint16_t vv = v;
   int fineY = (v >> 12) & 7;
@@ -204,12 +224,15 @@ static void renderBg(int /*line*/, uint8_t *fb) {
     uint8_t lo = clo ? clo[patAddr & 0x3FF] : 0;
     uint8_t hi = clo ? clo[(patAddr + 8) & 0x3FF] : 0;
     if (px >= 8 && px <= 248) {                  // tile fully on-screen and past the left mask
+      uint32_t w0 = nybExpand[lo >> 4]   | (nybExpand[hi >> 4]   << 1);  // pixels 0..3, one per byte
+      uint32_t w1 = nybExpand[lo & 0x0F] | (nybExpand[hi & 0x0F] << 1);  // pixels 4..7
       uint8_t *d = fb + px;                       // -> unrolled, no per-pixel bounds/mask checks
       bool    *op = bgOpaque + px;
-      #define NES_BGPX(b, col) do { int pix = ((lo >> (col)) & 1) | (((hi >> (col)) & 1) << 1); \
-                                    if (pix) { d[b] = pal[pix] & 0x3F; op[b] = true; } } while (0)
-      NES_BGPX(0,7); NES_BGPX(1,6); NES_BGPX(2,5); NES_BGPX(3,4);
-      NES_BGPX(4,3); NES_BGPX(5,2); NES_BGPX(6,1); NES_BGPX(7,0);
+      // No & 0x3F on pal[]: palette RAM is masked on every write (ppuBusWrite) and zeroed on reset.
+      #define NES_BGPX(b, wd, sh) do { int pix = ((wd) >> (sh)) & 3; \
+                                       if (pix) { d[b] = pal[pix]; op[b] = true; } } while (0)
+      if (w0) { NES_BGPX(0,w0,0); NES_BGPX(1,w0,8); NES_BGPX(2,w0,16); NES_BGPX(3,w0,24); }
+      if (w1) { NES_BGPX(4,w1,0); NES_BGPX(5,w1,8); NES_BGPX(6,w1,16); NES_BGPX(7,w1,24); }
       #undef NES_BGPX
     } else {                                      // edge tiles (off-screen / left-mask): full checks
       for (int b = 0; b < 8; b++) {
@@ -277,6 +300,73 @@ static void renderSprites(int line, uint8_t *fb) {
   }
 }
 
+// ---- skipped frames ----
+// While the render task owns the framebuffer the PPU must not draw into it -- that overlap is
+// exactly the random flickering lines, since a line caught between its backdrop memset and its
+// tile loop reads back as a blank or half-finished streak. With no room for a second 61K buffer,
+// those frames are emulated with the pixel work simply left out, which is also where most of the
+// core-1 time comes back from.
+//
+// Two status bits still have to behave, because games poll them and will hang or corrupt their
+// scroll split if they stop: sprite overflow (recovered from the OAM y-scan alone) and sprite-0
+// hit (two pattern fetches plus a background probe, instead of a whole rendered line).
+
+// Is the background pixel at screenX opaque, for the current loopy v / fine x? Only ever called
+// for the <=8 pixels of sprite 0, so walking coarse X one tile at a time is cheap enough.
+static bool bgPixelOpaque(int screenX) {
+  if (!(mask & 0x08)) return false;
+  if (screenX < 8 && !(mask & 0x02)) return false;
+  int n = screenX + (int)x;
+  int tiles = n >> 3, bit = 7 - (n & 7);
+  uint16_t vv = v;
+  for (int i = 0; i < tiles; i++) {
+    if ((vv & 0x001F) == 31) { vv &= ~0x001F; vv ^= 0x0400; } else vv++;
+  }
+  uint8_t tileIndex = vram[mirrorAddr(0x2000 | (vv & 0x0FFF))];
+  uint16_t patAddr = ((ctrl & 0x10) ? 0x1000 : 0x0000) + (uint16_t)tileIndex * 16 + ((v >> 12) & 7);
+  const uint8_t *c = chrMap[(patAddr >> 10) & 7];
+  if (!c) return false;
+  return (((c[patAddr & 0x3FF] | c[(patAddr + 8) & 0x3FF]) >> bit) & 1) != 0;
+}
+
+static void skipScanline(int line) {
+  if (!(mask & 0x10)) return;                         // sprites off: no flags to maintain
+  int h = (ctrl & 0x20) ? 16 : 8;
+  int count = 0;
+  bool spr0 = false;
+  for (int i = 0; i < 64; i++) {
+    int row = line - oam[i * 4] - 1;
+    if (row < 0 || row >= h) continue;
+    if (i == 0) spr0 = true;                          // sprite 0 is always evaluated first
+    if (++count > 8) { status |= 0x20; break; }       // sprite overflow (approximate, as above)
+  }
+  if (!spr0 || (status & 0x40) || !(mask & 0x08)) return;
+
+  int row = line - oam[0] - 1;                        // sprite 0 is here and has not hit yet
+  uint8_t tile = oam[1], attr = oam[2];
+  int sx = oam[3];
+  int r = (attr & 0x80) ? (h - 1 - row) : row;        // vertical flip
+  uint16_t patAddr;
+  if (h == 8) patAddr = ((ctrl & 0x08) ? 0x1000 : 0x0000) + (uint16_t)tile * 16 + r;
+  else {
+    uint16_t table = (tile & 1) ? 0x1000 : 0x0000;    // 8x16: bit0 of tile selects the table
+    uint8_t t8 = tile & 0xFE;
+    if (r >= 8) { t8 += 1; r -= 8; }
+    patAddr = table + (uint16_t)t8 * 16 + r;
+  }
+  const uint8_t *c = chrMap[(patAddr >> 10) & 7];
+  if (!c) return;
+  uint8_t lo = c[patAddr & 0x3FF], hi = c[(patAddr + 8) & 0x3FF];
+  for (int b = 0; b < 8; b++) {
+    int col = (attr & 0x40) ? b : 7 - b;              // horizontal flip
+    if (!(((lo | hi) >> col) & 1)) continue;          // transparent sprite pixel
+    int screenX = sx + b;
+    if (screenX < 0 || screenX >= 255) continue;      // x=255 never triggers the hit
+    if (screenX < 8 && !(mask & 0x04)) continue;
+    if (bgPixelOpaque(screenX)) { status |= 0x40; return; }
+  }
+}
+
 static void renderScanline(int line) {
   uint8_t *fb = framebuffer + line * 256;
   uint8_t backdrop = paletteRam[0] & 0x3F;
@@ -289,14 +379,41 @@ static void renderScanline(int line) {
 // Finish the scanline that just consumed its 341 dots, then advance to the next.
 void endScanline() {
   if (scanline < 240) {                          // visible line
-    renderScanline(scanline);
+    if (fbRendering) {
+      // Overlap guard (see nes.h): core 0 may still be reading this picture out, a couple of
+      // hundred lines ahead of us. Never write a line it has not taken yet. The bound is there so
+      // a wedged render task costs a stutter rather than a hang.
+      if (fbPushing && fbReadLine <= scanline) {
+        uint32_t t0 = millis();
+        while (fbPushing && fbReadLine <= scanline && (millis() - t0) < 50) { }
+      }
+      renderScanline(scanline);
+    }
+    else             skipScanline(scanline);     // core 0 owns the framebuffer this frame
     if (renderingEnabled()) { mapperClockScanline(); incrementY(); reloadHorizontal(); }
+    // Line 239 is the last one that touches the framebuffer, so the picture is finished HERE, not
+    // at the frame boundary. Publishing now hands it to the render task a whole VBlank (~1.4ms)
+    // early, and -- more to the point -- before the game's NMI handler gets the CPU, which is the
+    // longest stretch of the frame. See the handover note in nes.h.
+    if (scanline == 239 && fbRendering) { fbRendering = false; fbFrames++; }
   } else if (scanline == 261) {                  // pre-render line
     if (renderingEnabled()) v = t;               // full vertical+horizontal reload
   }
 
+  // APU frame-sequencer clock: 4 ticks per 262-line frame, i.e. ~240Hz when the emulation is at
+  // full speed and proportionally slower when it is not, which is what the envelopes want.
+  qfAcc += 4;
+  if (qfAcc >= 262) { qfAcc -= 262; apuQuarterTicks++; }
+
   scanline++;
-  if (scanline > 261) { scanline = 0; frameReady = true; nesFrameCount++; }
+  if (scanline > 261) {
+    scanline = 0; frameReady = true; nesFrameCount++;
+    // Start of a new picture: the only point at which drawing can switch back ON, and only by
+    // consuming a one-shot grant from the render task. If the task is still pushing, wait until it
+    // is FB_RELEASE_LINE down the picture -- from there it stays ahead of us all the way to line
+    // 239 (see the overlap note in nes.h), so we can start now instead of losing a whole frame.
+    if (fbGrant && (!fbPushing || fbReadLine >= FB_RELEASE_LINE)) { fbGrant = false; fbRendering = true; }
+  }
 
   if (scanline == 241) {                         // start of VBlank
     status |= 0x80;
@@ -314,7 +431,12 @@ void ppuStep(int cpuCycles) {
 void ppuReset() {
   ctrl = mask = status = oamAddr = 0;
   v = t = 0; x = 0; w = false; readBuffer = 0;
-  scanline = 0; dotAcc = 0;
+  scanline = 0; dotAcc = 0; qfAcc = 0;
+  // Stop drawing; the render task is the only thing that ever issues a grant (nes.h), so we must
+  // NOT hand one out here -- it could land while core 0 is midway through an SPI push. If the
+  // reset lands between a grant and its publish the task's 120ms timeout re-grants, which costs
+  // one torn frame on a ROM load and nothing else.
+  fbRendering = false;
   nmiPending = false; frameReady = false; dmaStallCycles = 0;
   if (vram) memset(vram, 0, 0x800);
   memset(oam, 0, sizeof(oam));

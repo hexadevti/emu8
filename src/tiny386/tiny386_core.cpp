@@ -1,4 +1,4 @@
-#if !defined(BOARD_JC4827W543)  // tiny386 is not built for the S3 board (too big; vendored core not wired for the device toolchain)
+#if !defined(BOARD_JC4827W543) && !defined(BOARD_PICOCALC)  // tiny386 is not built for the S3 board (too big; vendored core not wired for the device toolchain) or the PicoCalc (RP2350: 520KB SRAM, no memory-mapped PSRAM)
 // tiny386_core.cpp — the side of the glue that includes the vendored tiny386 core (pc.h). Kept in a
 // SEPARATE translation unit from tiny386.cpp because pc.h's `PC` machine type collides with the
 // Apple II 6502 program-counter global `PC` declared in proto.h (pulled in by emu.h). This file does
@@ -182,4 +182,4 @@ int t386_core_mount_hd(void *pc, const char *path)
   return (p->ide && path) ? ide_attach(p->ide, 0, path) : -1;
 }
 
-#endif // !defined(BOARD_JC4827W543)
+#endif // !defined(BOARD_JC4827W543) && !defined(BOARD_PICOCALC)

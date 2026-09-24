@@ -50,12 +50,19 @@ void nesLoop() {
   nes::cpuLoop();      // runs forever (6502 + PPU scanline timing)
 }
 
+// FNV-1a over a band of the indexed framebuffer, read 32 bits at a time (rows are 256 bytes, so
+// every row is word-aligned). Used to tell whether a band still matches what is on the panel; a
+// collision would hold one stale 8-line band for one frame, at odds of 2^-32.
+static inline uint32_t bandDigest(const uint8_t *p, int words) {
+  const uint32_t *w = (const uint32_t *)(const void *)p;
+  uint32_t h = 0x811C9DC5u;
+  for (int i = 0; i < words; i++) h = (h ^ w[i]) * 0x01000193u;
+  return h;
+}
+
 // Convert the indexed framebuffer to RGB565 and push it to the TFT, centred with pillarbox
 // borders. Runs on the core-0 render task (which owns the TFT), like c64RenderFrame.
-void nesRenderFrame() {
-  if (!nesScratch || !nes::framebuffer) return;
-  const uint16_t *pal = videoColor ? nes::nesPalette : nes::nesPaletteGray;  // VIDEO color/mono
-
+static void nesPushFrame(const uint16_t *pal) {
 #if BOARD_DISPLAY_GFX
   // S3 fast path (default, unless fill-screen scaling is on): convert each 8-line band and push it
   // STRAIGHT to the panel, bypassing the PSRAM canvas write and the full 480x272 QSPI flush. This is
@@ -73,6 +80,7 @@ void nesRenderFrame() {
         for (int xx = 0; xx < NES_W; xx++) dst[xx] = pal[src[xx] & 0x3F];
         n++;
       }
+      nes::fbReadLine = y + n;                             // these lines are ours now; PPU may reuse them
       tft.pushPanelBand(NES_OX, y, NES_W, n, nesScratch);   // direct to panel, centered
       y += n;
     }
@@ -80,26 +88,81 @@ void nesRenderFrame() {
   }
 #endif
 
-  // Original path (CYD via TFT_eSPI, or S3 with fill-screen scaling on): draw through the abstraction
-  // (canvas on S3, panel on CYD) and let the per-frame flush present it. On S3 fill-screen, ask the
-  // flush to STRETCH the 256x240 picture across the whole panel (no 4:3 aspect, no side bars) so the
-  // NES truly fills the screen; the no-op on CYD leaves the centered 320x240 panel unchanged.
+  // Original path (CYD via TFT_eSPI, PicoCalc, or S3 with fill-screen scaling on): draw through the
+  // abstraction (canvas on S3, panel otherwise) and let the per-frame flush present it. On S3
+  // fill-screen, ask the flush to STRETCH the 256x240 picture across the whole panel (no 4:3 aspect,
+  // no side bars) so the NES truly fills the screen; the no-op elsewhere leaves 320x240 centred.
+  //
+  // Everything below is aimed at the display link, because on the PicoCalc that is what caps the
+  // visible frame rate: 256x240 of RGB565 is 123KB, and at 50MHz SPI the transfer alone is ~20ms.
+  // Two things were being sent that did not need to be:
+  //   * the pillarbox borders are static black, yet were repainted every frame -- 15360 more
+  //     pixels, a fifth of the whole transfer, for a picture that never changes;
+  //   * whole 8-line bands are frequently identical frame to frame (status bars, HUDs, letterboxed
+  //     menus, anything not scrolling). Digesting a band costs ~15us; sending it costs ~660us.
+  // A full repaint is forced when the panel may have been painted over from outside (the options
+  // window or the startup notice -- seen as a gap since the last push), when the palette changes
+  // (VIDEO=COLOR/MONO), and every 64th push as a cheap backstop against a wrongly-held band.
+  static uint32_t bandDig[NES_H / 8];
+  static const uint16_t *lastPal = nullptr;
+  static uint32_t lastPushMs = 0, pushCount = 0;
+  uint32_t nowMs = millis();
+  bool forceAll = (pal != lastPal) || (nowMs - lastPushMs > 100) || ((pushCount++ & 63) == 0);
+  lastPal = pal; lastPushMs = nowMs;
+
   displaySetVideoFill(NES_OX, NES_W, true);
-  tft.fillRect(0, 0, NES_OX, NES_H, TFT_BLACK);                 // left border
-  tft.fillRect(NES_OX + NES_W, 0, 320 - (NES_OX + NES_W), NES_H, TFT_BLACK); // right border
+  if (forceAll) {
+    tft.fillRect(0, 0, NES_OX, NES_H, TFT_BLACK);                 // left border
+    tft.fillRect(NES_OX + NES_W, 0, 320 - (NES_OX + NES_W), NES_H, TFT_BLACK); // right border
+  }
   tft.setSwapBytes(true);
-  for (int y = 0; y < NES_H; ) {
-    int n = 0;
-    while (y + n < NES_H && n < 8) {
-      const uint8_t *src = nes::framebuffer + (y + n) * NES_W;
-      uint16_t *dst = nesScratch + n * NES_W;
-      for (int xx = 0; xx < NES_W; xx++) dst[xx] = pal[src[xx] & 0x3F];
-      n++;
+  for (int y = 0; y < NES_H; y += 8) {
+    int n = (NES_H - y < 8) ? (NES_H - y) : 8;
+    const uint8_t *src = nes::framebuffer + (size_t)y * NES_W;
+    uint32_t dig = bandDigest(src, (n * NES_W) / 4);
+    bool same = (!forceAll && dig == bandDig[y >> 3]);
+    if (!same) {
+      bandDig[y >> 3] = dig;
+      for (int i = 0; i < n * NES_W; i++) nesScratch[i] = pal[src[i] & 0x3F];
     }
+    // Everything up to here has been copied out of the framebuffer, so the PPU is free to draw
+    // over it (see the overlap note in nes.h). Publish before the SPI wait, not after: the pixels
+    // are already in nesScratch by then, and the wait is nearly all of the band's cost.
+    nes::fbReadLine = y + n;
+    if (same) continue;                                           // already on the panel
     tft.pushImage(NES_OX, y, NES_W, n, nesScratch);
-    y += n;
   }
   tft.setSwapBytes(false);
+}
+
+void nesRenderFrame() {
+  if (!nesScratch || !nes::framebuffer) return;
+  const uint16_t *pal = videoColor ? nes::nesPalette : nes::nesPaletteGray;  // VIDEO color/mono
+
+  // Collect the picture the PPU was granted last time round (see the handover note in nes.h). It
+  // publishes at the end of scanline 239, so by the time we get here it is either already waiting
+  // or a few milliseconds away -- this is a single wait, not a handshake: the old "wait for the PPU
+  // to start a frame, THEN ask it to stop" ordering spent an extra half frame per push doing
+  // nothing, which is most of the display frame rate that was missing.
+  //
+  // The timeout only bites if the interpreter is wedged, and then the picture is frozen anyway, so
+  // re-pushing the last one is the right thing to do.
+  static uint32_t lastPushed = 0;
+  uint32_t t0 = millis();
+  while (nes::fbFrames == lastPushed && (millis() - t0) < 120) vTaskDelay(1);
+  lastPushed = nes::fbFrames;
+
+  // Open the push, THEN grant. The order matters: the PPU tests fbPushing/fbReadLine to decide
+  // whether it may start, so it must never see the grant while those still describe the last push.
+  nes::fbReadLine = 0;
+  nes::fbPushing  = true;
+  nes::fbGrant    = true;    // the PPU releases itself once we are FB_RELEASE_LINE down the picture
+
+  nesPushFrame(pal);
+
+  nes::fbPushing  = false;
+  nes::fbReadLine = NES_H;   // idle: never hold the PPU up
+  nes::nesPushCount++;
 }
 
 // Controller bits from the joystick task -> NES controller 1 shift register.
@@ -114,6 +177,10 @@ bool nesLoadSelected(const char *path) {
 }
 // Settings: (re)scan the SD root for *.nes so freshly-added ROMs show in the browser.
 void nesScanFiles() { nes::loadNesFilesSync(); }
+// Settings: subdirectory navigation for that browser. The workers live inside namespace nes,
+// so these forwarders are what the shared options UI (which knows nothing about the core) calls.
+void nesBrowseEnter(const char *path) { nes::browseEnter(path); }
+void nesBrowseUp()                    { nes::browseUp(); }
 
 // ---- startup ROM-skip warning overlay (runs on the core-0 render task, which owns the TFT) ----
 // Lists ROMs skipped at load time (unsupported mapper / too big for RAM) so the user understands

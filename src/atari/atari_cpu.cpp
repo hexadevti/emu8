@@ -152,7 +152,16 @@ static inline __attribute__((always_inline)) void setflags() {
 }
 
 void cpuLoop() {
-  if (!cartRom) { printLog("Atari: no ROM loaded; CPU idle"); while (running) delay(100); return; }
+  // No ROM at boot (e.g. the carts live in a subfolder, which the boot autoload does not search):
+  // idle until the settings browser loads one, instead of parking forever -- otherwise a ROM
+  // picked there only starts after a reboot. Also wait out the pause so the cart is fully read.
+  if (!cartRom) {
+    printLog("Atari: no ROM loaded; CPU idle until one is picked in settings");
+    while (running && (!cartRom || paused)) delay(100);
+    if (!running) return;
+    atariResetReq = false;             // the reset below covers the pending request
+    tiaReset(); riotReset();
+  }
   cpuReset();
   lastPC = PC;
 

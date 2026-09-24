@@ -1,3 +1,7 @@
+// Not built for the PicoCalc (RP2350): this core needs multi-megabyte ps_malloc'd guest RAM,
+// and the board has 520KB of SRAM with its 8MB PSRAM on plain GPIOs (not memory-mapped). The
+// shared dispatch/render/UI code links against src/picocalc/bigram_stubs.cpp instead.
+#if !defined(BOARD_PICOCALC)
 // cpu65816_test.cpp - on-device self-test for the M1 65C816 core (src/iigs/cpu65816.*).
 //
 // Compiles only with -DIIGS_M1_TEST. Runs hand-assembled 65816 programs against a 64KB bank-0
@@ -200,3 +204,4 @@ void runIIgsM1Test() {
 }
 
 #endif // IIGS_M1_TEST
+#endif // !defined(BOARD_PICOCALC)

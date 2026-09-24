@@ -9,7 +9,9 @@
 
 #include "../../emu.h"
 
-#if !BOARD_AUDIO_DAC
+// Boards with PWM audio instead (PicoCalc) supply the same three entry points from
+// src/picocalc/audio_picocalc.cpp -- there is no I2S peripheral to drive there.
+#if !BOARD_AUDIO_DAC && !BOARD_AUDIO_PWM
 
 #include "driver/i2s.h"
 #if BOARD_AUDIO_CODEC
@@ -88,4 +90,4 @@ void ampWriteMono(const int16_t *mono, int n) {
   }
 }
 
-#endif // !BOARD_AUDIO_DAC
+#endif // !BOARD_AUDIO_DAC && !BOARD_AUDIO_PWM

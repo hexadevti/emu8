@@ -4,6 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+// Vendored Espressif JD9165 MIPI-DSI panel driver: ESP32-P4 (JC1060P470) only. Everything below,
+// including the soc/ and esp_lcd_ headers, exists only in the ESP-IDF tree, so non-ESP targets
+// (e.g. the PicoCalc's RP2350) must not even reach the first #include -- hence the outer guard on
+// the board -D flag rather than on SOC_MIPI_DSI_SUPPORTED, which needs soc_caps.h to be readable.
+#if defined(BOARD_JC1060P470)
+
 #include "soc/soc_caps.h"
 
 #if SOC_MIPI_DSI_SUPPORTED
@@ -337,3 +343,4 @@ static esp_err_t panel_jd9165_disp_on_off(esp_lcd_panel_t *panel, bool on_off)
     return ESP_OK;
 }
 #endif
+#endif // BOARD_JC1060P470

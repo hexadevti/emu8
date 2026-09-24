@@ -1,3 +1,7 @@
+// Not built for the PicoCalc (RP2350): this core needs multi-megabyte ps_malloc'd guest RAM,
+// and the board has 520KB of SRAM with its 8MB PSRAM on plain GPIOs (not memory-mapped). The
+// shared dispatch/render/UI code links against src/picocalc/bigram_stubs.cpp instead.
+#if !defined(BOARD_PICOCALC)
 // iigs_mem.cpp - Apple IIGS 24-bit banked memory (M2 skeleton). See iigs_mem.h.
 
 #include "iigs_mem.h"
@@ -46,3 +50,4 @@ void iigsWrite24(uint32_t a, uint8_t v) {
   uint8_t* p = iigsBankPtr[bank];
   if (p) p[off] = v;
 }
+#endif // !defined(BOARD_PICOCALC)

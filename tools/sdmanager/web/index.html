@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>emu8 SD Manager</title>
+  <meta name="description" content="Browse, upload and download files on an emu8 board's microSD card over USB serial.">
+  <meta name="theme-color" content="#101418">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="/icon.svg" alt="" width="28" height="28">
+      <span>emu8 <b>SD Manager</b></span>
+    </div>
+    <div class="conn">
+      <span id="connState" class="pill off">Not connected</span>
+      <span id="boardName" class="board"></span>
+      <label id="speedWrap" class="speed" hidden title="Transfer speed for boards with a USB-UART bridge (CYD, JC4827W543). USB-native boards ignore this.">
+        Speed
+        <select id="speed">
+          <option value="115200">115200</option>
+          <option value="460800">460800</option>
+          <option value="921600" selected>921600</option>
+        </select>
+      </label>
+      <button id="rebootBtn" class="ghost" hidden title="Restart the board (e.g. after copying ROMs)">Reboot</button>
+      <button id="connectBtn" class="primary">Connect</button>
+    </div>
+  </header>
+
+  <main id="welcome" class="welcome">
+    <section class="card hero">
+      <img src="/icon.svg" alt="" width="64" height="64">
+      <h1>Manage your emu8 SD card over USB</h1>
+      <p>Plug the board into this computer, click <b>Connect</b> and pick its serial port. You can then browse the
+        card, upload ROMs and disk images, download saves and tidy up folders without removing the card.</p>
+      <button id="connectBtn2" class="primary big">Connect to board</button>
+      <p id="unsupported" class="warn" hidden>This browser cannot open serial ports. Use a recent
+        <b>Chrome</b>, <b>Edge</b> or <b>Opera</b> on Windows, macOS, Linux, ChromeOS or Android,
+        or use the command-line tool <code>tools/sdmanager/emu8sd.py</code>.</p>
+      <ul class="tips">
+        <li>Close any other serial monitor (Arduino IDE, PlatformIO, PuTTY) first: only one program can hold the port.</li>
+        <li>The emulator keeps running while you transfer. Avoid replacing the disk image that is currently mounted.</li>
+        <li>Some boards restart when the port opens. The app waits for the board to finish booting.</li>
+      </ul>
+    </section>
+  </main>
+
+  <div id="app" class="layout" hidden>
+    <aside class="sidebar">
+      <h2>Places</h2>
+      <nav id="places"></nav>
+      <h2>Card</h2>
+      <div id="cardInfo" class="cardinfo">—</div>
+      <h2>Where files go</h2>
+      <dl class="guide">
+        <dt>Game &amp; disk images</dt><dd>Card root <code>/</code> (any system, mixed)</dd>
+        <dt>Apple II ROMs</dt><dd><code>/roms/apple2</code></dd>
+        <dt>C64 ROMs</dt><dd><code>/roms/c64</code></dd>
+        <dt>MSX BIOS</dt><dd><code>/roms/msx</code></dd>
+        <dt>IIGS ROM 01</dt><dd><code>/roms/iigs</code></dd>
+        <dt>PC-XT BIOS</dt><dd><code>/roms/pcxt</code></dd>
+        <dt>386 BIOS</dt><dd><code>/roms/tiny386</code></dd>
+      </dl>
+    </aside>
+
+    <section class="browser">
+      <div class="toolbar">
+        <button id="upBtn" class="icon" title="Parent folder" aria-label="Parent folder">↑</button>
+        <nav id="crumbs" class="crumbs" aria-label="Current folder"></nav>
+        <div class="spacer"></div>
+        <input id="filter" type="search" placeholder="Filter" aria-label="Filter files">
+        <button id="refreshBtn" class="icon" title="Refresh" aria-label="Refresh">⟳</button>
+      </div>
+      <div class="toolbar actions">
+        <button id="uploadBtn" class="primary">Upload files</button>
+        <button id="uploadDirBtn">Upload folder</button>
+        <button id="mkdirBtn">New folder</button>
+        <div class="spacer"></div>
+        <span id="selInfo" class="muted"></span>
+        <button id="dlSelBtn" disabled>Download</button>
+        <button id="renameSelBtn" disabled>Rename</button>
+        <button id="delSelBtn" class="danger" disabled>Delete</button>
+      </div>
+      <input id="fileInput" type="file" multiple hidden>
+      <input id="dirInput" type="file" webkitdirectory hidden>
+
+      <div id="listWrap" class="listwrap">
+        <table class="files">
+          <thead>
+            <tr>
+              <th class="chk"><input id="selAll" type="checkbox" aria-label="Select all"></th>
+              <th class="sortable" data-sort="name">Name</th>
+              <th class="sys">System</th>
+              <th class="sortable num" data-sort="size">Size</th>
+              <th class="rowact"></th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+        <div id="empty" class="empty" hidden>This folder is empty. Drop files here to upload them.</div>
+        <div id="loading" class="empty" hidden>Reading folder…</div>
+        <div id="dropHint" class="drop" hidden><div>Drop to upload into <b id="dropDir"></b></div></div>
+      </div>
+    </section>
+
+    <section class="bottom">
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-tab="transfers" role="tab">Transfers <span id="xferCount" class="count"></span></button>
+        <button class="tab" data-tab="log" role="tab">Device log</button>
+        <div class="spacer"></div>
+        <button id="clearBtn" class="ghost small">Clear</button>
+      </div>
+      <div id="transfers" class="panel"></div>
+      <pre id="log" class="panel log" hidden></pre>
+    </section>
+  </div>
+
+  <dialog id="dlg">
+    <form method="dialog">
+      <h3 id="dlgTitle"></h3>
+      <p id="dlgText"></p>
+      <input id="dlgInput" type="text" autocomplete="off" spellcheck="false">
+      <menu>
+        <button value="cancel" class="ghost">Cancel</button>
+        <button id="dlgOk" value="ok" class="primary">OK</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

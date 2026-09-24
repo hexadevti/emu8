@@ -1,3 +1,7 @@
+// Not built for the PicoCalc (RP2350): this core needs multi-megabyte ps_malloc'd guest RAM,
+// and the board has 520KB of SRAM with its 8MB PSRAM on plain GPIOs (not memory-mapped). The
+// shared dispatch/render/UI code links against src/picocalc/bigram_stubs.cpp instead.
+#if !defined(BOARD_PICOCALC)
 // m0_bench.cpp - Apple IIGS feasibility gates (M0 + M0.5): PSRAM/SRAM memory benchmarks.
 //
 // Throwaway validation experiments. The ENTIRE file is wrapped so that, without a build flag,
@@ -318,3 +322,4 @@ void runIIgsM05Bench() {
 #endif // IIGS_M05_BENCH
 
 #endif // IIGS_M0_BENCH || IIGS_M05_BENCH
+#endif // !defined(BOARD_PICOCALC)

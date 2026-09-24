@@ -1,3 +1,10 @@
+// This MSX translation unit is compiled out entirely on boards that clear
+// BOARD_HAS_Z80_CORES (the PicoCalc's original RP2040 mainboard -- see board.h for why).
+// emu.h must be included FIRST because it is what pulls in board.h and defines the macro;
+// the guard below then empties the file, handing this core's static RAM to the Apple II.
+#include "../../emu.h"
+#if BOARD_HAS_Z80_CORES
+
 // msx.cpp - device-side glue for the MSX1 platform: allocation, BIOS/C-BIOS load, the core-0 render
 // push, the core-1 run loop, input injection, and the settings (file browser / load) hooks. This is
 // the only MSX file that pulls in emu.h (Arduino/board), keeping the rest of src/msx/ host-portable.
@@ -11,7 +18,7 @@
 #include "msx_cart.h"
 #include "msx_disk.h"
 #include "msx_diskrom.h"
-#include <dirent.h>
+#include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
 
 // ---- per-frame RGB565 conversion band (malloc'd on the MSX path only, like nesScratch) ----------
 static uint16_t* msxScratch = nullptr;
@@ -89,26 +96,17 @@ static bool loadBiosFromSD() {
 
 // Scan SD root for *.rom / *.dsk into msxFiles (excluding the reserved BIOS names).
 #define MSX_MAX_FILES 200
-void loadMsxFilesSync() {
-  msxFiles.clear();
-  msxFiles.reserve(MSX_MAX_FILES);
-  DIR* dp = opendir(SD_VFS_ROOT);
-  if (dp) {
-    struct dirent* de; int scanned = 0;
-    while ((de = readdir(dp)) != nullptr) {
-      if (de->d_type == DT_DIR) continue;
-      std::string nm = de->d_name;
-      if (isBiosName(nm)) continue;
-      if (msxEndsCI(nm, ".rom") || msxEndsCI(nm, ".mx1") || msxEndsCI(nm, ".dsk"))
-        msxFiles.push_back(std::string("/") + nm);
-      if ((++scanned & 0x3f) == 0) ::uiDirScanProgress((int)msxFiles.size());
-      if ((int)msxFiles.size() >= MSX_MAX_FILES) break;
-    }
-    closedir(dp);
-  }
-  sprintf(buf, "MSX: %d ROM/disk file(s) on SD root", (int)msxFiles.size());
-  printLog(buf);
+// SD ROM/disk browser (.rom/.mx1/.dsk + subdirectories); see src/shared/filebrowser.h.
+// The BIOS images stay hidden -- they are loaded by name, not picked.
+static bool msxAccept(const std::string &n) {
+  if (isBiosName(n)) return false;
+  return msxEndsCI(n, ".rom") || msxEndsCI(n, ".mx1") || msxEndsCI(n, ".dsk");
 }
+static FileBrowser msxBrowser = { "MSX", &msxFiles, msxAccept, nullptr, MSX_MAX_FILES, "/" };
+
+void loadMsxFilesSync()      { fbScan(msxBrowser); }
+void msxBrowseEnter(const char *path) { fbEnter(msxBrowser, path); }
+void msxBrowseUp()           { fbUp(msxBrowser); }
 
 // ============================ platform entry points =============================================
 void msxSetup() {
@@ -324,3 +322,5 @@ bool msxRenderLoadWarning() {
   }
   return false;   // embedded/SD BIOS present -> boot straight into it (no overlay)
 }
+
+#endif  // BOARD_HAS_Z80_CORES

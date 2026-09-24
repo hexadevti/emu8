@@ -1,3 +1,7 @@
+// Not built for the PicoCalc (RP2350): this core needs multi-megabyte ps_malloc'd guest RAM,
+// and the board has 520KB of SRAM with its 8MB PSRAM on plain GPIOs (not memory-mapped). The
+// shared dispatch/render/UI code links against src/picocalc/bigram_stubs.cpp instead.
+#if !defined(BOARD_PICOCALC)
 // pcxt_time.cpp - device implementation of the PIT real-time source (5 MHz).
 //
 // PIT8253.cpp calls FRC1Timer() to know how much real time has elapsed so IRQ0
@@ -27,3 +31,4 @@ extern "C" uint32_t FRC1Timer(void) {
 }
 
 #endif // !PCXT_HOST_BOOT
+#endif // !defined(BOARD_PICOCALC)

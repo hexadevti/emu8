@@ -8,8 +8,6 @@
 
 // Address Modes
 
-
-
 #define AD_IMP  0x01
 #define AD_A    0x02
 #define AD_ABS  0x03
@@ -56,17 +54,34 @@
 #define STP_BASE 0x100
 long count = 0;
 long cycleCount = 0;
+volatile uint32_t appleGuestUs = 0;
+
+// Reading the clock is on the 6502's hot path: the pacer below consults it once per emulated
+// instruction. micros() is an out-of-line function that the linker places in FLASH (verified in
+// the map: micros at 0x10034bc8, cpuLoop at 0x20000270), so calling it from a RAM-resident
+// cpuLoop costs a veneer hop plus an XIP fetch -- on a core whose 16KB XIP cache the video
+// renderer on the other core is continuously evicting, which is the worst case for a call that
+// happens 300,000 times a second. The raw timer register IS what micros() returns: the same
+// free-running 1MHz counter, as a single APB load, with no call and no flash. Same trick, and the
+// same reasoning, as SPK_NOW_US in src/shared/speaker.cpp.
+#if defined(BOARD_PICOCALC)
+#include <hardware/timer.h>
+#define CPU_NOW_US() (timer_hw->timerawl)
+#else
+#define CPU_NOW_US() ((uint32_t)micros())
+#endif   // guest clock in us; see the note in emu.h
 uint32_t cpuCycleCount = 0;
 uint32_t lastCpuCycleCount = 0;
 uint32_t diffCpuCycleCount = 0;
 
 // Throughput meter (effective 6502 clock). Set false to silence.
 bool perfMeter = false;
+static uint32_t gPerfIps = 0;   // last measured instructions/sec, companion to appleMeasuredMhz
 // Cached active flags table (avoids the AppleIIe ternary + table base load per instruction).
 const unsigned char* activeFlags;
 
 //high nibble SR flags, low nibble address mode
-const unsigned char flagsIIe[] = {
+DRAM_ATTR const unsigned char flagsIIe[] = {
 	//X0               X1                X2                    X3    X4                    X5                X6                X7    X8              X9                 XA                  XB    XC                    XD                XE                XF   
 	  AD_IMP,          AD_INDX,          UNDF,                 UNDF, FL_Z | AD_ZPG,/*e*/   FL_ZN | AD_ZPG,   FL_ZNC | AD_ZPG,  UNDF, AD_IMP,         FL_ZN | AD_IMM,    FL_ZNC | AD_A,      UNDF, FL_Z | AD_ABS,/*e*/   FL_ZN | AD_ABS,   FL_ZNC | AD_ABS,  UNDF, // 0X
 	  AD_REL,          FL_ZN | AD_INDY,  FL_ZN | AD_IZPG/*e*/, UNDF, FL_Z | AD_ZPG,/*e*/   FL_ZN | AD_ZPGX,  FL_ZNC | AD_ZPGX, UNDF, AD_IMP,         FL_ZN | AD_ABSY,   FL_ZN | AD_A,/*e*/  UNDF, FL_Z | AD_ABS,/*e*/   FL_ZN | AD_ABSX,  FL_ZNC | AD_ABSX, UNDF, // 1X
@@ -86,7 +101,7 @@ const unsigned char flagsIIe[] = {
 	  AD_REL,          FL_ALL | AD_INDY, FL_ALL | AD_IZPG/*e*/,UNDF, UNDF,                 FL_ALL | AD_ZPGX, FL_ZN | AD_ZPGX,  UNDF, AD_IMP,         FL_ALL | AD_ABSY,  FL_ZN | AD_IMP,/*e*/UNDF, UNDF,                 FL_ALL | AD_ABSX, FL_ZN | AD_ABSX,  UNDF  // FX
 };
 
-const unsigned char flagsIIplus[] = {
+DRAM_ATTR const unsigned char flagsIIplus[] = {
   AD_IMP, AD_INDX, UNDF, UNDF, UNDF, FL_ZN | AD_ZPG, FL_ZNC | AD_ZPG, UNDF, AD_IMP, FL_ZN | AD_IMM, FL_ZNC | AD_A, UNDF, UNDF, FL_ZN | AD_ABS, FL_ZNC | AD_ABS, UNDF,
   AD_REL, FL_ZN | AD_INDY, UNDF, UNDF, UNDF, FL_ZN | AD_ZPGX, FL_ZNC | AD_ZPGX, UNDF, AD_IMP, FL_ZN | AD_ABSY, UNDF, UNDF, UNDF, FL_ZN | AD_ABSX, FL_ZNC | AD_ABSX, UNDF,
   AD_ABS, FL_ZN | AD_INDX, UNDF, UNDF, FL_Z | AD_ZPG, FL_ZN | AD_ZPG, FL_ZNC | AD_ZPG, UNDF, AD_IMP, FL_ZN | AD_IMM, FL_ZNC | AD_A, UNDF, FL_Z | AD_ABS, FL_ZN | AD_ABS, FL_ZNC | AD_ABS, UNDF,
@@ -105,7 +120,10 @@ const unsigned char flagsIIplus[] = {
   AD_REL, FL_ALL | AD_INDY, UNDF, UNDF, UNDF, FL_ALL | AD_ZPGX, FL_ZN | AD_ZPGX, UNDF, AD_IMP, FL_ALL | AD_ABSY, UNDF, UNDF, UNDF, FL_ALL | AD_ABSX, FL_ZN | AD_ABSX, UNDF
 };
 
-const int cycles[] = { 7, 6, 1, 0, 0, 3, 5, 0, 3, 2, 2, 0, 0, 4, 6, 0, 
+// uint8_t, not int: this table is DRAM_ATTR (.time_critical.rodata, i.e. RAM) and every entry
+// is 0..7, so `int` was spending 768 bytes of the RP2040's 264KB to hold nothing. The load in
+// cpuLoop becomes a plain ldrb as well.
+DRAM_ATTR const uint8_t cycles[] = { 7, 6, 1, 0, 0, 3, 5, 0, 3, 2, 2, 0, 0, 4, 6, 0, 
                        2, 5, 1, 0, 0, 4, 6, 0, 2, 4, 0, 0, 0, 4, 7, 0, 
                        6, 6, 1, 0, 3, 3, 5, 0, 4, 2, 2, 0, 4, 4, 6, 0, 
                        2, 5, 1, 0, 0, 4, 6, 0, 2, 4, 0, 0, 0, 4, 7, 0, 
@@ -166,29 +184,31 @@ IRAM_ATTR void setflags() {
   if (opflags & FL_V) SR |= ((result ^ ((unsigned short)A)) & (result ^ value16) & 0x0080) >> 1; // overflow
 }
 
-// Stack functions
-void push16(unsigned short pushval) {
+// Stack functions. IRAM_ATTR for the same reason cpuLoop and read8/write8 have it: without it
+// these land in flash, so every JSR/RTS/PHA/PLA/interrupt on the RP2040 pays an XIP fetch in the
+// middle of the hot loop. Four small functions, ~200 bytes of RAM.
+IRAM_ATTR void push16(unsigned short pushval) {
   write8(STP_BASE + (STP--), (pushval >> 8) & 0xFF);
   write8(STP_BASE + (STP--), pushval & 0xFF);
 }
 
-void push8(unsigned char pushval) {
+IRAM_ATTR void push8(unsigned char pushval) {
   write8(STP_BASE + (STP--), pushval);
 }
 
-unsigned short pull16() {
+IRAM_ATTR unsigned short pull16() {
   STP++;
 	value16 = read8(STP_BASE + (STP));
 	STP++;
 	value16 = value16 | ((unsigned short)read8(STP_BASE + (STP)) << 8);
 	return value16;}
 
-unsigned char pull8() {
+IRAM_ATTR unsigned char pull8() {
   return read8(STP_BASE + (++STP));
 }
 
 //int joyCount = 0;
-void cpuLoop() {
+IRAM_ATTR void cpuLoop() {
   // Load the reset vector
   PC = read16(0xFFFC);
   STP = 0xFD;
@@ -214,6 +234,7 @@ void cpuLoop() {
 #endif
 
     opcode = read8(PC++);
+    const uint32_t opCycles = cycles[opcode];   // read ONCE: the meter and the pacer both want it
 #if defined(BOARD_DESKTOP)
     dbgBusTouch(lastPC, DBG_HEAT_X);   // heat map: this instruction was fetched/executed at lastPC
 #endif
@@ -222,10 +243,14 @@ void cpuLoop() {
     // Settings as "6502 / X.XMHz") every ~256K instructions. Also prints to Serial when perfMeter is on.
     {
       static uint32_t mInstr = 0;
-      static uint64_t mCyc = 0;
+      // 32-bit, not 64-bit: both counters are zeroed every window below, so mCyc tops out at
+      // 0x40000 instructions * 7 cycles = 1.8M. As a uint64_t it cost a sign-extend plus a
+      // two-word add on EVERY emulated instruction -- this meter is the one piece of the hot
+      // loop that does no emulation at all, so it has to stay as close to free as possible.
+      static uint32_t mCyc = 0;
       static uint32_t mLast = 0;
       mInstr++;
-      mCyc += cycles[opcode];
+      mCyc += opCycles;
       if ((mInstr & 0x3FFFF) == 0)
       {
         uint32_t now = millis();
@@ -234,7 +259,8 @@ void cpuLoop() {
           float secs = (now - mLast) / 1000.0f;
           if (secs > 0)
           {
-            appleMeasuredMhz = (float)((mCyc / 1e6) / secs);
+            appleMeasuredMhz = (float)((mCyc / 1e6f) / secs);
+            gPerfIps = (uint32_t)(mInstr / secs);
             if (perfMeter)
               Serial.printf("PERF: %.2f MHz, %lu instr/s\n", appleMeasuredMhz, (unsigned long)(mInstr / secs));
           }
@@ -247,28 +273,64 @@ void cpuLoop() {
 
     if (!Fast1MhzSpeed)
     {
-#if defined(BOARD_DESKTOP)
-      // Desktop: pace to a true 1.000 MHz by locking emulated cycles to real microseconds
-      // (1 emulated cycle == 1 us), self-correcting regardless of host emulation overhead. The ESP
-      // cycle-count tuning below (expectedDiff=300 @ 240 MHz) gives only ~0.8 MHz on a PC because the
-      // host getCycleCount() is microsecond-derived, not a real 240 MHz counter.
+#if defined(BOARD_DESKTOP) || defined(BOARD_PICOCALC)
+      // Pace against REAL TIME -- 1 emulated cycle == 1 us at 1 MHz -- instead of against a count
+      // of host CPU cycles. The ESP branch below charges each emulated cycle a fixed 300 host
+      // cycles, which only works out to 1 MHz on a 240 MHz ESP32. Anywhere else that constant is
+      // simply the wrong clock: on the RP2350 at 200 MHz it pins the 6502 at 200/300 = 0.67 MHz,
+      // and on the desktop getCycleCount() is not a real clock counter at all (~0.8 MHz).
+      // Real microseconds are correct on every host and need no per-board tuning.
+      //
       // appleClockMhz scales the target rate (1.0 = stock 1 MHz). We accumulate the real microseconds
-      // the emulated cycles SHOULD take as an INTEGER (paceTargetUs) + a sub-microsecond float
-      // remainder — never dividing the large running cycle count by a float (that lost precision past
-      // ~16M cycles and made the busy-wait jitter -> speaker clicks / apparent CPU freeze). At
-      // mhz=1.0 this is bit-identical to the stock integer pacing.
-      static uint32_t paceBaseUs = 0, paceTargetUs = 0;
-      static float    paceFrac = 0.0f;
-      float mhz = appleClockMhz; if (mhz < 0.05f) mhz = 0.05f;
-      paceFrac += (float)cycles[opcode] / mhz;             // small, always-precise float
-      uint32_t whole = (uint32_t)paceFrac; paceFrac -= (float)whole;
-      paceTargetUs += whole;
-      uint32_t elapsed = (uint32_t)micros() - paceBaseUs;
-      if ((int32_t)(elapsed - paceTargetUs) > 100000)      // re-anchor at boot / after a FAST burst
-        { paceBaseUs = (uint32_t)micros(); paceTargetUs = 0; paceFrac = 0.0f; }
-      while ((uint32_t)((uint32_t)micros() - paceBaseUs) < paceTargetUs) { }   // spin until real time catches up
+      // the emulated cycles SHOULD take as an INTEGER (paceTargetUs) + a sub-microsecond remainder
+      // — never dividing the large running cycle count (that lost precision past ~16M cycles and
+      // made the busy-wait jitter -> speaker clicks / apparent CPU freeze).
+      //
+      // The remainder is fixed-point 16.16 rather than float because the PicoCalc's RP2040 is a
+      // Cortex-M0+ with no FPU, where a float divide in this loop would be a soft-float call on
+      // every single instruction. The reciprocal is recomputed only when appleClockMhz actually
+      // changes, and even that test compares raw bits so the hot path stays entirely integer.
+      // At mhz = 1.0 usPerCycQ16 is exactly 65536, i.e. bit-identical to stock integer pacing.
+      static uint32_t paceBaseUs = 0, paceTargetUs = 0, paceAccQ16 = 0;
+      static uint32_t lastMhzBits = 0, usPerCycQ16 = 1u << 16;
+      uint32_t mhzBits; memcpy(&mhzBits, &appleClockMhz, sizeof(mhzBits));
+      if (mhzBits != lastMhzBits) {
+        lastMhzBits = mhzBits;
+        float mhz = appleClockMhz; if (mhz < 0.05f) mhz = 0.05f;
+        usPerCycQ16 = (uint32_t)(65536.0f / mhz + 0.5f);
+      }
+      paceAccQ16 += opCycles * usPerCycQ16;
+      uint32_t guestInc = paceAccQ16 >> 16;
+      paceTargetUs += guestInc;
+      paceAccQ16 &= 0xFFFF;
+      // Publish the guest's own clock for the speaker: a FREE-RUNNING accumulation of emulated
+      // microseconds. Deliberately NOT paceBaseUs + paceTargetUs, which looks like the same thing
+      // and is not -- that sum LEAPS. The pacer re-anchors whenever it falls 100ms behind, and
+      // this host loses ~80ms per second (the 6502 manages 0.92 of 1.02MHz), so it re-anchors
+      // about every 1.25s and the sum jumps ~100ms forward each time. The speaker replays a
+      // timeline; a 100ms discontinuity in it is a loud click, once a second.
+      //
+      // Anchoring is the PACER's business -- it is how the emulator decides when to wait for real
+      // time. The guest's own clock has nothing to do with it: the 6502 just counts cycles, and so
+      // does this. Monotonic, smooth, and immune to the host stalling, which is exactly what $C030
+      // needs to be stamped with. It wraps every 71 minutes, like micros(), and every comparison
+      // on it is a signed difference, so the wrap is harmless.
+      appleGuestUs += guestInc;
+      // Every comparison is a SIGNED difference so it stays correct across the 71-minute
+      // micros() rollover; the 100 ms re-anchor keeps the gap far inside int32 range.
+      //
+      // ONE clock read per instruction on the path that is always taken, not two. The old form
+      // read it in the `if` and then again in the `while`; on a host that cannot quite keep up
+      // (the RP2040 sits just under 1MHz) the while-condition is false every single time, so that
+      // second read bought nothing. See CPU_NOW_US above for why this is not micros().
+      int32_t paceLag = (int32_t)(CPU_NOW_US() - paceBaseUs - paceTargetUs);
+      if (paceLag > 100000)  // boot / after a FAST burst
+        { paceBaseUs = CPU_NOW_US(); paceTargetUs = 0; paceAccQ16 = 0; }
+      else
+        while (paceLag < 0)  // spin until real time catches up
+          paceLag = (int32_t)(CPU_NOW_US() - paceBaseUs - paceTargetUs);
 #else
-      int cycleCount = cycles[opcode];
+      int cycleCount = (int)opCycles;
       cpuCycleCount = ESP.getCycleCount();
       uint32_t expectedDiff = 300;
 

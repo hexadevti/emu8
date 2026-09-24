@@ -150,12 +150,10 @@ void keyboard_bit()
                   HdDisk = !HdDisk;
                   optionsScreenRender();
                 }
-                else if (keyboard_data[2] == 0x06) // F2
-                {
-                  AppleIIe = !AppleIIe;
-                  activeFlags = AppleIIe ? flagsIIe : flagsIIplus;
-                  optionsScreenRender();
-                }
+                // F2 used to flip II+ <-> IIe here. It cannot any more: the machine decides which
+                // memory map memoryAlloc() builds at startup and only that one exists, so the model
+                // is picked on the boot splash (II+ and IIe are two systems there) and this key is
+                // left doing nothing rather than pointing read8 at RAM that was never allocated.
                 else if (keyboard_data[2] == 0x04) // F3
                 {
                   Fast1MhzSpeed = !Fast1MhzSpeed;

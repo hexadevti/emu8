@@ -7,9 +7,12 @@
 
 namespace atari {
 
-// Framebuffer points at the shared static buffer (set in atariSetup); 160x192 = 30720 bytes.
+// Framebuffer points at the shared static buffer (set in atariSetup); 160x240 = 38400 bytes.
 uint8_t *framebuffer = nullptr;
 volatile uint32_t atariFrameCount = 0;
+uint8_t *frontBuf = nullptr;
+volatile uint8_t frontState = 0;
+volatile int frontRows = 192;
 volatile bool wsyncStall = false;
 
 // Cartridge (filled by atari_cart.cpp).

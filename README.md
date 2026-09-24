@@ -63,6 +63,7 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
 - [Build & flash](#build--flash)
 - [Desktop (SDL2) debug build](#desktop-sdl2-debug-build)
 - [microSD card preparation](#microsd-card-preparation)
+- [Managing the SD card over USB](#managing-the-sd-card-over-usb)
 - [Display configuration (CYD / TFT_eSPI)](#display-configuration-cyd--tft_espi)
 - [Pin assignments (CYD)](#pin-assignments-cyd)
 - [Board resources & schematics](#board-resources--schematics)
@@ -331,6 +332,25 @@ Ghostbusters); copy them to the SD root. A few C64 test files are in [`resources
 
 ---
 
+## Managing the SD card over USB
+
+The firmware includes a small file server on the USB serial port. You can browse, upload, download,
+rename and delete files on the card **without removing it**, while the emulator keeps running. Two
+clients speak its protocol:
+
+- **Web app**, [`tools/sdmanager/web/`](tools/sdmanager/web/): runs in Chrome, Edge or Opera on
+  Windows, macOS, Linux, ChromeOS and Android. It's a Vite app: run `npm install` and then
+  `npm run dev` in `tools/sdmanager/web` (Node.js 20.19+), open http://localhost:5180 and click
+  **Connect**. It supports drag-and-drop uploads (folders too), zip downloads, reboot, a faster link
+  speed on the CYD / JC4827W543, and it can be installed as an app.
+- **CLI**, [`tools/sdmanager/emu8sd.py`](tools/sdmanager/emu8sd.py) (Python + pyserial):
+  `emu8sd.py --port COM5 --fast put -r ./roms/msx /roms/msx`.
+
+Close any other serial monitor first. See [`tools/sdmanager/README.md`](tools/sdmanager/README.md)
+for details and [`PROTOCOL.md`](tools/sdmanager/PROTOCOL.md) for the wire format.
+
+---
+
 ## Display configuration (CYD / TFT_eSPI)
 
 The CYD build configures TFT_eSPI at **library** level, so before building you must make the library
@@ -417,7 +437,8 @@ emulated system. The top-level sketch wires them together:
 | [`src/tiny386/`](src/tiny386/) | 386 — vendored tiny386 i386 + VGA core and emu8 glue (in development) |
 | [`src/iigs/`](src/iigs/) | Apple IIGS core — 65C816, banked memory, ROM 01 boot, video, disk (in development) + the original feasibility benchmark |
 | [`src/desktop/`](src/desktop/) | SDL2 desktop debug build — Arduino/FreeRTOS shims, SDL display/audio/input backends (see its [README](src/desktop/README.md)) |
-| [`host/`](host/) | Off-device debug harnesses (MSX / SMS / IIGS cores on a PC) |
+| [`host/`](host/) | Off-device debug harnesses (MSX / SMS / IIGS cores on a PC, SD serial server) |
+| [`tools/sdmanager/`](tools/sdmanager/) | SD card manager over USB serial: web app, Python CLI, protocol spec + tests |
 | [`data/`](data/) · [`resources/`](resources/) | Sample disk images / test files |
 
 ---

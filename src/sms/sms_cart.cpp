@@ -1,3 +1,10 @@
+// This SMS translation unit is compiled out entirely on boards that clear
+// BOARD_HAS_Z80_CORES (the PicoCalc's original RP2040 mainboard -- see board.h for why).
+// emu.h must be included FIRST because it is what pulls in board.h and defines the macro;
+// the guard below then empties the file, handing this core's static RAM to the Apple II.
+#include "../../emu.h"
+#if BOARD_HAS_Z80_CORES
+
 // sms_cart.cpp - Sega Master System cartridge mapping (the standard "Sega" mapper).
 //
 // CPU address space 0x0000-0xBFFF is three 16 KB ROM windows plus an optional 16 KB cart-RAM window:
@@ -75,3 +82,5 @@ void smsCartLoadImage(const uint8_t* data, int len) {
   sms::cartSetImage(data, len);
   sms::cartReset();
 }
+
+#endif  // BOARD_HAS_Z80_CORES
