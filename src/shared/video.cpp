@@ -865,6 +865,17 @@ void renderLoop(void *pvParameters)
     margin_y = oskRasterTop();
     screen_width = 280;
     screen_height = oskRasterHeight();
+#if defined(BOARD_PICOCALC)
+    // SCREEN: FILL (Settings): 280x192 scaled ~8:7 on both axes to 320x220 (rows 10..229) of the 320x240
+    // logical screen. Vertically that is the existing coef192 line repeat; horizontally the display
+    // doubles every 7th pixel (setHScale78 below). A mode change wipes the screen once, so the
+    // bigger picture's edges do not linger around the smaller one.
+    extern bool screenFill;
+    static bool appleLastFill = false;
+    const bool appleFill = screenFill && !oskActive();
+    if (appleFill != appleLastFill) { appleLastFill = appleFill; clearScr = true; }
+    if (appleFill) { screen_height = 219; margin_y = (240 - 219) / 2; }
+#endif
     displaySetVideoRect(margin_y, (int)screen_height);   // Apple raster (192 lines at margin_y); fill-screen scales just that
     last_y = margin_y;
     last_x = margin_x;
@@ -875,6 +886,12 @@ void renderLoop(void *pvParameters)
     float coef140 = screen_width / 140;
 
     int rasterH = (int)screen_height; // matches the line count produced by coef192
+#if defined(BOARD_PICOCALC)
+    // ...only while margin_y is 0 or the scale is 1:1: the line repeat below measures from margin_y,
+    // so with FILL (219/192 = 73/64, exact in float) it emits floor(coef192*202)-10 = 220 lines.
+    // Size the window by that same expression or the extra line would wrap to the top.
+    if (appleFill) rasterH = (int)floor(coef192 * (float)(margin_y + 192)) - margin_y;
+#endif
 
     // clearScr is tested FIRST: the wipe below writes exactly 320*240 pixels, so the window has
     // to be the full 320x240 or the surplus wraps back to the window origin and shifts the frame
@@ -893,6 +910,14 @@ void renderLoop(void *pvParameters)
     // (full 320 for the 40-col branch; the centered 280 at margin_x for the graphics/80-col branches).
     if (!OptionsWindow && AppleIIe && !Cols40_80 && !DHiResOn_Off) displaySetVideoFill(0, 320, true);
     else                                                           displaySetVideoFill(margin_x, (int)screen_width, true);
+#if defined(BOARD_PICOCALC)
+    // FILL: every 280-wide branch widens 7:8 to the full 320. (The 80-col text branch above is
+    // already 320 wide; the clear and the menu keep their unscaled 320x240 window.)
+    if (appleFill && !OptionsWindow && !DebugWindow && !clearScr && !(AppleIIe && !Cols40_80 && !DHiResOn_Off)) {
+      tft.setAddrWindow(0, margin_y, 320, rasterH);
+      tft.setHScale78(true);
+    }
+#endif
     tft.startWrite();
     
     

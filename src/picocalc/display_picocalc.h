@@ -57,6 +57,7 @@ namespace pcd {
   extern uint16_t stage[2][STAGE_LEN];
   extern uint32_t stageFill;                          // pixels held in stage[stageHalf]
   extern uint8_t  stageHalf;
+  extern uint8_t  hsc;                                // 7:8 upscale countdown, 0 = off (see setHScale78)
   void stageKick();                                   // DMA the full half, flip, reset stageFill
   void stageDrain();                                  // push a partial half and join the transfer
   void bulkFill(uint16_t color, uint32_t len);        // read-increment-off DMA of `len` copies
@@ -112,9 +113,18 @@ public:
     while (len--) {
       pcd::stage[pcd::stageHalf][pcd::stageFill++] = color;
       if (pcd::stageFill >= pcd::STAGE_LEN) pcd::stageKick();
+      if (pcd::hsc && --pcd::hsc == 0) {              // 7th pixel of a group: send it twice
+        pcd::hsc = 7;
+        pcd::stage[pcd::stageHalf][pcd::stageFill++] = color;
+        if (pcd::stageFill >= pcd::STAGE_LEN) pcd::stageKick();
+      }
     }
   }
   void endWrite();
+  // Apple II SCREEN: FILL. For the NEXT startWrite()..endWrite() only: every 7th writeColor() pixel
+  // goes out twice, so a 280-wide raster fills a 320-wide window (7:8, nearest neighbour). One-shot
+  // so no other window can inherit it; endWrite() turns it off.
+  void setHScale78(bool on) { _hscale = on; }
 
   // text
   void    setTextDatum(uint8_t d) { _datum = d; }
@@ -153,6 +163,7 @@ private:
   bool      _textHasBg = false;
   bool      _rawText = false;       // drawPanelString(): skip the logical clip + DISP_OFFSET_Y
   bool      _swap = false;
+  bool      _hscale = false;        // setHScale78(): armed for the next startWrite()
   int32_t   _spanX = 0, _spanY = -1, _spanLen = 0;   // pending horizontal run (_spanY < 0 = none)
   uint16_t  _spanColor = 0;
   int32_t   _offY = DISP_OFFSET_Y;  // panel row of logical row 0 (0 in full-panel mode)

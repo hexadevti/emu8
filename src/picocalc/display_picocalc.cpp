@@ -69,6 +69,7 @@ namespace pcd {
   uint16_t stage[2][STAGE_LEN];
   uint32_t stageFill = 0;
   uint8_t  stageHalf = 0;
+  uint8_t  hsc = 0;
 }
 
 // ============================== low-level panel I/O ===========================================
@@ -445,10 +446,13 @@ void DisplayGFX::setPanelAddrWindow(int32_t x, int32_t y, int32_t w, int32_t h) 
 void DisplayGFX::startWrite() {
   pcd::stageFill = 0;                                // nothing carried over from a previous window
   pcd::stageHalf = 0;
+  pcd::hsc = _hscale ? 7 : 0;                        // groups restart at the window origin
   fmt16();
 }
 void DisplayGFX::endWrite() {
   pcd::stageDrain();
+  pcd::hsc = 0;
+  _hscale = false;
 }
 
 // ---------- single pixels, coalesced into horizontal runs ----------
