@@ -78,7 +78,7 @@
 // microSD on its own SPI bus, PWM stereo audio, 18650 battery. The mainboard carries 8MB of PSRAM
 // but on PLAIN GPIOs (bit-bang/PIO SPI), NOT the RP2350 memory-mapped QSPI PSRAM bus -- it cannot
 // back a raw pointer, so BOARD_HAS_PSRAM is 0 and the cores that need MBs of guest RAM (IIGS,
-// PC-XT, tiny386) are compiled out. Everything else fits the 520KB SRAM.
+// PC-XT) are compiled out. Everything else fits the 520KB SRAM.
 //
 // Toolchain: earlephilhower arduino-pico, FQBN rp2040:rp2040:rpipico2 with arch=arm + os=freertos
 // (FreeRTOS SMP is ARM-only) + freq=200 (see the SPI note below). Pin numbers below are taken from
@@ -383,9 +383,20 @@
 #endif
 
 // Cores that need megabytes of contiguous, pointer-addressable guest RAM (Apple IIGS banks, the
-// PC-XT's 1MB, tiny386's guest+VGA memory) only exist on boards with real PSRAM. On the others
+// PC-XT's 1MB) only exist on boards with real PSRAM. On the others
 // they are compiled out of the platform switch entirely -- see emu8.ino and the boot splash.
 #define BOARD_HAS_BIGRAM_CORES BOARD_HAS_PSRAM
+
+// The PC-XT is the exception: on the PicoCalc's RP2350 it runs from a PAGED guest address space
+// (src/pcxt/fabgl/pcmem.h) built out of whatever SRAM is left -- a few hundred KB of
+// conventional memory instead of the full 640KB, which is plenty for DOS and most XT software.
+// Not on the RP2040 (Cortex-M0+, __ARM_ARCH_6M__): its heap leaves ~75KB, and DOS 3.3 stops with
+// "Configuration too large for memory". There it is stubbed (src/picocalc/bigram_stubs.cpp).
+#if BOARD_HAS_PSRAM || (defined(BOARD_PICOCALC) && !defined(__ARM_ARCH_6M__))
+#define BOARD_HAS_PCXT_CORE 1
+#else
+#define BOARD_HAS_PCXT_CORE 0
+#endif
 
 // The two Z80 cores (MSX, SMS) keep separate gates, but both are on for every board today. Neither
 // carries meaningful statics: RAM, VRAM and (on the SMS) the 32KB of on-cart battery RAM are heap,
@@ -397,6 +408,16 @@
 // keeping the BIOS and cartridge images in flash instead -- see BOARD_ROM_IN_FLASH below.
 #define BOARD_HAS_MSX_CORE 1
 #define BOARD_HAS_SMS_CORE 1
+
+// The ColecoVision is assembled from the other two Z80 machines' parts -- the MSX TMS9918A VDP and
+// the SMS SN76489 PSG -- so it exists wherever both of them do. Its own state is 1K RAM + 16K VRAM
+// on the heap, with the 8K BIOS and the cartridge in flash on the PicoCalc (BOARD_ROM_IN_FLASH).
+#define BOARD_HAS_COLECO_CORE (BOARD_HAS_MSX_CORE && BOARD_HAS_SMS_CORE)
+
+// The ZX Spectrum 48K needs only the Z80 core. Its 48K RAM IS sharedBigBuf (with the screen snapshot
+// and the side buffers in the tail), and the 16K ROM and any tape image sit in flash on the PicoCalc,
+// so it costs no heap beyond a few KB anywhere.
+#define BOARD_HAS_ZX_CORE 1
 
 // MSX BIOS + MSX/SMS cartridge images live in spare on-board flash (src/picocalc/romflash_picocalc.cpp)
 // instead of ps_malloc'd RAM. Only the PicoCalc: it has no PSRAM, and its flash is XIP-mapped, so

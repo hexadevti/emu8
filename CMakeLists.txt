@@ -42,7 +42,8 @@ endif()
 file(GLOB_RECURSE CORE_SRC CONFIGURE_DEPENDS
   ${REPO}/src/apple2/*.cpp ${REPO}/src/c64/*.cpp  ${REPO}/src/nes/*.cpp
   ${REPO}/src/atari/*.cpp  ${REPO}/src/iigs/*.cpp ${REPO}/src/msx/*.cpp
-  ${REPO}/src/sms/*.cpp    ${REPO}/src/z80/*.cpp
+  ${REPO}/src/sms/*.cpp    ${REPO}/src/z80/*.cpp  ${REPO}/src/coleco/*.cpp
+  ${REPO}/src/zx/*.cpp
   ${REPO}/src/shared/*.cpp)
 list(REMOVE_ITEM CORE_SRC
   ${REPO}/src/shared/audio_amp.cpp      # -> src/desktop/audio_sdl.cpp
@@ -78,11 +79,6 @@ set(IMGUI_SRC
   ${IMGUI_DIR}/backends/imgui_impl_sdl2.cpp
   ${IMGUI_DIR}/backends/imgui_impl_sdlrenderer2.cpp)
 
-# tiny386 (Intel i386 PC emulator): vendored C99 core (pc/i386/vga/ide/...) + the C++ glue
-# (tiny386.cpp) + embedded BIOS arrays (tiny386_roms.c). Compiled into the desktop build so the
-# core can be debugged with gdb; the device build compiles the same files via arduino-cli under src/.
-file(GLOB TINY386_SRC CONFIGURE_DEPENDS ${REPO}/src/tiny386/*.c ${REPO}/src/tiny386/*.cpp)
-
 # Compile the Arduino sketch as a C++ translation unit (copied so the compiler accepts the name).
 configure_file(${REPO}/emu8.ino ${CMAKE_BINARY_DIR}/emu8_ino.cpp COPYONLY)
 
@@ -92,7 +88,6 @@ add_executable(emu8
   ${CORE_SRC}
   ${DESKTOP_SRC}
   ${IMGUI_SRC}
-  ${TINY386_SRC}
   ${PCXT_SRC})
 
 # ImGui headers (imgui.h) + its SDL backends. PRIVATE: only the desktop target uses them.
@@ -103,9 +98,6 @@ target_include_directories(emu8 PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_include_directories(emu8 BEFORE PRIVATE
   ${REPO}/src/desktop/arduino_shim
   ${REPO})
-# tiny386 vendored sources include their own headers by bare name ("pc.h", ...) -> put their dir on
-# the include path. AFTER the shim/repo dirs so e.g. emu.h still resolves to the project's, not here.
-target_include_directories(emu8 PRIVATE ${REPO}/src/tiny386)
 
 target_compile_definitions(emu8 PRIVATE BOARD_DESKTOP)
 # The codebase is full of Arduino-isms; keep it building (warnings on, not fatal).

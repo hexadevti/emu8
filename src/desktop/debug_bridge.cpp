@@ -171,7 +171,7 @@ void dbgReset() {
     case PLATFORM_NES:    nes::nesResetReq   = true;  break;
     case PLATFORM_ATARI:  atari::atariResetReq = true; break;
     case PLATFORM_MSX:    msxResetReq        = true;  break;   // in-process machine reset (keeps the debug session)
-    default:              rebootInto(currentPlatform); break;   // SMS/PCXT/tiny386/IIgs: re-exec
+    default:              rebootInto(currentPlatform); break;   // SMS/PCXT/IIgs: re-exec
   }
 }
 
@@ -197,12 +197,12 @@ float dbgClockDefaultMhz() { return 1.0f; }                        // stock Appl
 float dbgGetMeasuredMhz()  { return appleMeasuredMhz; }
 
 // --- full host speed (uncapped), for EVERY platform. The cores honor a per-platform "Fast" flag in
-// their pacing loop (Apple II/C64/IIGS share Fast1MhzSpeed; NES/MSX/SMS have their own); Atari, PC-XT
-// and tiny386 have no real-time throttle on the desktop, so they always run uncapped (Fixed = true). ---
+// their pacing loop (Apple II/C64/IIGS share Fast1MhzSpeed; NES/MSX/SMS have their own); Atari and
+// PC-XT have no real-time throttle on the desktop, so they always run uncapped (Fixed = true). ---
 bool dbgFullSpeedSupported() { return true; }   // every desktop platform can run at full host speed
 bool dbgFullSpeedFixed() {
   switch (currentPlatform) {
-    case PLATFORM_ATARI: case PLATFORM_PCXT: case PLATFORM_TINY386: return true;   // always uncapped on desktop
+    case PLATFORM_ATARI: case PLATFORM_PCXT: return true;   // always uncapped on desktop
     default: return false;
   }
 }
@@ -212,7 +212,9 @@ bool dbgGetFullSpeed() {
     case PLATFORM_NES: return nesFast;
     case PLATFORM_MSX: return msxFast;
     case PLATFORM_SMS: return smsFast;
-    default: return true;                                                          // Atari/PCXT/tiny386
+    case PLATFORM_COLECO: return colecoFast;
+    case PLATFORM_ZX: return zxFast;
+    default: return true;                                                          // Atari/PCXT
   }
 }
 void dbgSetFullSpeed(bool on) {
@@ -221,6 +223,8 @@ void dbgSetFullSpeed(bool on) {
     case PLATFORM_NES: nesFast = on; break;
     case PLATFORM_MSX: msxFast = on; break;
     case PLATFORM_SMS: smsFast = on; break;
+    case PLATFORM_COLECO: colecoFast = on; break;
+    case PLATFORM_ZX: zxFast = on; break;
     default: return;                                                               // fixed-uncapped platforms
   }
   saveConfig();   // persist where the flag has EEPROM backing (Apple II's Fast1MhzSpeed)
@@ -303,7 +307,8 @@ static const char *platEnvName(int p) {
     case PLATFORM_NES:    return "nes";    case PLATFORM_ATARI: return "atari";
     case PLATFORM_IIGS:   return "iigs";   case PLATFORM_MSX:   return "msx";
     case PLATFORM_SMS:    return "sms";    case PLATFORM_PCXT:  return "pcxt";
-    case PLATFORM_TINY386: return "tiny386"; default: return "apple2";
+    case PLATFORM_COLECO: return "coleco"; case PLATFORM_ZX: return "zx";
+    default: return "apple2";
   }
 }
 static void rebootInto(int p) {
@@ -315,18 +320,21 @@ static void rebootInto(int p) {
 }
 
 int dbgPlatform()      { return currentPlatform; }
-int dbgPlatformCount() { return PLATFORM_TINY386 + 1; }
+int dbgPlatformCount() { return PLATFORM_ZX + 1; }   // PLATFORM_SDMANAGER inside is named "" (skipped)
 const char *dbgPlatformName(int p) {
   switch (p) {
     case PLATFORM_APPLE2: return "Apple II"; case PLATFORM_C64:  return "Commodore 64";
     case PLATFORM_NES:    return "NES";      case PLATFORM_ATARI: return "Atari 2600";
     case PLATFORM_IIGS:   return "Apple IIGS"; case PLATFORM_MSX: return "MSX";
     case PLATFORM_SMS:    return "Master System"; case PLATFORM_PCXT: return "PC-XT (8086)";
-    case PLATFORM_TINY386: return "PC (i386)"; default: return "?";
+    case PLATFORM_COLECO: return "ColecoVision";
+    case PLATFORM_ZX:     return "ZX Spectrum 48K";
+    case PLATFORM_SDMANAGER: return "";                 // not an emulator; the menu skips it
+    default: return "?";
   }
 }
 void dbgSwitchPlatform(int p) {
-  if (p < 0 || p > PLATFORM_TINY386 || p == currentPlatform) return;
+  if (p < 0 || p > PLATFORM_ZX || p == PLATFORM_SDMANAGER || p == currentPlatform) return;
   currentPlatform = p;
   saveConfig();            // persist so the re-exec'd setup() inits the chosen core
   rebootInto(p);
@@ -342,8 +350,9 @@ bool dbgLoadFile(const char *path) {
     case PLATFORM_ATARI:   ok = atariLoadSelected(path); break;
     case PLATFORM_MSX:     ok = msxLoadSelected(path); break;
     case PLATFORM_SMS:     ok = smsLoadSelected(path); break;
+    case PLATFORM_COLECO:  ok = colecoLoadSelected(path); break;
+    case PLATFORM_ZX:      ok = zxLoadSelected(path); break;
     case PLATFORM_PCXT:    ok = pcxtMountAuto(path); break;   // floppy -> A:, hard disk (e.g. DOSHDD.IMG) -> C:
-    case PLATFORM_TINY386: ok = tiny386MountC(path); break;
     case PLATFORM_IIGS:    iigsLoadDisk(path); return true;   // reboots internally (persists first)
     case PLATFORM_APPLE2:
     default:
@@ -362,14 +371,15 @@ const char *dbgFileExts() {
     case PLATFORM_IIGS:    return "dsk po 2mg hdv";
     case PLATFORM_MSX:     return "rom dsk mx1 mx2";
     case PLATFORM_SMS:     return "sms bin";
+    case PLATFORM_COLECO:  return "col rom bin";
+    case PLATFORM_ZX:      return "sna z80 tap tzx";
     case PLATFORM_PCXT:    return "img dsk ima";
-    case PLATFORM_TINY386: return "img vhd";
     default: return "";
   }
 }
 
-// The PC platforms expose two drive slots (A: floppy + C: hard disk) the UI can target separately.
-bool dbgHasDriveSlots() { return currentPlatform == PLATFORM_PCXT || currentPlatform == PLATFORM_TINY386; }
+// The PC-XT exposes two drive slots (A: floppy + C: hard disk) the UI can target separately.
+bool dbgHasDriveSlots() { return currentPlatform == PLATFORM_PCXT; }
 
 // Mount `path` into a specific slot (0 = A: floppy, 1 = C: hard disk, -1 = auto-by-size). Lets the
 // file browser put one image in A: and another in C:. Non-PC platforms ignore the slot.
@@ -380,9 +390,6 @@ bool dbgLoadFileToSlot(const char *path, int slot) {
       if (slot == 0)      ok = pcxtMountA(path);                       // A: floppy (live media change)
       else if (slot == 1) { ok = pcxtMountC(path); if (ok) pcxtHardReset(); }  // C: HD: re-POST so the BIOS detects it
       else                ok = pcxtMountAuto(path);                    // auto-by-size (also re-POSTs for a HD)
-      break;
-    case PLATFORM_TINY386:
-      ok = (slot == 0) ? tiny386MountA(path) : tiny386MountC(path);    // -1/1 -> C: (MountC re-POSTs internally)
       break;
     default:
       return dbgLoadFile(path);                                        // single-slot platforms
@@ -396,7 +403,6 @@ bool dbgLoadFileToSlot(const char *path, int slot) {
 const char *dbgMountedSlotPath(int slot) {
   switch (currentPlatform) {
     case PLATFORM_PCXT:    return (slot == 0 ? selectedPcFileName     : selectedPcHdFileName ).c_str();
-    case PLATFORM_TINY386: return (slot == 0 ? selectedTiny386FileNameA : selectedTiny386FileName).c_str();
     default: return "";
   }
 }
@@ -408,9 +414,6 @@ void dbgEjectSlot(int slot) {
     case PLATFORM_PCXT:
       pcxtUnmount(slot == 0 ? 0 : 2);            // machine slots: 0 = A:, 2 = C:
       if (slot == 1) pcxtHardReset();            // re-POST so the BIOS drops the C: drive
-      break;
-    case PLATFORM_TINY386:
-      if (slot == 0) tiny386MountA(""); else tiny386MountC("");   // "" = eject (MountC re-POSTs internally)
       break;
     default: return;
   }
@@ -615,8 +618,9 @@ const char *dbgCpuName() {
     case PLATFORM_IIGS:   return "WDC 65C816";
     case PLATFORM_MSX:    return "Zilog Z80";
     case PLATFORM_SMS:    return "Zilog Z80";
+    case PLATFORM_COLECO: return "Zilog Z80";
+    case PLATFORM_ZX:     return "Zilog Z80";
     case PLATFORM_PCXT:   return "Intel 8086";
-    case PLATFORM_TINY386: return "Intel i386";
     default: return "(unsupported)";
   }
 }

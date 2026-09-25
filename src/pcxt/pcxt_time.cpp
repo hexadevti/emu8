@@ -1,7 +1,7 @@
-// Not built for the PicoCalc (RP2350): this core needs multi-megabyte ps_malloc'd guest RAM,
-// and the board has 520KB of SRAM with its 8MB PSRAM on plain GPIOs (not memory-mapped). The
-// shared dispatch/render/UI code links against src/picocalc/bigram_stubs.cpp instead.
-#if !defined(BOARD_PICOCALC)
+// Not built for the PicoCalc on an RP2040 (Cortex-M0+): its heap leaves ~75KB of guest RAM, too
+// little for DOS ("Configuration too large for memory"). The RP2350 runs it paged (fabgl/pcmem.h);
+// see BOARD_HAS_PCXT_CORE in board.h. The RP2040 links against src/picocalc/bigram_stubs.cpp.
+#if !(defined(BOARD_PICOCALC) && defined(__ARM_ARCH_6M__))
 // pcxt_time.cpp - device implementation of the PIT real-time source (5 MHz).
 //
 // PIT8253.cpp calls FRC1Timer() to know how much real time has elapsed so IRQ0
@@ -20,6 +20,9 @@
 // reference resolves (the IDF symbol is C, the shim symbol is C++/mangled).
 #if defined(BOARD_DESKTOP)
 int64_t esp_timer_get_time();
+#elif defined(BOARD_PICOCALC)
+#include <pico/time.h>
+static inline int64_t esp_timer_get_time(void) { return (int64_t)time_us_64(); }   // RP2040 1MHz timer
 #else
 extern "C" int64_t esp_timer_get_time(void);
 #endif
@@ -31,4 +34,4 @@ extern "C" uint32_t FRC1Timer(void) {
 }
 
 #endif // !PCXT_HOST_BOOT
-#endif // !defined(BOARD_PICOCALC)
+#endif // !(BOARD_PICOCALC && RP2040)

@@ -102,7 +102,7 @@ private:
 };
 
 void displayFlush();
-// Resize the emulator framebuffer (and the SDL texture if already created). PC-XT / tiny386 call this
+// Resize the emulator framebuffer (and the SDL texture if already created). PC-XT call this
 // from their setup() — BEFORE begin() — so the authentic PC fonts render at native resolution instead
 // of being squished into 320x240. Other platforms keep the default 320x240.
 void desktopSetEmuResolution(int w, int h);

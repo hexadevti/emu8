@@ -94,10 +94,8 @@ public:
   void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data);
   void setBypassCanvas(bool) {}     // canvas fast-path flag; there is no canvas here
   void pushPanelBand(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data);
-  void drawCanvasRGB565(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data);  // RAW panel rows
   void fillPanelBlack();            // the two 320x40 letterbox bars
   void fillPanelRect(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t color);  // RAW panel coords
-  void flushOskBand() {}            // DSI-only partial flush; nothing is buffered here
   // On-screen-keyboard overlay: no touchscreen on this board, so the overlay never opens.
   void oskOverlayBegin() {}
   void oskOverlayEnd() {}

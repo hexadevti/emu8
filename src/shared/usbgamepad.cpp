@@ -80,8 +80,7 @@ public:
       int off = (n >= 5) ? 1 : 0;
       if (n >= off + 3) {
         int8_t mdx = (int8_t)d[off + 1], mdy = (int8_t)d[off + 2]; uint8_t mb = d[off + 0];
-        if (currentPlatform == PLATFORM_TINY386) tiny386MouseInput(mdx, mdy, mb);  // -> PS/2 mouse
-        else                                     pcxtMouseInput(mdx, mdy, mb);     // -> INT 33h
+        pcxtMouseInput(mdx, mdy, mb);     // -> INT 33h
       }
       return;
     }

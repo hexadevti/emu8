@@ -46,6 +46,12 @@ static const OsgBtn SMS_BTNS[] = {
   { 286, 2, 32, 16, OSG_MENU, "MENU" },
 };
 
+static const OsgBtn COLECO_BTNS[] = {   // Pb2/Pb3 -> keypad '*' / '1' (see applyPlatformInput)
+  { 262, 144, 50, 50, 0, "L" }, { 206, 168, 48, 48, 1, "R" },
+  { 160, 218, 46, 16, 2, "*" }, { 212, 218, 52, 16, 3, "1" },
+  { 286, 2, 32, 16, OSG_MENU, "MENU" },
+};
+
 static const OsgBtn *osgBtns = nullptr;
 static int osgBtnCount = 0;
 
@@ -54,6 +60,7 @@ static void osgLayout() {
     case PLATFORM_NES:   osgBtns = NES_BTNS;   osgBtnCount = sizeof(NES_BTNS) / sizeof(OsgBtn);   break;
     case PLATFORM_ATARI: osgBtns = ATARI_BTNS; osgBtnCount = sizeof(ATARI_BTNS) / sizeof(OsgBtn); break;
     case PLATFORM_SMS:   osgBtns = SMS_BTNS;   osgBtnCount = sizeof(SMS_BTNS) / sizeof(OsgBtn);   break;
+    case PLATFORM_COLECO:osgBtns = COLECO_BTNS;osgBtnCount = sizeof(COLECO_BTNS) / sizeof(OsgBtn);break;
     default:             osgBtns = nullptr;    osgBtnCount = 0;                                   break;
   }
 }
@@ -63,7 +70,8 @@ static bool stickActive = false;
 static int  stickCX = 0, stickCY = 0;   // logical centre (set on the first touch of a press)
 
 bool osgSupported() {
-  return currentPlatform == PLATFORM_NES || currentPlatform == PLATFORM_ATARI || currentPlatform == PLATFORM_SMS;
+  return currentPlatform == PLATFORM_NES || currentPlatform == PLATFORM_ATARI || currentPlatform == PLATFORM_SMS ||
+         currentPlatform == PLATFORM_COLECO;
 }
 bool osgActive() { return osgSupported() && !OptionsWindow && !DebugWindow; }
 

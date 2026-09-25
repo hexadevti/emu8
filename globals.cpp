@@ -37,8 +37,9 @@ std::vector<std::string> nesFiles;     // NES .nes ROMs on SD
 std::vector<std::string> atariFiles;   // Atari 2600 .a26/.bin ROMs on SD
 std::vector<std::string> msxFiles;     // MSX1 .rom/.mx1/.dsk images on SD
 std::vector<std::string> smsFiles;     // SMS .sms/.bin ROM images on SD
+std::vector<std::string> colecoFiles;  // ColecoVision .col/.rom/.bin cartridges on SD
+std::vector<std::string> zxFiles;      // ZX Spectrum .sna/.z80/.tap/.tzx on SD
 std::vector<std::string> pcFiles;      // PCXT .img/.ima/.dsk/.vhd disk images on SD
-std::vector<std::string> tiny386Files; // tiny386 .img/.ima/.vhd/.hdd disk images on SD
 
 // keyboard
 unsigned short keyboard_data[3] = {0, 0, 0};
@@ -110,13 +111,16 @@ float msxMeasuredMhz = 0.0f;  // MSX: measured uncapped Z80 speed from the boot 
 String selectedSmsFileName;   // currently-loaded SMS .sms/.bin ROM (for the settings file browser)
 bool smsFast = false;         // SMS: NORMAL (paced to 3.58 MHz) by default; true = FAST (uncapped)
 float smsMeasuredMhz = 0.0f;  // SMS: measured uncapped Z80 speed from the boot benchmark
+String selectedColecoFileName;   // currently-loaded ColecoVision cartridge (for the settings file browser)
+bool colecoFast = false;         // Coleco: NORMAL (paced to 3.58 MHz) by default; true = FAST (uncapped)
+float colecoMeasuredMhz = 0.0f;  // Coleco: measured uncapped Z80 speed from the boot benchmark
+String selectedZxFileName;       // currently-loaded ZX Spectrum snapshot / tape (for the settings file browser)
+bool zxFast = false;             // ZX Spectrum: NORMAL (paced to 3.5 MHz) by default; true = FAST (uncapped)
+float zxMeasuredMhz = 0.0f;      // ZX Spectrum: measured uncapped Z80 speed from the boot benchmark
 String selectedPcFileName;    // PCXT A: floppy image (for the settings file browser)
 String selectedPcHdFileName;  // PCXT C: hard-disk image (auto-mounted on boot)
 bool pcFast = false;          // PCXT: reserved speed flag
 float pcMeasuredMhz = 0.0f;   // PCXT: measured 8086 equivalent speed from the boot benchmark
-String selectedTiny386FileName;   // tiny386: C: hard-disk image (hda) (settings file browser)
-String selectedTiny386FileNameA;  // tiny386: A: floppy image (fda) (settings file browser)
-float tiny386MeasuredMhz = 0.0f;  // tiny386: measured i386 throughput (boot benchmark)
 float appleMeasuredMhz = 0.0f; // Apple II: live measured 6502 speed (updated in cpuLoop)
 float appleClockMhz = 1.0f;    // Apple II: target clock when throttled (1.0 = stock 1 MHz; UI-adjustable on desktop)
 volatile int  g_pcSpkFreq = 0;     // PCXT PC-speaker: PIT ch2 frequency (Hz)
@@ -185,7 +189,7 @@ unsigned char* menuColor;
 // framebuffer (two 32016-byte halves) AND the Apple II main RAM (0xC000). Static (not malloc)
 // so the framebuffer is deterministic (no heap-fragmentation failure) without permanently
 // stealing heap from whichever platform isn't using it. 320*100+16 = 32016 per C64 half.
-unsigned char sharedBigBuf[2 * (320 * 100 + 16)];
+alignas(8) unsigned char sharedBigBuf[2 * (320 * 100 + 16)];   // aligned: PC-XT guest RAM pages on PicoCalc
 
 // speaker
 boolean speaker_state = false;

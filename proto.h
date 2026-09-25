@@ -103,7 +103,6 @@ void oskBuildLayout();
 void oskSetup();
 void oskRender();
 bool oskActive();
-bool oskDirty();   // keyboard needs a repaint (opened / key / shift) — lets heavy renders skip idle flushes
 int oskRasterTop();
 int oskRasterHeight();
 bool touchRead(int16_t *sx, int16_t *sy);
@@ -319,6 +318,36 @@ void loadSmsFilesSync();                  // scan SD root -> smsFiles (ROM brows
 void smsBrowseEnter(const char *path); // navigate into a subdirectory and rescan
 void smsBrowseUp();               // navigate to the parent directory and rescan
 
+// ColecoVision core entry points (src/coleco/coleco.cpp), called by the platform dispatch
+void colecoSetup();                       // alloc RAM/VRAM, load the SD BIOS, reset; auto-load saved cart
+void colecoLoop();                        // run the machine frame-by-frame (from loop())
+void colecoRenderFrame();                 // push the 256x192 TMS9918A picture (from renderLoop)
+void colecoPsgSetup();                    // SN76489 audio task, called from setup() LAST
+void colecoSetInput(uint8_t joyMask);     // joystick -> controller 1 (active-low; b4/b5 = left/right fire)
+void colecoSetKeypad(int key);            // controller 1 keypad: 0-9, 10 = '*', 11 = '#', -1 = none
+void colecoHardReset();                   // power-cycle: BIOS title screen -> cartridge (mapped to F12)
+bool colecoLoadSelected(const char *path);// settings: load a .col/.rom/.bin cartridge + reset
+void colecoScanFiles();                   // settings: rescan the cartridge browser
+bool colecoRenderLoadWarning();           // no-BIOS / no-cartridge overlay (true while showing)
+void loadColecoFilesSync();               // scan SD -> colecoFiles (cartridge browser)
+void colecoBrowseEnter(const char *path); // navigate into a subdirectory and rescan
+void colecoBrowseUp();                    // navigate to the parent directory and rescan
+// ZX Spectrum 48K core entry points (src/zx/zx.cpp), called by the platform dispatch
+void zxSetup();                           // RAM in sharedBigBuf, load the SD ROM, reset; auto-load saved file
+void zxLoop();                            // run the machine frame-by-frame (from loop())
+void zxRenderFrame();                     // push the 320x240 screen + border (from renderLoop)
+void zxAudioSetup();                      // beeper audio task, called from setup() LAST
+void zxSetKempston(uint8_t v);            // Kempston joystick (active-high: b0 R b1 L b2 D b3 U b4 fire)
+void zxKey(int row, int bit, bool down);  // keyboard matrix: half-row 0-7 (A8..A15), key bit 0-4
+void zxKeysReleaseAll();                  // release every matrix key (keyboard reset / focus loss)
+void zxHardReset();                       // power-cycle to the (C) 1982 screen (mapped to F12)
+bool zxLoadSelected(const char *path);    // settings: load a .sna/.z80 snapshot or insert a .tap/.tzx tape
+void zxScanFiles();                       // settings: rescan the file browser
+bool zxRenderLoadWarning();               // no-ROM overlay (true while showing)
+void loadZxFilesSync();                   // scan SD -> zxFiles (file browser)
+void zxBrowseEnter(const char *path);     // navigate into a subdirectory and rescan
+void zxBrowseUp();                        // navigate to the parent directory and rescan
+
 // PC-XT (Intel 8086 + CGA) core entry points (src/pcxt/pcxt.cpp), called by the platform dispatch
 void pcxtSetup();                          // alloc 1MB RAM (PSRAM) + 64K video RAM; install BIOS + wire chipset
 void pcxtLoop();                           // run the 8086 in chunks (from loop()); PIT drives IRQ0 real-time
@@ -339,25 +368,6 @@ void loadPcxtFilesSync();                  // scan SD root -> pcFiles (disk brow
 void pcxtBrowseEnter(const char *path); // navigate into a subdirectory and rescan
 void pcxtBrowseUp();              // navigate to the parent directory and rescan
 
-// tiny386 (Intel i386 + VGA) core entry points (src/tiny386/tiny386.cpp), called by the dispatch.
-// Declared in src/tiny386/tiny386.h; mirrored here so the shared dispatch/render/UI can call them.
-void tiny386Setup();
-void tiny386Loop();
-bool tiny386RenderFrame();
-void tiny386ForceRedraw();
-void tiny386SetInput(uint8_t joyMask);
-void tiny386KeyDown(uint8_t hidUsage, bool shift, bool ctrl, bool alt);
-void tiny386KeyUp(uint8_t hidUsage);
-void tiny386MouseInput(int dx, int dy, uint8_t buttons);
-void tiny386HardReset();
-bool tiny386LoadSelected(const char *path);
-bool tiny386MountA(const char *sel);   // A: floppy: live mount/eject (no reboot)
-bool tiny386MountC(const char *sel);   // C: hard disk: re-attach + soft-reboot the PC (no device restart)
-void tiny386ScanFiles();
-void loadTiny386FilesSync();
-void tiny386BrowseEnter(const char *path); // navigate into a subdirectory and rescan
-void tiny386BrowseUp();           // navigate to the parent directory and rescan
-bool tiny386RenderLoadWarning();
 
 // SID sound (src/c64/c64_sid.cpp)
 void sidSetup();                       // init the 3-voice synth + I2S DAC output task

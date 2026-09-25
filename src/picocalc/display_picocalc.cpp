@@ -419,14 +419,6 @@ void DisplayGFX::pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uin
 void DisplayGFX::pushPanelBand(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data) {
   pushImage(x, y, w, h, data);
 }
-// RAW panel rows, no letterbox offset (the tiny386 renderer draws full-panel).
-void DisplayGFX::drawCanvasRGB565(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data) {
-  pxFlush();
-  if (!data || x < 0 || y < 0 || w <= 0 || h <= 0) return;
-  if (x + w > PANEL_NATIVE_W || y + h > PANEL_NATIVE_H) return;
-  panelPushRaw(x, y, w, h, data);
-}
-
 // ---------- the Apple II scanline window ----------
 // video.cpp calls setAddrWindow() ONCE, then startWrite(), then writeColor() per pixel, then
 // endWrite() -- the TFT_eSPI order. So the window is programmed here as its own 8-bit transaction

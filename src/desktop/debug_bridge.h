@@ -135,11 +135,11 @@ void  dbgSetClockMhz(float mhz);
 float dbgClockDefaultMhz();         // the stock/default clock to "reset" to
 float dbgGetMeasuredMhz();          // live measured speed
 // --- full host speed (uncapped) — available on EVERY platform. Most have a "Fast" flag the pacing
-//     loop honors; Atari/PC-XT/tiny386 are inherently uncapped on desktop (dbgFullSpeedFixed = true). ---
+//     loop honors; Atari/PC-XT are inherently uncapped on desktop (dbgFullSpeedFixed = true). ---
 bool  dbgFullSpeedSupported();
 bool  dbgGetFullSpeed();
 void  dbgSetFullSpeed(bool on);
-bool  dbgFullSpeedFixed();          // true = always uncapped, can't be paced (Atari/PC-XT/tiny386)
+bool  dbgFullSpeedFixed();          // true = always uncapped, can't be paced (Atari/PC-XT)
 
 // --- platform control (native menus, so EMU_PLATFORM env isn't needed) ---
 int         dbgPlatform();              // currentPlatform
@@ -148,7 +148,7 @@ const char *dbgPlatformName(int p);     // "Apple II", "C64", ... (display label
 void        dbgSwitchPlatform(int p);   // reboot (re-exec) straight into platform p
 bool        dbgLoadFile(const char *sdPath);   // mount/load an SD file for the CURRENT platform
 const char *dbgFileExts();              // space-separated lowercase exts to show in the file browser
-// PC platforms (PC-XT, tiny386) have two drive slots — A: (floppy) and C: (hard disk) — so you can
+// The PC-XT has two drive slots — A: (floppy) and C: (hard disk) — so you can
 // mount one image in each. dbgHasDriveSlots() reports that; dbgLoadFileToSlot mounts into a chosen
 // slot (0 = A:, 1 = C:, -1 = auto-by-size). Other platforms ignore the slot (route to dbgLoadFile).
 bool        dbgHasDriveSlots();

@@ -75,10 +75,6 @@ public:
   // --- blits ---
   void setSwapBytes(bool swap);
   void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data);
-  // Direct 1:1 RGB565 blit into the canvas at PANEL-native (x,y) — NO logical 320x240 scaling and NO
-  // centering offset (unlike pushImage). For cores that compose a full-panel image themselves and
-  // need exact pixel placement (the tiny386 PC renderer). UI-mode flush then pushes the canvas 1:1.
-  void drawCanvasRGB565(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data);
 
   // --- direct-to-panel fast path (NES video): push a band straight to the panel at the centered
   //     video offset, skipping the PSRAM canvas + the full-panel QSPI flush. setBypassCanvas(true)
@@ -86,14 +82,6 @@ public:
   //     the static border once. Used only when not in fill-screen mode. ---
   void setBypassCanvas(bool b) { _bypassCanvas = b; }
   void pushPanelBand(int32_t logicalX, int32_t logicalY, int32_t w, int32_t h, const uint16_t *data);
-  // Like pushPanelBand but at RAW panel coords (no DISP_OFFSET centering). The tiny386 PC renderer
-  // pushes its full-panel image straight to the panel (bypassing the PSRAM canvas + its flush) to
-  // halve the per-frame PSRAM traffic -- the canvas write + flush read were the FPS bottleneck.
-  void drawPanelRGB565(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data);
-  // Composite + push ONLY the on-screen-keyboard's panel band in one DSI transfer, so a key press
-  // doesn't re-flush the whole 1024x600 frame (the tiny386 OSK was laggy from the full composite).
-  // The caller setBypassCanvas(true) to skip the loop-top full flush. P4 (DSI) only; no-op elsewhere.
-  void flushOskBand();
   void fillPanelBlack();
 
   // --- scanline window writes (Apple II raster path) ---

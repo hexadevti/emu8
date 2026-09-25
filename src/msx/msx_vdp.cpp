@@ -7,8 +7,12 @@
 
 // msx_vdp.cpp - TMS9918A VDP for the MSX1 core. Ports $98 (data) / $99 (address+register / status).
 // Implements the address-latch state machine, the read-ahead buffer, the VBlank interrupt, and
-// background rendering for Text Mode 1 (40x24), Graphic Mode 1 (32x24) and Graphic Mode 2 (256x192).
-// Sprites + multicolor + collision/5th-sprite status land in M3 (game support).
+// background rendering for Text Mode 1 (40x24), Graphic Mode 1 (32x24), Graphic Mode 2 (256x192)
+// and Multicolor (64x48 blocks), plus sprites with collision/5th-sprite status. Colour 0 is
+// transparent (shows the R7 backdrop) and R1 bit6 clear blanks the screen to the backdrop.
+//
+// The ColecoVision core (src/coleco/) drives this same VDP: it points msx::vram/framebuffer at its
+// own buffers and calls these entry points, so the two platforms share one TMS9918.
 //
 // Renders into the 256x192 8-bit indexed framebuffer; the platform render task converts it to
 // RGB565 8-line bands using MSX_PALETTE (see msx.cpp / video.cpp), like the NES/Atari paths.
@@ -80,11 +84,14 @@ bool vdpIrqActive()    { return (vstatus & 0x80) && (vreg[1] & 0x20); }
 
 // ---- rendering ---------------------------------------------------------------------------------
 static inline void fillRow(uint8_t* fb, int y, uint8_t color) { memset(fb + y * VDP_W, color, VDP_W); }
+static inline uint8_t backdrop() { return vreg[7] & 0x0F; }
+// Colour 0 is transparent on the TMS9918: the backdrop (R7 low nibble) shows through.
+static inline uint8_t opaque(uint8_t c) { return c ? c : backdrop(); }
 
 static void renderText1(uint8_t* fb) {     // 40x24, 6px-wide chars, 2 colors from R7
   uint16_t nameBase = (uint16_t)((vreg[2] & 0x0F) << 10);
   uint16_t patBase  = (uint16_t)((vreg[4] & 0x07) << 11);
-  uint8_t fg = vreg[7] >> 4, bg = vreg[7] & 0x0F;
+  uint8_t fg = opaque(vreg[7] >> 4), bg = backdrop();
   const int OX = (VDP_W - 240) / 2;          // 8px border each side
   for (int row = 0; row < 24; row++) {
     for (int line = 0; line < 8; line++) {
@@ -114,7 +121,7 @@ static void renderGraphic1(uint8_t* fb) {  // 32x24 tiles, color per group of 8 
         uint8_t ch  = vram[(nameBase + row * 32 + col) & 0x3FFF];
         uint8_t pat = vram[(patBase + ch * 8 + line) & 0x3FFF];
         uint8_t clr = vram[(colBase + (ch >> 3)) & 0x3FFF];
-        uint8_t fg = clr >> 4, bg = clr & 0x0F;
+        uint8_t fg = opaque(clr >> 4), bg = opaque(clr & 0x0F);
         int x = col * 8;
         for (int px = 0; px < 8; px++) p[x + px] = (pat & (0x80 >> px)) ? fg : bg;
       }
@@ -136,9 +143,28 @@ static void renderGraphic2(uint8_t* fb) {  // 256x192 bitmap (3 banks of 8 rows)
         int idx = (third * 256 + name) * 8 + line;
         uint8_t pat = vram[(patBase + idx) & 0x3FFF];
         uint8_t clr = vram[(colBase + idx) & 0x3FFF];
-        uint8_t fg = clr >> 4, bg = clr & 0x0F;
+        uint8_t fg = opaque(clr >> 4), bg = opaque(clr & 0x0F);
         int x = col * 8;
         for (int px = 0; px < 8; px++) p[x + px] = (pat & (0x80 >> px)) ? fg : bg;
+      }
+    }
+  }
+}
+
+static void renderMulticolor(uint8_t* fb) {  // 64x48 grid of 4x4 blocks, two colours per pattern byte
+  uint16_t nameBase = (uint16_t)((vreg[2] & 0x0F) << 10);
+  uint16_t patBase  = (uint16_t)((vreg[4] & 0x07) << 11);
+  for (int row = 0; row < 24; row++) {
+    for (int line = 0; line < 8; line++) {
+      int y = row * 8 + line;
+      uint8_t* p = fb + y * VDP_W;
+      for (int col = 0; col < 32; col++) {
+        uint8_t name = vram[(nameBase + row * 32 + col) & 0x3FFF];
+        uint8_t clr  = vram[(patBase + name * 8 + (row & 3) * 2 + (line >> 2)) & 0x3FFF];
+        uint8_t l = opaque(clr >> 4), r = opaque(clr & 0x0F);
+        int x = col * 8;
+        p[x] = p[x + 1] = p[x + 2] = p[x + 3] = l;
+        p[x + 4] = p[x + 5] = p[x + 6] = p[x + 7] = r;
       }
     }
   }
@@ -208,9 +234,13 @@ void vdpRender() {
   bool m1 = (vreg[1] & 0x10) != 0;     // Text Mode 1
   bool m2 = (vreg[0] & 0x02) != 0;     // Graphic Mode 2
   bool m3 = (vreg[1] & 0x08) != 0;     // Multicolor
+  if (!(vreg[1] & 0x40)) {             // BL clear: display blanked -> backdrop only, no sprites
+    for (int y = 0; y < VDP_H; y++) fillRow(fb, y, backdrop());
+    return;
+  }
   if (m1) { renderText1(fb); return; }                     // text mode has no sprites
   if (m2)      renderGraphic2(fb);
-  else if (m3) { uint8_t bg = vreg[7] & 0x0F; for (int y = 0; y < VDP_H; y++) fillRow(fb, y, bg); }  // multicolor: M3+
+  else if (m3) renderMulticolor(fb);
   else         renderGraphic1(fb);
   renderSprites(fb);
 }

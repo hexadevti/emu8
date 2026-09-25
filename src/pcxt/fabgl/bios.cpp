@@ -1,7 +1,7 @@
-// Not built for the PicoCalc (RP2350): this core needs multi-megabyte ps_malloc'd guest RAM,
-// and the board has 520KB of SRAM with its 8MB PSRAM on plain GPIOs (not memory-mapped). The
-// shared dispatch/render/UI code links against src/picocalc/bigram_stubs.cpp instead.
-#if !defined(BOARD_PICOCALC)
+// Not built for the PicoCalc on an RP2040 (Cortex-M0+): its heap leaves ~75KB of guest RAM, too
+// little for DOS ("Configuration too large for memory"). The RP2350 runs it paged (fabgl/pcmem.h);
+// see BOARD_HAS_PCXT_CORE in board.h. The RP2040 links against src/picocalc/bigram_stubs.cpp.
+#if !(defined(BOARD_PICOCALC) && defined(__ARM_ARCH_6M__))
 /*
   Created by Fabrizio Di Vittorio (fdivitto2013@gmail.com) - <http://www.fabgl.com>
   Copyright (c) 2019-2022 Fabrizio Di Vittorio.
@@ -32,6 +32,14 @@
 #include "bios.h"
 #include "machine.h"
 #include "i8086.h"
+#include "pcmem.h"
+
+// Guest memory through pcmem (flat 1MB buffer, or 4KB pages on the PicoCalc -- see pcmem.h).
+//   MEMB(a): guest byte as an lvalue (writes to ROM/unbacked pages are dropped)
+//   MEMP(a): host pointer -- only for structures that never cross a page and always sit in RAM with
+//            natural alignment: the IVT, the BIOS data area (page 0) and the EBDA (0x9FC00)
+#define MEMB(a) pcmem::ref8(a)
+#define MEMP(a) (&pcmem::ref8(a))
 
 
 using fabgl::i8086;
@@ -46,8 +54,15 @@ uint8_t *pcxtReadBiosRom(size_t *outLen);   // src/pcxt/pcxt.cpp
 static const uint8_t *biosrom    = nullptr;
 static size_t         biosromLen = 0;
 
+#if PCXT_PAGED_MEM
+size_t pcxtReadBiosRomInto(uint8_t *dst, size_t maxLen);   // src/pcxt/pcxt.cpp
+#endif
+
 static bool ensureBiosLoaded() {
   if (biosrom) return true;
+#if PCXT_PAGED_MEM
+  return false;                 // only BIOS::init loads it (into guest memory)
+#endif
   biosrom = pcxtReadBiosRom(&biosromLen);
   return biosrom != nullptr;
 }
@@ -90,6 +105,14 @@ void BIOS::init(Machine * machine)
   m_MC146818  = m_machine->getMC146818();
 
 	// copy bios (from /roms/pcxt/bios.bin; pcxtReadBiosRom already logs if it's missing)
+#if PCXT_PAGED_MEM
+  // PicoCalc: no RAM to spare for a second copy -- read the image straight into the guest BIOS pages
+  // (one contiguous block, see pcxtSetup) and let biosrom point at it for pcBiosFont8x8(). The top
+  // page with the reset JMP is a constant (pcmem.cpp).
+  biosrom    = nullptr;
+  biosromLen = pcxtReadBiosRomInto(pcmem::wrPtr(BIOS_ADDR), PCXT_BIOS_MAXLEN);
+  if (biosromLen) biosrom = pcmem::rdPtr(BIOS_ADDR);
+#else
   if (ensureBiosLoaded()) memcpy(m_memory + BIOS_ADDR, biosrom, biosromLen);
 
   // setup bootstrap code (starting from 0xFFFF0)
@@ -99,13 +122,14 @@ void BIOS::init(Machine * machine)
   m_memory[0xffff2] = BIOS_OFF >> 8;
   m_memory[0xffff3] = BIOS_SEG & 0xff;
   m_memory[0xffff4] = BIOS_SEG >> 8;
+#endif
 }
 
 
 void BIOS::reset()
 {
   m_kbdScancodeComp = 0;
-  m_memory[BIOS_DATAAREA_ADDR + BIOS_NUMHD] = (bool)(m_machine->disk(2)) + (bool)(m_machine->disk(3));
+  MEMB(BIOS_DATAAREA_ADDR + BIOS_NUMHD) = (bool)(m_machine->disk(2)) + (bool)(m_machine->disk(3));
 }
 
 
@@ -117,7 +141,7 @@ void BIOS::reset()
 uint32_t BIOS::getDriveMediaTableAddr(int drive)
 {
   int intNum = drive < 2 ? 0x1e : (drive == 2 ? 0x41 : 0x46);
-  uint16_t * intAddr = (uint16_t*)(m_memory + intNum * 4);
+  uint16_t * intAddr = (uint16_t*)MEMP(intNum * 4);
   return intAddr[0] + intAddr[1] * 16;
 }
 
@@ -202,16 +226,16 @@ void BIOS::setDriveMediaType(int drive, MediaType media)
     }
     if (m_memory && drive < 2) {
       // BIOS data area
-      m_memory[BIOS_DATAAREA_ADDR + BIOS_DRIVE0MEDIATYPE + drive] = knownMedia | doubleStepping | dataRate | defs;
-      //printf("%05X = %02X\n", BIOS_DATAAREA_ADDR + BIOS_DRIVE0MEDIATYPE + drive, m_memory[BIOS_DATAAREA_ADDR + BIOS_DRIVE0MEDIATYPE + drive]);
+      MEMB(BIOS_DATAAREA_ADDR + BIOS_DRIVE0MEDIATYPE + drive) = knownMedia | doubleStepping | dataRate | defs;
+      //printf("%05X = %02X\n", BIOS_DATAAREA_ADDR + BIOS_DRIVE0MEDIATYPE + drive, MEMB(BIOS_DATAAREA_ADDR + BIOS_DRIVE0MEDIATYPE + drive));
 
       // INT 1E
       uint32_t maddr = getDriveMediaTableAddr(drive);
-      m_memory[maddr + 0x04] = m_machine->diskSectors(drive);
+      MEMB(maddr + 0x04) = m_machine->diskSectors(drive);
 
       // original INT 1E (returned in ES:DI, int 13h, serv 08h)
-      m_memory[m_origInt1EAddr + 0x04] = m_machine->diskSectors(drive);
-      m_memory[m_origInt1EAddr + 0x0b] = m_machine->diskCylinders(drive) - 1;
+      MEMB(m_origInt1EAddr + 0x04) = m_machine->diskSectors(drive);
+      MEMB(m_origInt1EAddr + 0x0b) = m_machine->diskCylinders(drive) - 1;
     }
 
   } else if (media == HDD) {
@@ -220,9 +244,9 @@ void BIOS::setDriveMediaType(int drive, MediaType media)
 
     // fill tables pointed by INT 41h or 46h
     uint32_t mtableAddr = getDriveMediaTableAddr(drive);
-    *(uint16_t*)(m_memory + mtableAddr + 0x00) = m_machine->diskCylinders(drive);
-    *(uint8_t*)(m_memory + mtableAddr + 0x02)  = m_machine->diskHeads(drive);
-    *(uint8_t*)(m_memory + mtableAddr + 0x0e)  = m_machine->diskSectors(drive);
+    pcmem::wr16(mtableAddr + 0x00, m_machine->diskCylinders(drive));
+    pcmem::wr8(mtableAddr + 0x02, m_machine->diskHeads(drive));
+    pcmem::wr8(mtableAddr + 0x0e, m_machine->diskSectors(drive));
 
   }
 }
@@ -348,7 +372,7 @@ bool BIOS::processScancode(int scancode, uint16_t * syscode)
   *syscode = 0xffff;
 
   // 3 = RALT, 2 = RCTRL, 1 = E0, 0 = E1
-  uint8_t * mode = m_memory + BIOS_DATAAREA_ADDR + BIOS_KBDMODE;
+  uint8_t * mode = MEMP(BIOS_DATAAREA_ADDR + BIOS_KBDMODE);
 
   // save and reset e0 and e1 flags
   bool e0 = *mode & 0x02;
@@ -373,15 +397,15 @@ bool BIOS::processScancode(int scancode, uint16_t * syscode)
   //printf("  e0 = %d, down = %d\n", e0, down);
 
   // 7 = INS ON, 6 = CAPS ON, 5 = NUMLCK ON, 4 = SCRLCK ON, 3 = ALT, 2 = CTRL, 1 = LSHIFT, 0 = RSHIFT
-  uint8_t * flags1 = m_memory + BIOS_DATAAREA_ADDR + BIOS_KBDSHIFTFLAGS1;
+  uint8_t * flags1 = MEMP(BIOS_DATAAREA_ADDR + BIOS_KBDSHIFTFLAGS1);
 
   // 7 = INS, 6 = CAPS, 5 = NUMLCK, 4 = SCRLCK, 3 = CTRL+NUMLCK ON (PAUSE), 2 = SYSREQ, 1 = LALT, 0 = LCTRL
-  uint8_t * flags2 = m_memory + BIOS_DATAAREA_ADDR + BIOS_KBDSHIFTFLAGS2;
+  uint8_t * flags2 = MEMP(BIOS_DATAAREA_ADDR + BIOS_KBDSHIFTFLAGS2);
 
   // 2 = CAPS LED, 1 = NUMLCK LED, 0 = SCRLCK LED
-  uint8_t * LEDs   = m_memory + BIOS_DATAAREA_ADDR + BIOS_KBDLEDS;
+  uint8_t * LEDs   = MEMP(BIOS_DATAAREA_ADDR + BIOS_KBDLEDS);
 
-  uint8_t * altKeypadEntry = m_memory + BIOS_DATAAREA_ADDR + BIOS_KBDALTKEYPADENTRY;
+  uint8_t * altKeypadEntry = MEMP(BIOS_DATAAREA_ADDR + BIOS_KBDALTKEYPADENTRY);
 
   if (e0) {
     // extended code (0xe0 ...)
@@ -405,7 +429,7 @@ bool BIOS::processScancode(int scancode, uint16_t * syscode)
       case 0x37:
         // not shifts, PRINTSCREEN
         if (down && (*flags1 & 0x0f) == 0)
-          m_memory[BIOS_DATAAREA_ADDR + BIOS_PRINTSCREENFLAG] = 1;
+          MEMB(BIOS_DATAAREA_ADDR + BIOS_PRINTSCREENFLAG) = 1;
         // ALT + PRINTSCREEN = SYSREQ
         else if (*flags1 & 0x08)
           *flags2 |= 0x04;
@@ -413,7 +437,7 @@ bool BIOS::processScancode(int scancode, uint16_t * syscode)
       // CTRL + BREAK (CTRL + PAUSE)
       case 0x46:
         emptyKbdBuffer();
-        m_memory[BIOS_DATAAREA_ADDR + BIOS_CTRLBREAKFLAG] = 0x80;
+        MEMB(BIOS_DATAAREA_ADDR + BIOS_CTRLBREAKFLAG) = 0x80;
         break;
       // bypass (e0 2a / e0 aa)
       case 0x2a:
@@ -532,11 +556,11 @@ bool BIOS::processScancode(int scancode, uint16_t * syscode)
 bool BIOS::storeKeyInKbdBuffer(uint16_t syscode)
 {
   // check space in BIOS keyboard buffer
-  auto head = (uint16_t*)(m_memory + BIOS_DATAAREA_ADDR + BIOS_KBDBUFHEAD);
-  auto tail = (uint16_t*)(m_memory + BIOS_DATAAREA_ADDR + BIOS_KBDBUFTAIL);
+  auto head = (uint16_t*)(MEMP(BIOS_DATAAREA_ADDR + BIOS_KBDBUFHEAD));
+  auto tail = (uint16_t*)(MEMP(BIOS_DATAAREA_ADDR + BIOS_KBDBUFTAIL));
   if (*head - 2 != *tail && (*head != BIOS_KBDBUF || *tail != BIOS_KBDBUF + 30)) {
     // insert key into the keyboard buffer
-    *(uint16_t*)(m_memory + BIOS_DATAAREA_ADDR + *tail) = syscode;
+    pcmem::wr16(BIOS_DATAAREA_ADDR + *tail, syscode);
     *tail = (*tail == BIOS_KBDBUF + 30 ? BIOS_KBDBUF : *tail + 2);
     return true;  // success
   }
@@ -557,8 +581,8 @@ bool BIOS::storeKeyInKbdBuffer(uint16_t syscode)
 //    5 : SYSREQ      (ALT + PRINTSCREEN), down (AL = 0), up (AL = 1)
 void BIOS::getKeyFromKeyboard()
 {
-  uint8_t * flags1 = m_memory + BIOS_DATAAREA_ADDR + BIOS_KBDSHIFTFLAGS1;
-  uint8_t * flags2 = m_memory + BIOS_DATAAREA_ADDR + BIOS_KBDSHIFTFLAGS2;
+  uint8_t * flags1 = MEMP(BIOS_DATAAREA_ADDR + BIOS_KBDSHIFTFLAGS1);
+  uint8_t * flags2 = MEMP(BIOS_DATAAREA_ADDR + BIOS_KBDSHIFTFLAGS2);
   // saves current pause state
   bool onPause = *flags2 & 0x08;
   // update keyboard decoding state
@@ -580,7 +604,7 @@ void BIOS::getKeyFromKeyboard()
   // check for special syskeys
   if ((*flags1 & 0x04) && (*flags1 & 0x08) && (syscode == 0x53e0 || syscode == 0x93e0 || syscode == 0xa300)) {
     i8086::setAH(2);
-  } else if (m_memory[BIOS_DATAAREA_ADDR + BIOS_PRINTSCREENFLAG] == 1) {
+  } else if (MEMB(BIOS_DATAAREA_ADDR + BIOS_PRINTSCREENFLAG) == 1) {
     i8086::setAH(3);
   } else if (syscode == 0x0000) {
     i8086::setAH(4);
@@ -623,13 +647,13 @@ void BIOS::getKeyFromBuffer()
   // return value is not valid (ZF = 1)
   i8086::setFlagZF(1);
 
-  auto head = (uint16_t*)(m_memory + BIOS_DATAAREA_ADDR + BIOS_KBDBUFHEAD);
-  auto tail = (uint16_t*)(m_memory + BIOS_DATAAREA_ADDR + BIOS_KBDBUFTAIL);
+  auto head = (uint16_t*)(MEMP(BIOS_DATAAREA_ADDR + BIOS_KBDBUFHEAD));
+  auto tail = (uint16_t*)(MEMP(BIOS_DATAAREA_ADDR + BIOS_KBDBUFTAIL));
 
   if (*head != *tail) {
 
     // get key from buffer head
-    uint16_t k = * (uint16_t*) (m_memory + BIOS_DATAAREA_ADDR + *head);
+    uint16_t k = pcmem::rd16(BIOS_DATAAREA_ADDR + *head);
 
     bool filtered = false;
 
@@ -661,7 +685,7 @@ void BIOS::getKeyFromBuffer()
   // update LEDs
   bool numLockLED, capsLockLED, scrollLockLED;
   m_keyboard->getLEDs(&numLockLED, &capsLockLED, &scrollLockLED);
-  uint8_t LEDs = m_memory[BIOS_DATAAREA_ADDR + BIOS_KBDLEDS];
+  uint8_t LEDs = MEMB(BIOS_DATAAREA_ADDR + BIOS_KBDLEDS);
   if (numLockLED != (bool)(LEDs & 0x02) || capsLockLED != (bool)(LEDs & 0x04) || scrollLockLED != (bool)(LEDs & 0x01))
     m_keyboard->setLEDs((bool)(LEDs & 0x02), (bool)(LEDs & 0x04), (bool)(LEDs & 0x01));
 }
@@ -669,8 +693,8 @@ void BIOS::getKeyFromBuffer()
 
 void BIOS::emptyKbdBuffer()
 {
-  auto head = (uint16_t*)(m_memory + BIOS_DATAAREA_ADDR + BIOS_KBDBUFHEAD);
-  auto tail = (uint16_t*)(m_memory + BIOS_DATAAREA_ADDR + BIOS_KBDBUFTAIL);
+  auto head = (uint16_t*)(MEMP(BIOS_DATAAREA_ADDR + BIOS_KBDBUFHEAD));
+  auto tail = (uint16_t*)(MEMP(BIOS_DATAAREA_ADDR + BIOS_KBDBUFTAIL));
   *tail = *head;
 }
 
@@ -681,9 +705,9 @@ void BIOS::emptyKbdBuffer()
 // output AL or AX
 void BIOS::getKeyboardFlags()
 {
-  uint8_t * flags1 = m_memory + BIOS_DATAAREA_ADDR + BIOS_KBDSHIFTFLAGS1;
-  uint8_t * flags2 = m_memory + BIOS_DATAAREA_ADDR + BIOS_KBDSHIFTFLAGS2;
-  uint8_t * mode   = m_memory + BIOS_DATAAREA_ADDR + BIOS_KBDMODE;
+  uint8_t * flags1 = MEMP(BIOS_DATAAREA_ADDR + BIOS_KBDSHIFTFLAGS1);
+  uint8_t * flags2 = MEMP(BIOS_DATAAREA_ADDR + BIOS_KBDSHIFTFLAGS2);
+  uint8_t * mode   = MEMP(BIOS_DATAAREA_ADDR + BIOS_KBDMODE);
   if (i8086::AL() & 1)
     i8086::setAH( (*flags2 & 0xf3) | (*mode & 0x0c) );
   i8086::setAL(*flags1);
@@ -794,7 +818,7 @@ void BIOS::pointingDeviceInterface()
         m_mouse->setSampleRate(100);              // 100 reports/second
         m_mouse->setResolution(2);                // 4 counts/millimeter
         m_mouse->setScaling(1);                   // 1:1 scaling
-        uint8_t * EBDA = m_memory + EBDA_ADDR;
+        uint8_t * EBDA = MEMP(EBDA_ADDR);
         EBDA[EBDA_DRIVER_OFFSET] = 0x0000;
         EBDA[EBDA_DRIVER_SEG]    = 0x0000;
         EBDA[EBDA_FLAGS1]        = 0x00;
@@ -835,7 +859,7 @@ void BIOS::pointingDeviceInterface()
       //    ES:BX : Pointer to application-program's device driver
       case 0x07:
       {
-        uint8_t * EBDA = m_memory + EBDA_ADDR;
+        uint8_t * EBDA = MEMP(EBDA_ADDR);
         *(uint16_t*)(EBDA + EBDA_DRIVER_OFFSET) = i8086::BX();
         *(uint16_t*)(EBDA + EBDA_DRIVER_SEG)    = i8086::ES();
         EBDA[EBDA_FLAGS2] |= 0x80;  // set handler installed flag
@@ -865,6 +889,43 @@ static uint8_t BCDtoByte(uint8_t v)
 }
 
 
+// Disk <-> guest memory transfer for INT 13h; returns the bytes moved. FLAT: one call straight into
+// guest RAM. PAGED: split at 4KB page boundaries (the pages are not contiguous in host memory); a
+// page that is not writable (ROM / unbacked) goes through a bounce buffer and the data is dropped.
+uint32_t BIOS::diskXfer(bool write, int drive, uint64_t pos, uint32_t dest, uint32_t count)
+{
+#if PCXT_PAGED_MEM
+  static uint8_t bounce[512];
+  uint32_t done = 0;
+  while (done < count) {
+    uint32_t a = (dest + done) & 0xFFFFF;
+    uint32_t n = pcmem::pageLeft(a);
+    if (n > count - done)
+      n = count - done;
+    uint8_t * p = pcmem::wrPtr(a);
+    int r;
+    if (p) {
+      r = write ? m_machine->diskWrite(drive, pos + done, p, n) : m_machine->diskRead(drive, pos + done, p, n);
+    } else {
+      if (n > sizeof(bounce))
+        n = sizeof(bounce);
+      if (write)
+        pcmem::copyOut(bounce, a, n);
+      r = write ? m_machine->diskWrite(drive, pos + done, bounce, n) : m_machine->diskRead(drive, pos + done, bounce, n);
+    }
+    if (r <= 0)
+      break;
+    done += r;
+    if ((uint32_t)r < n)
+      break;
+  }
+  return done;
+#else
+  return write ? m_machine->diskWrite(drive, pos, m_memory + dest, count) : m_machine->diskRead(drive, pos, m_memory + dest, count);
+#endif
+}
+
+
 // synchronize system ticks with RTC
 void BIOS::syncTicksWithRTC()
 {
@@ -874,7 +935,7 @@ void BIOS::syncTicksWithRTC()
   int hh = BCDtoByte(m_MC146818->reg(0x04));
   int totSecs = ss + mm * 60 + hh * 3600 + 1000;
   int64_t pitTicks = (int64_t)totSecs * PIT_TICK_FREQ;
-  *(uint32_t*)(m_memory + BIOS_DATAAREA_ADDR + BIOS_SYSTICKS) = (uint32_t) (pitTicks / 65536);
+  *(uint32_t*)MEMP(BIOS_DATAAREA_ADDR + BIOS_SYSTICKS) = (uint32_t) (pitTicks / 65536);
 }
 
 
@@ -910,8 +971,8 @@ void BIOS::diskHandler_floppy()
 
     // Read Diskette Status
     case 0x01:
-      diskHandler_floppyExit(m_memory[BIOS_DATAAREA_ADDR + BIOS_DISKLASTSTATUS], false);
-      m_memory[BIOS_DATAAREA_ADDR + BIOS_DISKLASTSTATUS] = 0; // this function resets BIOS_DISKLASTSTATUS
+      diskHandler_floppyExit(MEMB(BIOS_DATAAREA_ADDR + BIOS_DISKLASTSTATUS), false);
+      MEMB(BIOS_DATAAREA_ADDR + BIOS_DISKLASTSTATUS) = 0; // this function resets BIOS_DISKLASTSTATUS
       return;
 
     // Read Diskette Sectors
@@ -932,9 +993,7 @@ void BIOS::diskHandler_floppy()
       }
       size_t sects = i8086::AL();
       if (service != 0x04) {
-        sects = service == 0x02 ?
-                  m_machine->diskRead(drive, pos, m_memory + dest, count) :
-                  m_machine->diskWrite(drive, pos, m_memory + dest, count);
+        sects = diskXfer(service == 0x03, drive, pos, dest, count);
         sects /= 512;
       }
       i8086::setAL(sects);
@@ -954,16 +1013,16 @@ void BIOS::diskHandler_floppy()
       int SPT = m_machine->diskSectors(drive);
       int tracksCount = m_machine->diskCylinders(drive);
 
-      uint8_t fillByte = m_memory[getDriveMediaTableAddr(drive) + 8];
+      uint8_t fillByte = MEMB(getDriveMediaTableAddr(drive) + 8);
 
       uint8_t * buf = (uint8_t*) malloc(512);
       memset(buf, fillByte, 512);
 
       for (int i = 0; i < sectsCountToFormat; ++i) {
-        int ttrack  = m_memory[tableAddr++];
-        int thead   = m_memory[tableAddr++];
-        int tsect   = m_memory[tableAddr++];
-        int tsectSz = 128 << m_memory[tableAddr++];
+        int ttrack  = MEMB(tableAddr++);
+        int thead   = MEMB(tableAddr++);
+        int tsect   = MEMB(tableAddr++);
+        int tsectSz = 128 << MEMB(tableAddr++);
         if (ttrack != track || thead > 1 || tsect > SPT || tsectSz != 512 || track >= tracksCount) {
           // error
           free(buf);
@@ -1135,7 +1194,7 @@ void BIOS::diskHandler_floppyExit(uint8_t err, bool setErrStat)
   i8086::setAH(err);
   i8086::setFlagCF(err ? 1 : 0);
   if (setErrStat)
-    m_memory[BIOS_DATAAREA_ADDR + BIOS_DISKLASTSTATUS] = err;
+    MEMB(BIOS_DATAAREA_ADDR + BIOS_DISKLASTSTATUS) = err;
 
   /*
   if (err > 0)
@@ -1166,8 +1225,8 @@ void BIOS::diskHandler_HD()
 
     // Read Disk Status
     case 0x01:
-      diskHandler_HDExit(m_memory[BIOS_DATAAREA_ADDR + BIOS_HDLASTSTATUS], false);
-      m_memory[BIOS_DATAAREA_ADDR + BIOS_HDLASTSTATUS] = 0; // this function resets BIOS_HDLASTSTATUS
+      diskHandler_HDExit(MEMB(BIOS_DATAAREA_ADDR + BIOS_HDLASTSTATUS), false);
+      MEMB(BIOS_DATAAREA_ADDR + BIOS_HDLASTSTATUS) = 0; // this function resets BIOS_HDLASTSTATUS
       return;
 
     // Read Fixed Disk Sectors
@@ -1188,9 +1247,7 @@ void BIOS::diskHandler_HD()
       }
       size_t sects = i8086::AL();
       if (service != 0x04) {
-        sects = service == 0x02 ?
-                  m_machine->diskRead(drive, pos, m_memory + dest, count) :
-                  m_machine->diskWrite(drive, pos, m_memory + dest, count);
+        sects = diskXfer(service == 0x03, drive, pos, dest, count);
         sects /= 512;
       }
       i8086::setAL(sects);
@@ -1223,9 +1280,9 @@ void BIOS::diskHandler_HD()
 /*
         printf("CH = %02X CL = %02X DH = %02X DL = %02X\n", i8086::CH(), i8086::CL(), i8086::DH(), i8086::DL());
         printf("ES = %04X  DI = %04X\n", i8086::ES(), i8086::DI());
-        printf("ES:DI [00-01] = %d\n", (int) *(uint16_t*)(m_memory + i8086::ES() * 16 + i8086::DI() + 0x00));
-        printf("ES:DI    [02] = %d\n", (int) *(uint8_t*)(m_memory + i8086::ES() * 16 + i8086::DI() + 0x02));
-        printf("ES:DI    [0e] = %d\n", (int) *(uint8_t*)(m_memory + i8086::ES() * 16 + i8086::DI() + 0x0e));
+        printf("ES:DI [00-01] = %d\n", (int) pcmem::rd16(i8086::ES() * 16 + i8086::DI() + 0x00));
+        printf("ES:DI    [02] = %d\n", (int) pcmem::rd8(i8086::ES() * 16 + i8086::DI() + 0x02));
+        printf("ES:DI    [0e] = %d\n", (int) pcmem::rd8(i8086::ES() * 16 + i8086::DI() + 0x0e));
 */
         diskHandler_HDExit(0x00, true);
       } else {
@@ -1282,7 +1339,7 @@ void BIOS::diskHandler_HDExit(uint8_t err, bool setErrStat)
   i8086::setAH(err);
   i8086::setFlagCF(err ? 1 : 0);
   if (setErrStat)
-    m_memory[BIOS_DATAAREA_ADDR + BIOS_HDLASTSTATUS] = err;
+    MEMB(BIOS_DATAAREA_ADDR + BIOS_HDLASTSTATUS) = err;
 }
 
 
@@ -1334,4 +1391,4 @@ void BIOS::videoHandlerEntry()
 
   }
 }
-#endif // !defined(BOARD_PICOCALC)
+#endif // !(BOARD_PICOCALC && RP2040)

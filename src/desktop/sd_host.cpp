@@ -52,8 +52,11 @@ uint64_t sdFreeBytes() {
   return (uint64_t)FSTYPE.totalBytes() - (uint64_t)FSTYPE.usedBytes();
 }
 
+bool sdCardMounted = false;   // FSSetup() "mounted" the host folder (read by video.cpp / sdserial.cpp)
+
 void FSSetup() {
   if (!gBusLock) gBusLock = xSemaphoreCreateMutex();
+  sdCardMounted = true;
   hdAttached  = HdDisk;
   diskAttached = !HdDisk;
 

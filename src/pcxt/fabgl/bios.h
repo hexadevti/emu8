@@ -43,6 +43,10 @@ constexpr int DISKCOUNT = 4;
 #define BIOS_SEG             0xF000
 #define BIOS_OFF             0x0100
 #define BIOS_ADDR            (BIOS_SEG * 16 + BIOS_OFF)
+// PicoCalc (paged guest memory): the BIOS image is read straight into guest pages F0..F4
+// (0xF0000..0xF4FFF), so it must fit in 20KB minus the 0x100 offset.
+#define PCXT_BIOS_PAGES      5
+#define PCXT_BIOS_MAXLEN     (PCXT_BIOS_PAGES * 4096 - BIOS_OFF)
 
 
 // BIOS Data Area
@@ -139,6 +143,7 @@ private:
   void pointingDeviceInterface();
 
   void syncTicksWithRTC();
+  uint32_t diskXfer(bool write, int drive, uint64_t pos, uint32_t dest, uint32_t count);
 
   void diskHandler_floppy();
   bool diskHandler_calcAbsAddr(int drive, uint32_t * pos, uint32_t * dest, uint32_t * count);

@@ -114,8 +114,9 @@ extern std::vector<std::string> nesFiles;
 extern std::vector<std::string> atariFiles;   // Atari 2600 .a26/.bin ROMs on SD
 extern std::vector<std::string> msxFiles;      // MSX1 .rom/.mx1/.dsk images on SD
 extern std::vector<std::string> smsFiles;      // SMS .sms/.bin ROM images on SD
+extern std::vector<std::string> colecoFiles;   // ColecoVision .col/.rom/.bin cartridges on SD
+extern std::vector<std::string> zxFiles;       // ZX Spectrum .sna/.z80/.tap/.tzx on SD
 extern std::vector<std::string> pcFiles;       // PCXT .img/.ima/.dsk/.vhd disk images on SD
-extern std::vector<std::string> tiny386Files;  // tiny386 .img/.ima/.vhd/.hdd disk images on SD
 
 // Board Pins, capability macros, and the display backend selection now live in board.h
 // (included above). Pins: SD_*, KEYBOARD_*, ANALOG_*, LED_PIN, DIGITAL_BUTTON12_PIN, SPEAKER_PIN.
@@ -156,7 +157,7 @@ extern char keymem;
 #define JOY_MAX 1024
 #define JOY_MID 512
 #define JOY_MIN 0
-#define EEPROM_SIZE 1792   // ... + Tiny386FileNameA (1408, A:) + the Apple IIe's own disk/HD names (1536, 1664)
+#define EEPROM_SIZE 1792   // ... + the ColecoVision cartridge name (1280) + the ZX Spectrum file name (1408) + the Apple IIe's own disk/HD names (1536, 1664)
 extern int fnSelected;
 extern int joystickCycles0;
 extern int joystickCycles1;
@@ -215,7 +216,7 @@ extern uint8_t volume;
 // which is not an emulator: the SD card file manager as a boot mode of its own (sdserial.cpp), so it
 // has the whole heap to itself. It is entered for one boot only (sdManagerBootRequested) and never
 // saved, so leaving it lands back on the system the user was running.
-enum Platform : uint8_t { PLATFORM_APPLE2 = 0, PLATFORM_C64 = 1, PLATFORM_NES = 2, PLATFORM_ATARI = 3, PLATFORM_IIGS = 4, PLATFORM_MSX = 5, PLATFORM_SMS = 6, PLATFORM_PCXT = 7, PLATFORM_TINY386 = 8, PLATFORM_SDMANAGER = 9 };
+enum Platform : uint8_t { PLATFORM_APPLE2 = 0, PLATFORM_C64 = 1, PLATFORM_NES = 2, PLATFORM_ATARI = 3, PLATFORM_IIGS = 4, PLATFORM_MSX = 5, PLATFORM_SMS = 6, PLATFORM_PCXT = 7, PLATFORM_SDMANAGER = 8, PLATFORM_COLECO = 9, PLATFORM_ZX = 10 };
 extern uint8_t currentPlatform;
 
 // Log Config
@@ -239,7 +240,9 @@ extern int logLineCount;
 #define MsxSpeedEEPROMaddress 13       // MSX: 1 = FAST (uncapped) / 0 = NORMAL (paced to 3.58 MHz)
 #define SmsSpeedEEPROMaddress 14       // SMS: 1 = FAST (uncapped) / 0 = NORMAL (paced to 3.58 MHz)
 #define PcxtSpeedEEPROMaddress 15      // PCXT: reserved speed flag (currently always uncapped)
+#define ColecoSpeedEEPROMaddress 16    // Coleco: 1 = FAST (uncapped) / 0 = NORMAL (paced to 3.58 MHz)
 #define NesSpeedEEPROMaddress 17       // NES: 1 = FAST (uncapped) / 0 = NORMAL (paced ~60fps/1.79MHz)
+#define ZxSpeedEEPROMaddress 21        // ZX Spectrum: 1 = FAST (uncapped) / 0 = NORMAL (paced to 3.5 MHz)
 // The Apple IIe keeps its own copy of the Apple-only settings (DEVICE, SPEED, the disk and HD
 // images); the addresses above without "IIe" are the II+'s (and the IIGS's). See eprom.cpp.
 #define IIeHdDiskEEPROMaddress 18
@@ -255,8 +258,8 @@ extern int logLineCount;
 #define SmsFileNameEEPROMaddress 896   // SMS: last-loaded .sms/.bin ROM (auto-loaded on boot)
 #define PcxtFileNameEEPROMaddress 1024 // PCXT: last-mounted A: floppy image (auto-mounted on boot)
 #define PcxtHdFileNameEEPROMaddress 1152 // PCXT: last-mounted C: hard-disk image (auto-mounted on boot)
-#define Tiny386FileNameEEPROMaddress 1280 // tiny386: last C: hard-disk image (auto-mounted on boot)
-#define Tiny386FileNameAEEPROMaddress 1408 // tiny386: last A: floppy image (auto-mounted on boot)
+#define ColecoFileNameEEPROMaddress 1280 // Coleco: last-loaded .col/.rom cartridge (auto-loaded on boot)
+#define ZxFileNameEEPROMaddress 1408   // ZX Spectrum: last-loaded .sna/.z80/.tap/.tzx (auto-loaded on boot)
 #define IIeDiskFileNameEEPROMaddress 1536  // Apple IIe: last .dsk (the II+'s is DiskFileNameEEPROMaddress)
 #define IIeHdFileNameEEPROMaddress 1664    // Apple IIe: last HD image (the II+'s is HdFileNameEEPROMaddress)
 extern String selectedDiskFileName;
@@ -270,13 +273,16 @@ extern float msxMeasuredMhz;         // MSX: measured uncapped Z80 speed (one-ti
 extern String selectedSmsFileName;   // SMS: currently-loaded .sms/.bin ROM (settings file browser marker)
 extern bool smsFast;                 // SMS: true = run uncapped (FAST), false = pace to real 3.58 MHz
 extern float smsMeasuredMhz;         // SMS: measured uncapped Z80 speed (one-time boot benchmark)
+extern String selectedColecoFileName;// Coleco: currently-loaded .col/.rom cartridge (settings file browser marker)
+extern bool colecoFast;              // Coleco: true = run uncapped (FAST), false = pace to real 3.58 MHz
+extern float colecoMeasuredMhz;      // Coleco: measured uncapped Z80 speed (one-time boot benchmark)
+extern String selectedZxFileName;    // ZX Spectrum: currently-loaded snapshot / tape (settings file browser marker)
+extern bool zxFast;                  // ZX Spectrum: true = run uncapped (FAST), false = pace to real 3.5 MHz
+extern float zxMeasuredMhz;          // ZX Spectrum: measured uncapped Z80 speed (one-time boot benchmark)
 extern String selectedPcFileName;    // PCXT: A: floppy image (settings file browser marker)
 extern String selectedPcHdFileName;  // PCXT: C: hard-disk image (auto-mounted on boot)
 extern bool pcFast;                  // PCXT: reserved (8086 always runs uncapped for now)
 extern float pcMeasuredMhz;          // PCXT: measured 8086 equivalent speed (one-time boot benchmark)
-extern String selectedTiny386FileName; // tiny386: C: hard-disk image (settings browser marker / auto-mount)
-extern String selectedTiny386FileNameA; // tiny386: A: floppy image (settings browser marker / auto-mount)
-extern float tiny386MeasuredMhz;     // tiny386: measured i386 throughput (one-time boot benchmark)
 extern float appleMeasuredMhz;       // Apple II: live measured 6502 speed (updated in cpuLoop)
 extern float appleClockMhz;          // Apple II: target clock when throttled (1.0 = stock 1 MHz)
 extern volatile int  g_pcSpkFreq;    // PCXT PC-speaker: PIT ch2 frequency (Hz), read by the audio ISR

@@ -257,10 +257,48 @@ static void oskBuildLayoutMsx()
   oskAddKeyM(COLX, r5y, COLW, OSK_ROWH, 0, 0, OSK_ACT_ESC, 2, 7);                    // ESC (row7,col2)
 }
 
+// ZX Spectrum keyboard: mcol = bit (0-4), mrow = half-row (0-7, see zx.h). SHIFT/CTRL are the sticky
+// CAPS SHIFT / SYMBOL SHIFT; DEL, the cursors and BRK press CAPS SHIFT with their key (CAPS+0, CAPS+5-8,
+// CAPS+SPACE) like the Spectrum+ keyboard's extra keys.
+static void oskBuildLayoutZx()
+{
+  oskKeyCount = 0;
+  const int16_t r1y = OSK_Y, r2y = OSK_Y + OSK_ROWH, r3y = OSK_Y + 2 * OSK_ROWH,
+                r4y = OSK_Y + 3 * OSK_ROWH, r5y = OSK_Y + 4 * OSK_ROWH;
+  const int16_t KBW = 264, COLX = KBW, COLW = 320 - KBW;
+
+  static const int8_t c1[] = {0,1,2,3,4,4,3,2,1,0}, q1[] = {3,3,3,3,3,4,4,4,4,4};   // 1234567890
+  oskAddRowC64("1234567890", c1, q1, r1y, 0, 238);
+  oskAddKeyM(238, r1y, 26, OSK_ROWH, 0, 0, OSK_ACT_DEL, 0, 4);                       // CAPS+0
+
+  static const int8_t c2[] = {0,1,2,3,4,4,3,2,1,0}, q2[] = {2,2,2,2,2,5,5,5,5,5};   // QWERTYUIOP
+  oskAddRowC64("QWERTYUIOP", c2, q2, r2y, 0, 264);
+
+  static const int8_t c3[] = {0,1,2,3,4,4,3,2,1}, q3[] = {1,1,1,1,1,6,6,6,6};       // ASDFGHJKL
+  oskAddRowC64("ASDFGHJKL", c3, q3, r3y, 0, 229);
+  oskAddKeyM(229, r3y, 35, OSK_ROWH, 0, 0, OSK_ACT_RETURN, 0, 6);                    // ENTER
+
+  static const int8_t c4[] = {1,2,3,4,4,3,2}, q4[] = {0,0,0,0,7,7,7};               // ZXCVBNM
+  oskAddRowC64("ZXCVBNM", c4, q4, r4y, 0, 264);
+
+  int16_t x = 0;
+  oskAddKey (x, r5y, 36, OSK_ROWH, 0,   0,   OSK_ACT_SHIFT);          x += 36;       // sticky CAPS SHIFT
+  oskAddKey (x, r5y, 36, OSK_ROWH, 0,   0,   OSK_ACT_CTRL);           x += 36;       // sticky SYMBOL SHIFT
+  oskAddKeyM(x, r5y, 88, OSK_ROWH, ' ', ' ', OSK_ACT_SPACE,   0, 7);  x += 88;
+  oskAddKeyM(x, r5y, 26, OSK_ROWH, 0,   0,   OSK_ACT_LEFT,    4, 3);  x += 26;       // CAPS+5
+  oskAddKeyM(x, r5y, 26, OSK_ROWH, 0,   0,   OSK_ACT_DOWN,    4, 4);  x += 26;       // CAPS+6
+  oskAddKeyM(x, r5y, 26, OSK_ROWH, 0,   0,   OSK_ACT_UP,      3, 4);  x += 26;       // CAPS+7
+  oskAddKeyM(x, r5y, 26, OSK_ROWH, 0,   0,   OSK_ACT_RIGHT,   2, 4);  x += 26;       // CAPS+8
+
+  oskAddKey (COLX, r1y, COLW, OSK_ROWH, 0, 0, OSK_ACT_MENU);
+  oskAddKeyM(COLX, r2y, COLW, OSK_ROWH, 0, 0, OSK_ACT_ESC, 0, 7);                    // BREAK = CAPS+SPACE
+}
+
 void oskBuildLayout()
 {
   if (currentPlatform == PLATFORM_C64) { oskBuildLayoutC64(); return; }
   if (currentPlatform == PLATFORM_MSX) { oskBuildLayoutMsx(); return; }
+  if (currentPlatform == PLATFORM_ZX)  { oskBuildLayoutZx();  return; }
 
   oskKeyCount = 0;
 
@@ -327,6 +365,12 @@ void oskSetup()
 static void oskKeyLabel(int i, char *out)
 {
   const OskKey &k = oskKeys[i];
+  if (currentPlatform == PLATFORM_ZX) {
+    if (k.act == OSK_ACT_SHIFT)  { strcpy(out, "CAPS"); return; }
+    if (k.act == OSK_ACT_CTRL)   { strcpy(out, "SYM");  return; }
+    if (k.act == OSK_ACT_ESC)    { strcpy(out, "BRK");  return; }
+    if (k.act == OSK_ACT_RETURN) { strcpy(out, "ENT");  return; }
+  }
   switch (k.act) {
     case OSK_ACT_SHIFT:  strcpy(out, "SHF");   break;
     case OSK_ACT_CTRL:   strcpy(out, "CTL");   break;
@@ -405,14 +449,6 @@ void oskRender()
 bool oskActive()
 {
   return osk_visible;
-}
-
-// True if the keyboard needs a repaint (just opened, a key pressed/released, or SHIFT/CTRL toggled).
-// Lets a heavy render path (tiny386 on the big P4 panel) skip the per-frame overlay flush while the
-// keyboard is idle, so touch stays responsive instead of being throttled by the 1024x600 composite.
-bool oskDirty()
-{
-  return osk_dirty;
 }
 
 // Raster geometry used by renderLoop (video.ino). When the keyboard is open the
@@ -677,50 +713,8 @@ static int oskHitTest(int16_t sx, int16_t sy)
 // ---------------------------------------------------------------------------
 // Keystroke injection (same mechanism as the PS/2 path: write keymem)
 // ---------------------------------------------------------------------------
-// tiny386 (HID/PS-2): map an OSK key to a USB HID usage and send make+break via the PS/2 path. SHIFT
-// and CTRL are sent as separate modifier keys (the guest tracks their state), so a shifted symbol is
-// SHIFT-down + key + SHIFT-up. The physical-key char is k.norm; shift/the layout's symbols come from
-// the modifier, not a different usage.
-static uint8_t oskAsciiToHid(char c)
-{
-  if (c >= 'A' && c <= 'Z') return 0x04 + (c - 'A');
-  if (c >= 'a' && c <= 'z') return 0x04 + (c - 'a');
-  if (c >= '1' && c <= '9') return 0x1E + (c - '1');
-  switch (c) {
-    case '0': return 0x27;  case '-': return 0x2D;  case '=': return 0x2E;
-    case '[': return 0x2F;  case ']': return 0x30;  case '\\': return 0x31;
-    case ';': return 0x33;  case '\'': return 0x34; case '`': return 0x35;
-    case ',': return 0x36;  case '.': return 0x37;  case '/': return 0x38;
-    case ' ': return 0x2C;
-  }
-  return 0;
-}
-static void oskInjectTiny386(int i)
-{
-  const OskKey &k = oskKeys[i];
-  uint8_t usage = 0;
-  switch (k.act) {
-    case OSK_ACT_RETURN: usage = 0x28; break;  case OSK_ACT_SPACE: usage = 0x2C; break;
-    case OSK_ACT_LEFT:   usage = 0x50; break;  case OSK_ACT_RIGHT: usage = 0x4F; break;
-    case OSK_ACT_UP:     usage = 0x52; break;  case OSK_ACT_DOWN:  usage = 0x51; break;
-    case OSK_ACT_ESC:    usage = 0x29; break;  case OSK_ACT_TAB:   usage = 0x2B; break;
-    case OSK_ACT_DEL:    usage = 0x2A; break;  // backspace
-    default:             usage = oskAsciiToHid(k.norm); break;
-  }
-  if (!usage) return;
-  bool sh = osk_shift, ct = osk_ctrl;
-  if (sh) tiny386KeyDown(0xE1, false, false, false);   // LShift
-  if (ct) tiny386KeyDown(0xE0, false, false, false);   // LCtrl
-  tiny386KeyDown(usage, sh, ct, false);
-  tiny386KeyUp(usage);
-  if (ct) tiny386KeyUp(0xE0);
-  if (sh) tiny386KeyUp(0xE1);
-  if (osk_shift || osk_ctrl) { osk_shift = false; osk_ctrl = false; osk_dirty = true; oskRender(); }  // one-shot
-}
-
 static void oskInject(int i)
 {
-  if (currentPlatform == PLATFORM_TINY386) { oskInjectTiny386(i); return; }
   const OskKey &k = oskKeys[i];
   uint8_t code;
   switch (k.act) {
@@ -806,10 +800,41 @@ static void oskMsxUp(int i)
   if (osk_ctrl)  { osk_ctrl  = false; osk_dirty = true; }
 }
 
+// ZX Spectrum: same sticky-modifier scheme as the MSX. CAPS SHIFT = (0,0), SYMBOL SHIFT = (7,1).
+static bool oskZxAutoCaps(int act) {
+  return act == OSK_ACT_DEL || act == OSK_ACT_ESC || act == OSK_ACT_LEFT || act == OSK_ACT_DOWN ||
+         act == OSK_ACT_UP  || act == OSK_ACT_RIGHT;
+}
+
+static void oskZxDown(int i)
+{
+  const OskKey &k = oskKeys[i];
+  if (k.act == OSK_ACT_HIDE)  { oskHide(); return; }
+  if (k.act == OSK_ACT_MENU)  { oskHide(); showHideOptionsWindow(); return; }
+  if (k.act == OSK_ACT_SHIFT) { osk_shift = !osk_shift; osk_dirty = true; oskRender(); return; }
+  if (k.act == OSK_ACT_CTRL)  { osk_ctrl  = !osk_ctrl;  osk_dirty = true; oskRender(); return; }
+  if (k.mcol >= 0) zxKey(k.mrow, k.mcol, true);
+  if (osk_shift || oskZxAutoCaps(k.act)) zxKey(0, 0, true);
+  if (osk_ctrl) zxKey(7, 1, true);
+  osk_pressedIdx = i;
+  oskDrawKey(i, true);
+}
+
+static void oskZxUp(int i)
+{
+  const OskKey &k = oskKeys[i];
+  if (k.mcol >= 0) zxKey(k.mrow, k.mcol, false);
+  zxKey(0, 0, false);
+  zxKey(7, 1, false);
+  if (osk_shift) { osk_shift = false; osk_dirty = true; }
+  if (osk_ctrl)  { osk_ctrl  = false; osk_dirty = true; }
+}
+
 static void oskHandleKey(int i)
 {
   if (currentPlatform == PLATFORM_C64) { oskC64Down(i); return; }
   if (currentPlatform == PLATFORM_MSX) { oskMsxDown(i); return; }
+  if (currentPlatform == PLATFORM_ZX)  { oskZxDown(i);  return; }
 
   const OskKey &k = oskKeys[i];
   switch (k.act) {
@@ -831,7 +856,7 @@ static void oskHandleKey(int i)
       break;
     case OSK_ACT_RESET:
       // Like a real Apple II: RESET alone does nothing; CTRL+RESET is a soft reset.
-      if (osk_ctrl) { oskHide(); if (currentPlatform == PLATFORM_TINY386) tiny386HardReset(); else cpuReset(); }
+      if (osk_ctrl) { oskHide(); cpuReset(); }
       else          { oskDrawKey(i, true); osk_pressedIdx = i; }   // just show the press
       break;
     case OSK_ACT_USR1:                 // reserved side-panel buttons: no action wired up yet
@@ -883,7 +908,8 @@ void oskPoll()
   // NES/Atari/SMS have no use for the on-screen keyboard (the buttons are game controls), so a
   // screen tap opens the settings menu directly. oskIgnoreCurrentTouch() on close stops the
   // lingering finger from immediately reopening it.
-  if (currentPlatform == PLATFORM_NES || currentPlatform == PLATFORM_ATARI || currentPlatform == PLATFORM_SMS) {
+  if (currentPlatform == PLATFORM_NES || currentPlatform == PLATFORM_ATARI || currentPlatform == PLATFORM_SMS ||
+      currentPlatform == PLATFORM_COLECO) {
     if (down && !osk_prevDown) showHideOptionsWindow();
     osk_prevDown = down;
     return;
@@ -919,6 +945,7 @@ void oskPoll()
     int p = osk_pressedIdx;
     if (currentPlatform == PLATFORM_C64) oskC64Up(p);   // release the matrix bits
     else if (currentPlatform == PLATFORM_MSX) oskMsxUp(p);
+    else if (currentPlatform == PLATFORM_ZX)  oskZxUp(p);
     osk_pressedIdx = -1;
     oskDrawKey(p, false);
   }

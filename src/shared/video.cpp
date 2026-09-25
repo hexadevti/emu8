@@ -164,6 +164,8 @@ static void hintText(const char **keys, const char **joy)
     case PLATFORM_NES:   *joy = "Arrows dpad   X=A  Z=B  Tab select  Enter start"; break;
     case PLATFORM_ATARI: *joy = "Arrows stick   Space fire   F4 select   F3 reset"; break;
     case PLATFORM_MSX:   *joy = "Arrows joystick   Space trigger";             break;
+    case PLATFORM_COLECO:*joy = "Arrows  Space/F4 L  X/F5 R  0-9 keypad  -=*  = #"; break;
+    case PLATFORM_ZX:    *joy = "Shift=CAPS  Ctrl/Alt=SYMBOL  F12 reset"; break;
     default:             *joy = "Arrows joystick   Space fire";                break;
   }
 }
@@ -295,7 +297,8 @@ static const SplashSystem splashSystems[] = {
   { "MSX",   PLATFORM_MSX,     -1, "SOON"   },
   { "SMS",   PLATFORM_SMS,     -1, "SOON"   },
   { "PCXT",  PLATFORM_PCXT,    -1, "SOON"   },
-  { "386",   PLATFORM_TINY386, -1, "SOON"   },
+  { "COLECO", PLATFORM_COLECO, -1, "SOON"   },
+  { "ZX48",  PLATFORM_ZX,      -1, "SOON"   },
   { "SD MGR", PLATFORM_SDMANAGER, -1, "N/A"  },   // not an emulator: the SD card file manager
 };
 #define SPLASH_N     ((int)(sizeof(splashSystems) / sizeof(splashSystems[0])))
@@ -322,10 +325,9 @@ static int splashHitTest(int16_t x, int16_t y)
   return -1;
 }
 
-// Which platforms this BOARD can actually run. IIGS / PC-XT / tiny386 each want 1-4MB of
+// Which platforms this BOARD can actually run. IIGS / PC-XT each want 1-4MB of
 // ps_malloc'd guest RAM, so they only exist where BOARD_HAS_BIGRAM_CORES is set (see the
-// matching #if gates in emu8.ino, which also keep their cores out of the link); tiny386
-// additionally only builds on the P4 / desktop. MSX / SMS go the same way wherever
+// matching #if gates in emu8.ino, which also keep their cores out of the link). MSX / SMS go the same way wherever
 // BOARD_HAS_MSX_CORE / BOARD_HAS_SMS_CORE is clear. Disabled buttons draw greyed with "SOON" and ignore taps.
 static bool splashEnabled(int i)
 {
@@ -335,16 +337,12 @@ static bool splashEnabled(int i)
   // a II+ and sets this; from then on the button is greyed "NO RAM" instead of lying.
   if (splashSystems[i].iie > 0 && apple2IIeUnavailable) return false;
   switch (splashSystems[i].platform) {
-    case PLATFORM_IIGS:
-    case PLATFORM_PCXT:     return BOARD_HAS_BIGRAM_CORES;
+    case PLATFORM_IIGS:     return BOARD_HAS_BIGRAM_CORES;
+    case PLATFORM_PCXT:     return BOARD_HAS_PCXT_CORE;
     case PLATFORM_MSX:      return BOARD_HAS_MSX_CORE;
     case PLATFORM_SMS:      return BOARD_HAS_SMS_CORE;
-    case PLATFORM_TINY386:
-#if defined(BOARD_JC1060P470) || defined(BOARD_DESKTOP)
-      return BOARD_HAS_BIGRAM_CORES;   // i386 PC: P4 / desktop only
-#else
-      return false;                    // S3 (not built here) / CYD (no PSRAM)
-#endif
+    case PLATFORM_COLECO:   return BOARD_HAS_COLECO_CORE;
+    case PLATFORM_ZX:       return BOARD_HAS_ZX_CORE;
     case PLATFORM_SDMANAGER:
 #if defined(BOARD_DESKTOP)
       return false;                    // the "card" is a host folder already (sdserial.cpp)
@@ -653,6 +651,25 @@ void renderLoop(void *pvParameters)
       continue;
     }
 
+    // ColecoVision startup overlay: no BIOS in /roms/coleco, or no cartridge picked yet. Touch is
+    // still polled so a tap opens SETTINGS (the cartridge browser).
+    if (currentPlatform == PLATFORM_COLECO && colecoRenderLoadWarning())
+    {
+      oskPoll();
+      Vertical_blankingOn_Off = true;
+      vTaskDelay(pdMS_TO_TICKS(20));
+      continue;
+    }
+
+    // ZX Spectrum startup overlay: no ROM in /roms/zxspectrum. (No tape is needed: it boots to BASIC.)
+    if (currentPlatform == PLATFORM_ZX && zxRenderLoadWarning())
+    {
+      oskPoll();
+      Vertical_blankingOn_Off = true;
+      vTaskDelay(pdMS_TO_TICKS(20));
+      continue;
+    }
+
     // Apple II startup overlay: held when the system ROMs are missing from /roms/apple2 on the SD card.
     if (currentPlatform == PLATFORM_APPLE2 && apple2RenderLoadWarning())
     {
@@ -782,6 +799,43 @@ void renderLoop(void *pvParameters)
       continue;
     }
 
+    // ColecoVision: the same TMS9918A picture as the MSX (256x192, fixed palette), centered.
+    if (currentPlatform == PLATFORM_COLECO)
+    {
+#if BOARD_DISPLAY_GFX
+      if (clearScr) { tft.fillScreen(TFT_BLACK); clearScr = false; }   // wipe border after a menu
+#endif
+      displaySetUiMode(false);
+      displaySetVideoRect(24, 192);
+      displaySetVideoFill(32, 256, true);
+      colecoRenderFrame();
+      Vertical_blankingOn_Off = true;
+#if defined(BOARD_PICOCALC)
+      vTaskDelay(1);
+#else
+      vTaskDelay(pdMS_TO_TICKS(10));
+#endif
+      continue;
+    }
+
+    // ZX Spectrum: the whole 320x240 is the picture -- 256x192 paper inside a 32/24px border that the
+    // program colours per scanline -- so there is nothing to wipe around it.
+    if (currentPlatform == PLATFORM_ZX)
+    {
+      displaySetUiMode(false);
+      displaySetVideoRect(0, 240);
+      displaySetVideoFill(0, 320, true);
+      zxRenderFrame();
+      if (oskActive()) { displaySetUiMode(true); oskRender(); }   // on-screen keyboard overlays the bottom
+      Vertical_blankingOn_Off = true;
+#if defined(BOARD_PICOCALC)
+      vTaskDelay(1);
+#else
+      vTaskDelay(pdMS_TO_TICKS(10));
+#endif
+      continue;
+    }
+
 #if BOARD_HAS_BIGRAM_CORES
     // Apple IIGS: the 65C816 (core 1) runs the firmware; draw its 40-col text page here.
     if (currentPlatform == PLATFORM_IIGS)
@@ -795,7 +849,9 @@ void renderLoop(void *pvParameters)
       vTaskDelay(pdMS_TO_TICKS(33));      // ~30 fps text refresh
       continue;
     }
+#endif // BOARD_HAS_BIGRAM_CORES
 
+#if BOARD_HAS_PCXT_CORE
     // PC-XT: the 8086 (core 1) runs the BIOS/DOS; render the CGA buffer here. pcxtRenderFrame() returns
     // false when the picture is UNCHANGED -> we then skip the QSPI flush (setBypassCanvas), so core 0
     // stops draining the shared MSPI bus and the 8086 runs much faster while the screen is static.
@@ -803,6 +859,8 @@ void renderLoop(void *pvParameters)
     {
 #if BOARD_DISPLAY_GFX
       if (clearScr) { tft.fillScreen(TFT_BLACK); tft.fillPanelBlack(); clearScr = false; pcxtForceRedraw(); }
+#elif defined(BOARD_PICOCALC)
+      if (clearScr) { clearScr = false; pcxtForceRedraw(); }   // the PicoCalc renderer wipes the panel itself
 #endif
       bool drew = pcxtRenderFrame();
       if (oskActive()) { displaySetUiMode(true); oskRender(); drew = true; }
@@ -810,7 +868,9 @@ void renderLoop(void *pvParameters)
       if (!drew) tft.setBypassCanvas(true);   // nothing changed -> no flush this round (free the bus)
 #endif
       Vertical_blankingOn_Off = true;
-#if defined(BOARD_DESKTOP)
+#if defined(BOARD_PICOCALC)
+      vTaskDelay(pdMS_TO_TICKS(drew ? 1 : 20));   // only changed rows are pushed; the push paces us
+#elif defined(BOARD_DESKTOP)
       vTaskDelay(pdMS_TO_TICKS(4));   // desktop: present is vsync-paced; the device's 16-40ms throttle
                                       // (shared MSPI bus) just adds input lag here — keep it snappy
 #else
@@ -818,43 +878,7 @@ void renderLoop(void *pvParameters)
 #endif
       continue;
     }
-
-    // tiny386 (Intel i386 + VGA): the i386 (core 1) runs SeaBIOS/DOS/Windows; nearest-scale the VGA
-    // framebuffer onto the panel here. tiny386RenderFrame() returns false when the picture is
-    // UNCHANGED -> skip the QSPI flush so core 0 stops draining the shared bus (like PC-XT).
-    if (currentPlatform == PLATFORM_TINY386)
-    {
-#if BOARD_DISPLAY_GFX
-      if (clearScr) { tft.fillScreen(TFT_BLACK); tft.fillPanelBlack(); clearScr = false; tiny386ForceRedraw(); }
-#endif
-      bool vgaDrew = tiny386RenderFrame();
-      bool osk = oskActive();
-      bool oskChanged = false;
-      if (osk) { displaySetUiMode(true); oskChanged = oskDirty(); oskRender(); }  // oskDirty before oskRender clears it
-#if BOARD_PANEL_DSI
-      if (osk && oskChanged && !vgaDrew) {
-        tft.flushOskBand();          // only the keyboard changed -> push just its band (cheap), and
-        tft.setBypassCanvas(true);   // skip the loop-top full 1024x600 composite (that made it laggy)
-      } else
-#endif
-      {
-#if BOARD_DISPLAY_GFX
-        if (!(vgaDrew || oskChanged)) tft.setBypassCanvas(true);   // nothing changed -> skip the flush
-#endif
-      }
-      Vertical_blankingOn_Off = true;
-      // Keyboard open: poll touch fast (12ms) so it stays responsive -- an idle frame is cheap (flush is
-      // gated above). Otherwise cap the render rate (~22 fps): a full 1024x600 frame costs a lot of PSRAM
-      // bandwidth and at 60 fps saturates the bus the i386 (core 1) shares, so throttling frees the CPU.
-#if defined(BOARD_DESKTOP)
-      vTaskDelay(pdMS_TO_TICKS(4));   // desktop: vsync-paced present; skip the device's 45-80ms bus-relief
-                                      // throttle so input + the VGA display stay responsive
-#else
-      vTaskDelay(pdMS_TO_TICKS(osk ? 12 : ((vgaDrew || oskChanged) ? 45 : 80)));
-#endif
-      continue;
-    }
-#endif // BOARD_HAS_BIGRAM_CORES
+#endif // BOARD_HAS_PCXT_CORE
 
     // 320x240 TFT: center the 280x192 raster (overriding the S3/VGA margins below).
     // When the touch keyboard is open, squeeze the raster into the top rows so the

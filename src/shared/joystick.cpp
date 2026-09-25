@@ -148,6 +148,45 @@ void applyPlatformInput()
         smsSetInput(m);
     }
 
+    // ColecoVision: stick + left/right fire onto controller 1 (same active-LOW bit order as SMS:
+    // bit4 = left fire, bit5 = right fire). A gamepad has no 12-key keypad, so its two spare buttons
+    // give the keys games ask for most: Pb3 = '1' (start / skill 1) and Pb2 = '*' (restart).
+    if (currentPlatform == PLATFORM_COLECO)
+    {
+        uint8_t m = 0xFF;
+        int key = -1;
+        if (joystick && !OptionsWindow)
+        {
+            if (joyX == 0) m &= ~0x01;   // up
+            if (joyX == 2) m &= ~0x02;   // down
+            if (joyY == 0) m &= ~0x04;   // left
+            if (joyY == 2) m &= ~0x08;   // right
+            if (Pb0)       m &= ~0x10;   // left fire
+            if (Pb1)       m &= ~0x20;   // right fire
+            if (Pb3)       key = 1;
+            else if (Pb2)  key = 10;     // '*'
+        }
+        colecoSetInput(m);
+        colecoSetKeypad(key);
+    }
+
+    // ZX Spectrum: Kempston interface on port 0x1F. Active-HIGH, b0=right b1=left b2=down b3=up b4=fire.
+    // The USB keyboard (arrows + Space with JOYSTICK on) also drives it, so only write while a pad is used.
+    if (currentPlatform == PLATFORM_ZX)
+    {
+        uint8_t k = 0;
+        if (joystick && !OptionsWindow)
+        {
+            if (joyY == 2) k |= 0x01;    // right
+            if (joyY == 0) k |= 0x02;    // left
+            if (joyX == 2) k |= 0x04;    // down
+            if (joyX == 0) k |= 0x08;    // up
+            if (Pb0 || Pb1) k |= 0x10;   // fire
+        }
+        static uint8_t lastK = 0;
+        if (k != lastK) { zxSetKempston(k); lastK = k; }
+    }
+
     // PC-XT: gamepad -> arrow keys + Enter/Esc (active-LOW mask, same bit order as SMS:
     // bit0=up, bit1=down, bit2=left, bit3=right, bit4=A (Enter), bit5=B (Esc)).
     if (currentPlatform == PLATFORM_PCXT)

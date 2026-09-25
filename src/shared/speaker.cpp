@@ -191,7 +191,7 @@ static void IRAM_ATTR spkISR()
   int amp = sound ? ((int)volume << 4) : 0;            // volume 0..0xF0 -> 0..~3840 (kept low: a full
                                                       // square is loud; the slider scales from here)
   int16_t s;
-  if (currentPlatform == PLATFORM_PCXT || currentPlatform == PLATFORM_TINY386) {
+  if (currentPlatform == PLATFORM_PCXT) {
     // PC-speaker: synthesize a square wave at the PIT-ch2 frequency (gated by port 0x61). A phase
     // accumulator advances by `freq` each 44100Hz sample; one full cycle per SPK_FS, high in the
     // first half. Silent when off (the DC blocker decays the held level -> no pop).

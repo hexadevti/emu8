@@ -186,8 +186,7 @@
       //                 panel can only run at 37.5MHz, but 200MHz sysclk yields an exact 50MHz.
       // The -I puts src/picocalc/pico_shim first on the include path, so the sources that reach for
       // <esp_system.h> / <dirent.h> / "driver/i2s.h" / "EspUsbHost.h" by name resolve to the shims
-      // (see pico_shim.h). BOARD_PICOCALC goes to the C compiler too -- the tiny386 core's .c files
-      // are excluded by that macro and never include board.h.
+      // (see pico_shim.h). BOARD_PICOCALC goes to the C compiler too.
       // exceptions=Enabled is needed because arduino-pico builds with -fno-exceptions while
       // src/apple2/hd.cpp::loadBlock() wraps its memory write in try/catch. Use the BOARD MENU,
       // not a bare -fexceptions in extra_flags: the menu option also selects -lstdc++-exc, the

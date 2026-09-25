@@ -47,7 +47,7 @@
 //   Ctrl-Shift-F1            -> reboot the Pico itself (see the note at the handler)
 // Bare keys pass through:
 //   F1, F2 -> HID_KEY_F1, HID_KEY_F2
-//   F3     -> HID_KEY_F12    hard reset (SMS / PC-XT / tiny386) -- unchanged
+//   F3     -> HID_KEY_F12    hard reset (SMS / PC-XT) -- unchanged
 //   F4, F5 -> HID_KEY_F4, HID_KEY_F5   Apple II paddle buttons 0 and 1; MSX matrix keys;
 //                                      SMS buttons 1 (start) and 2
 // F6..F10 are translated too in case a unit's firmware emits them; the stock PicoCalc keyboard
@@ -163,7 +163,7 @@ static HidKey pcToHid(uint8_t code)
     // handled in handleEvent() before this is reached, so these are the bare-key meanings.
     case PCK_F1:        return { HID_KEY_F1,          false };
     case PCK_F2:        return { HID_KEY_F2,          false };
-    case PCK_F3:        return { HID_KEY_F12,         false };   // SMS / PC-XT / tiny386 hard reset
+    case PCK_F3:        return { HID_KEY_F12,         false };   // SMS / PC-XT hard reset
     case PCK_F4:        return { HID_KEY_F4,          false };   // Apple II button 0 (open-apple)
     case PCK_F5:        return { HID_KEY_F5,          false };   // Apple II button 1 (solid-apple)
     case PCK_F6:        return { HID_KEY_F6,          false };
@@ -591,7 +591,6 @@ void oskBuildLayout() {}
 void oskSetup() {}
 void oskRender() {}
 bool oskActive() { return false; }
-bool oskDirty()  { return false; }
 int  oskRasterTop()    { return 24; }
 int  oskRasterHeight() { return 192; }
 bool touchRead(int16_t *sx, int16_t *sy) { (void)sx; (void)sy; return false; }

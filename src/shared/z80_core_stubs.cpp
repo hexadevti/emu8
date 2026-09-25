@@ -41,3 +41,32 @@ void smsBrowseUp() {}
 bool smsLoadSelected(const char *) { return false; }
 
 #endif  // !BOARD_HAS_SMS_CORE
+
+#if !BOARD_HAS_COLECO_CORE
+
+void colecoSetInput(uint8_t) {}
+void colecoSetKeypad(int) {}
+void colecoHardReset() {}
+void colecoRenderFrame() {}
+bool colecoRenderLoadWarning() { return false; }
+void colecoScanFiles() {}
+void colecoBrowseEnter(const char *) {}
+void colecoBrowseUp() {}
+bool colecoLoadSelected(const char *) { return false; }
+
+#endif  // !BOARD_HAS_COLECO_CORE
+
+#if !BOARD_HAS_ZX_CORE
+
+void zxSetKempston(uint8_t) {}
+void zxKey(int, int, bool) {}
+void zxKeysReleaseAll() {}
+void zxHardReset() {}
+void zxRenderFrame() {}
+bool zxRenderLoadWarning() { return false; }
+void zxScanFiles() {}
+void zxBrowseEnter(const char *) {}
+void zxBrowseUp() {}
+bool zxLoadSelected(const char *) { return false; }
+
+#endif  // !BOARD_HAS_ZX_CORE

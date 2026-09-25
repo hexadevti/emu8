@@ -351,7 +351,7 @@ static void buildMenuBar()
     if (ImGui::BeginMenu("Platform")) {
       int cur = dbgPlatform();
       for (int p = 0; p < dbgPlatformCount(); p++)
-        if (ImGui::MenuItem(dbgPlatformName(p), nullptr, p == cur)) dbgSwitchPlatform(p);  // reboots into p
+        if (*dbgPlatformName(p) && ImGui::MenuItem(dbgPlatformName(p), nullptr, p == cur)) dbgSwitchPlatform(p);  // reboots into p
       ImGui::EndMenu();
     }
     if (ImGui::MenuItem("Load disk / cartridge...")) g_showLoad = true;
@@ -436,7 +436,7 @@ static void buildControlPanel()
       ImGui::TextDisabled("(single-step not wired for this platform)");
 
     // speed controller — "Full speed (uncapped host)" on EVERY platform; Apple II also gets a target-MHz
-    // slider when paced. Atari/PC-XT/tiny386 are always uncapped on desktop (the toggle is fixed-on).
+    // slider when paced. Atari/PC-XT are always uncapped on desktop (the toggle is fixed-on).
     if (dbgFullSpeedSupported()) {
       ImGui::SeparatorText("Speed");
       bool fixed = dbgFullSpeedFixed();
@@ -884,7 +884,7 @@ static void buildLoadBrowser()
     ImGui::Text("SD: /%s", rel.c_str());
     ImGui::Text("Platform: %s", dbgPlatformName(dbgPlatform()));
     ImGui::SameLine(); ImGui::TextDisabled("(%s)", dbgFileExts());
-    // PC platforms (PC-XT, tiny386) have A: + C: drives — pick which slot a clicked image mounts into
+    // The PC-XT has A: + C: drives — pick which slot a clicked image mounts into
     // (so you can put a boot floppy in A: and a hard disk in C:). Other platforms have one slot.
     static int g_mountSlot = -1;   // -1 = Auto (by size), 0 = A:, 1 = C:
     if (dbgHasDriveSlots()) {

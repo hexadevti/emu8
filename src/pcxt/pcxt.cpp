@@ -1,7 +1,7 @@
-// Not built for the PicoCalc (RP2350): this core needs multi-megabyte ps_malloc'd guest RAM,
-// and the board has 520KB of SRAM with its 8MB PSRAM on plain GPIOs (not memory-mapped). The
-// shared dispatch/render/UI code links against src/picocalc/bigram_stubs.cpp instead.
-#if !defined(BOARD_PICOCALC)
+// Not built for the PicoCalc on an RP2040 (Cortex-M0+): its heap leaves ~75KB of guest RAM, too
+// little for DOS ("Configuration too large for memory"). The RP2350 runs it paged (fabgl/pcmem.h);
+// see BOARD_HAS_PCXT_CORE in board.h. The RP2040 links against src/picocalc/bigram_stubs.cpp.
+#if !(defined(BOARD_PICOCALC) && defined(__ARM_ARCH_6M__))
 // pcxt.cpp - device-side glue for the PC-XT (Intel 8086) platform: memory
 // allocation, the core-1 run loop, the core-0 CGA render push, USB-keyboard ->
 // XT scancode injection, and the settings (disk browser / mount) hooks. This is
@@ -32,7 +32,7 @@ static bool pcInitDone = false;
 void desktopSetEmuResolution(int w, int h);   // display_sdl.cpp — size the fb before begin()
 #endif
 
-static uint8_t* pcAllocFast(size_t n) {                 // internal SRAM first, PSRAM fallback
+static inline uint8_t* pcAllocFast(size_t n) {                 // internal SRAM first, PSRAM fallback
   uint8_t* p = (uint8_t*)heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   if (!p) p = (uint8_t*)ps_malloc(n);
   return p;
@@ -63,6 +63,91 @@ uint8_t* pcxtReadBiosRom(size_t* outLen) {
   sprintf(buf, "PC-XT: BIOS loaded from /roms/pcxt/bios.bin (%d bytes)", len); printLog(buf);
   return b;
 }
+
+#if PCXT_PAGED_MEM
+// Paged layout: read the BIOS straight into its (contiguous) guest ROM pages, no second copy.
+size_t pcxtReadBiosRomInto(uint8_t* dst, size_t maxLen) {
+  if (!dst) return 0;
+  busTake();
+  File f = FSTYPE.open("/roms/pcxt/bios.bin", FILE_READ);
+  size_t len = f ? (size_t)f.size() : 0;
+  if (!f || len == 0 || len > maxLen) {
+    if (f) f.close(); busGive();
+    sprintf(buf, "PC-XT: /roms/pcxt/bios.bin missing or bad size (%u, max %u) - cannot boot",
+            (unsigned)len, (unsigned)maxLen);
+    printLog(buf);
+    return 0;
+  }
+  size_t rd = 0;
+  while (rd < len) { int n = f.read(dst + rd, (len - rd > 4096) ? 4096 : (len - rd)); if (n <= 0) break; rd += n; }
+  f.close();
+  busGive();
+  if (rd != len) return 0;
+  sprintf(buf, "PC-XT: BIOS loaded from /roms/pcxt/bios.bin (%u bytes)", (unsigned)len); printLog(buf);
+  return len;
+}
+
+// Build the guest memory map out of whatever SRAM is left (see fabgl/pcmem.h). The RP2040 has no
+// PSRAM, so instead of the 1MB flat buffer the guest gets:
+//   * conventional RAM: the first 60KB from sharedBigBuf (idle while the PC-XT runs; its tail above
+//     0xF000 holds the speaker task stack), then 4KB heap pages while the heap can spare them;
+//   * CGA: 16KB at B8000 (mirrored at BC000, like the real card's 16KB decode);
+//   * BIOS: 20KB of RAM at F0000 (image) + 8KB at FE000 (BIOS stack; top page seeded with the reset JMP).
+// The BIOS is told the real size (N*4-1 KB; the last KB backs the EBDA at 9FC00 via an alias).
+#ifndef PCXT_HEAP_RESERVE
+#define PCXT_HEAP_RESERVE (28 * 1024)   // left for SD file handles, FreeRTOS, the UI
+#endif
+#define PCXT_SHARED_PAGES 15             // sharedBigBuf[0..0xEFFF]
+
+static bool pcxtBuildPagedMemory() {
+  pcmem::clear();
+
+  uint8_t* bios = (uint8_t*)malloc(PCXT_BIOS_PAGES * pcmem::PAGE_SIZE);
+  pcVRam = (uint8_t*)malloc(PCXT_VIDEOMEM_SIZE);
+  if (!bios || !pcVRam) {
+    sprintf(buf, "PCXT: ALLOC FAIL bios=%p vram=%p", bios, pcVRam); printLog(buf);
+    free(bios); free(pcVRam); pcVRam = nullptr;
+    return false;
+  }
+  memset(bios, 0xFF, PCXT_BIOS_PAGES * pcmem::PAGE_SIZE);
+  // Left writable, as in the flat layout: the 8086tiny BIOS keeps variables in its own segment.
+  for (int i = 0; i < PCXT_BIOS_PAGES; i++)
+    pcmem::mapPage(0xF0 + i, bios + i * pcmem::PAGE_SIZE, bios + i * pcmem::PAGE_SIZE);
+  // F000:E000..FFFF must be RAM too: the 8086tiny BIOS puts its stack in its own segment
+  // (SS=F000, SP just below F000/FFFE), and pushes to a flash page would be silently dropped.
+  uint8_t* biosTop = (uint8_t*)malloc(2 * pcmem::PAGE_SIZE);
+  if (!biosTop) { printLog("PCXT: ALLOC FAIL bios stack"); free(bios); free(pcVRam); pcVRam = nullptr; return false; }
+  memset(biosTop, 0, pcmem::PAGE_SIZE);
+  memcpy(biosTop + pcmem::PAGE_SIZE, pcmem::topPage(), pcmem::PAGE_SIZE);
+  pcmem::mapPage(0xFE, biosTop, biosTop);
+  pcmem::mapPage(0xFF, biosTop + pcmem::PAGE_SIZE, biosTop + pcmem::PAGE_SIZE);
+  for (int i = 0; i < 8; i++) {                   // B8..BB, mirrored at BC..BF
+    uint8_t* p = pcVRam + (i & 3) * pcmem::PAGE_SIZE;
+    pcmem::mapPage(0xB8 + i, p, p);
+  }
+
+  int n = 0;
+  for (; n < PCXT_SHARED_PAGES; n++) {
+    uint8_t* p = sharedBigBuf + n * pcmem::PAGE_SIZE;
+    memset(p, 0, pcmem::PAGE_SIZE);
+    pcmem::mapPage(n, p, p);
+  }
+  while (n < 0x9F && heap_caps_get_free_size(MALLOC_CAP_INTERNAL) > PCXT_HEAP_RESERVE + pcmem::PAGE_SIZE) {
+    uint8_t* p = (uint8_t*)malloc(pcmem::PAGE_SIZE);
+    if (!p) break;
+    memset(p, 0, pcmem::PAGE_SIZE);
+    pcmem::mapPage(n++, p, p);
+  }
+  if (n < 0x9F) pcmem::mapPage(0x9F, pcmem::rd[n - 1], pcmem::wr[n - 1]);   // EBDA -> top KB of RAM
+
+  pcRam = sharedBigBuf;
+  Machine::setReportedRamKB(n * 4 - 1);
+  sprintf(buf, "PCXT: %d KB guest RAM (%d pages), heap free=%u", n * 4 - 1, n,
+          (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+  printLog(buf);
+  return true;
+}
+#endif
 static bool pcEndsCI(const std::string& s, const char* suf) {
   size_t n = strlen(suf); if (s.size() < n) return false;
   for (size_t i = 0; i < n; i++)
@@ -263,13 +348,12 @@ static void pcMouseStepHook() {
 
   uint16_t cond = pcEvCond; pcEvCond = 0; pcEvPending = false;
   pcCbAge = 0;
-  uint8_t * mem  = g_pcxtMachine.memory();
   uint32_t  ssb  = (uint32_t)fabgl::i8086::SS() << 4;
   uint16_t  sp   = fabgl::i8086::SP();
   uint16_t  curCS = fabgl::i8086::CS(), curIP = fabgl::i8086::IP();
   // push CS then IP (far-call frame; the handler ends with RETF, returning to curCS:curIP)
-  sp -= 2; { uint32_t a = (ssb + sp) & 0xFFFFF; mem[a] = curCS & 0xFF; mem[(a + 1) & 0xFFFFF] = curCS >> 8; }
-  sp -= 2; { uint32_t a = (ssb + sp) & 0xFFFFF; mem[a] = curIP & 0xFF; mem[(a + 1) & 0xFFFFF] = curIP >> 8; }
+  sp -= 2; { uint32_t a = (ssb + sp) & 0xFFFFF; pcmem::wr8(a, curCS & 0xFF); pcmem::wr8((a + 1) & 0xFFFFF, curCS >> 8); }
+  sp -= 2; { uint32_t a = (ssb + sp) & 0xFFFFF; pcmem::wr8(a, curIP & 0xFF); pcmem::wr8((a + 1) & 0xFFFFF, curIP >> 8); }
   fabgl::i8086::setSP(sp);
   pcCbRetCS = curCS; pcCbRetIP = curIP;
   // save the FULL interrupted-code context so we can restore it when the handler returns
@@ -348,6 +432,9 @@ void pcxtSetup() {
   desktopSetEmuResolution(PCXT_DESK_W, PCXT_DESK_H);     // render CGA text/graphics at native PC res
 #endif
 
+#if PCXT_PAGED_MEM
+  if (!pcxtBuildPagedMemory()) return;
+#else
   pcRam  = (uint8_t*)ps_malloc(PCXT_RAM_SIZE);            // 1 MB main RAM -> PSRAM
   pcVRam = pcAllocFast(PCXT_VIDEOMEM_SIZE);               // 64 KB video RAM -> internal preferred
   if (!pcRam || !pcVRam) {
@@ -355,6 +442,7 @@ void pcxtSetup() {
     printLog(buf);
     return;
   }
+#endif
 
   g_pcxtMachine.setMemoryBuffers(pcRam, pcVRam);
   g_pcxtMachine.setBootDrive(0);                          // floppy A: by default
@@ -387,7 +475,7 @@ void pcxtSetup() {
   }
 
 #if defined(BOARD_DESKTOP)
-  // Desktop: choose the boot image via env (mirrors tiny386's EMU_T386_HDA/FDA) so a fresh run with no
+  // Desktop: choose the boot image via env so a fresh run with no
   // persisted EEPROM selection can still boot straight into a disk. EMU_PCXT_A = A: floppy, EMU_PCXT_C = C:.
   if (const char* a = getenv("EMU_PCXT_A")) selectedPcFileName   = a;
   if (const char* c = getenv("EMU_PCXT_C")) selectedPcHdFileName = c;
@@ -438,9 +526,8 @@ void pcxtLoop() {
     // Give INT 33h a non-null vector so DOS programs (e.g. QBASIC) detect a mouse. The emulator
     // intercepts the actual INT 33h, so this target is never executed. Set only when null (the POST
     // clears the IVT at boot); leave a real driver's vector alone if one is ever installed.
-    uint8_t* mem = g_pcxtMachine.memory();
-    if (mem && mem[0xCC] == 0 && mem[0xCD] == 0 && mem[0xCE] == 0 && mem[0xCF] == 0) {
-      mem[0xCC] = 0x33; mem[0xCD] = 0x00; mem[0xCE] = 0x00; mem[0xCF] = 0xF0;   // IVT[0x33] = F000:0033
+    if (pcRam && pcmem::rd16(0xCC) == 0 && pcmem::rd16(0xCE) == 0) {
+      pcmem::wr16(0xCC, 0x0033); pcmem::wr16(0xCE, 0xF000);   // IVT[0x33] = F000:0033
     }
 #if defined(BOARD_DESKTOP)
     taskYIELD();             // desktop: cooperative yield (separate render/input threads) — run near full speed
@@ -469,7 +556,7 @@ static void pcxtRenderGraphics(fabgl::GraphicsAdapter::Emulation emu) {
   if (!pcGfxScratch) pcGfxScratch = (uint16_t*)malloc(320 * 8 * sizeof(uint16_t));
   if (!pcGfxScratch) return;
   fabgl::GraphicsAdapter* ga = g_pcxtMachine.graphicsAdapter();
-  const uint8_t* vm = g_pcxtMachine.videoMemory() + 0x8000;
+  const uint8_t* vm = g_pcxtMachine.cgaBase();
   bool mode640 = (emu == fabgl::GraphicsAdapter::Emulation::PC_Graphics_640x200_2Colors);
 
   uint16_t pal[4];
@@ -588,7 +675,7 @@ static bool pcxtRenderTextGlyph(int PW, int PH) {
   bool text80 = (g_pcxtMachine.graphicsAdapter()->emulation()
                  == fabgl::GraphicsAdapter::Emulation::PC_Text_80x25_16Colors);
   int cols = text80 ? 80 : 40;
-  const uint8_t* vbuf = g_pcxtMachine.videoMemory() + 0x8000 + g_pcxtMachine.cgaMemOffset();
+  const uint8_t* vbuf = g_pcxtMachine.cgaBase() + g_pcxtMachine.cgaMemOffset();
 
   for (int r = 0; r < 25; r++) {
     int y0 = r * PH / 25, y1 = (r + 1) * PH / 25;
@@ -643,7 +730,7 @@ static void pcxtRenderText() {
                  == fabgl::GraphicsAdapter::Emulation::PC_Text_80x25_16Colors);
   int cols = text80 ? 80 : 40;
 
-  const uint8_t* vbuf = g_pcxtMachine.videoMemory() + 0x8000 + g_pcxtMachine.cgaMemOffset();
+  const uint8_t* vbuf = g_pcxtMachine.cgaBase() + g_pcxtMachine.cgaMemOffset();
 
   if (osk) tft.fillRect(0, 0, 320, kbdTop, TFT_BLACK);
   else     tft.fillScreen(TFT_BLACK);
@@ -728,7 +815,7 @@ static void pcxtRenderGraphicsDesktop(fabgl::GraphicsAdapter::Emulation emu) {
   if (!band) band = (uint16_t*)malloc(PCXT_DESK_W * 2 * sizeof(uint16_t));
   if (!band) return;
   fabgl::GraphicsAdapter* ga = g_pcxtMachine.graphicsAdapter();
-  const uint8_t* vm = g_pcxtMachine.videoMemory() + 0x8000;
+  const uint8_t* vm = g_pcxtMachine.cgaBase();
   bool mode640 = (emu == fabgl::GraphicsAdapter::Emulation::PC_Graphics_640x200_2Colors);
 
   uint16_t pal[4];
@@ -755,13 +842,151 @@ static void pcxtRenderGraphicsDesktop(fabgl::GraphicsAdapter::Emulation emu) {
 }
 #endif
 
+#if defined(BOARD_PICOCALC)
+// ---- PicoCalc: CGA streamed straight to the 320x320 panel (no canvas; see display_picocalc.h) ----
+// Text uses the BIOS's own IBM 8x8 font. 80 columns get 4 px each: glyph columns are OR'd in pairs,
+// so single-pixel strokes survive the halving. 25 rows are 9 panel px (8 glyph rows + row 7 again,
+// which keeps CP437 box lines joined), or 12 px (rows 0,0,1,2,2,3,...) with SCREEN: FILL. Graphics
+// are 320 wide and scaled 6:5 vertically into the 240-line window, or 3:2 to 300 lines with FILL.
+// Only text rows / graphics bands whose bytes changed are re-sent: the SPI link is the bottleneck.
+extern bool screenFill;
+const uint8_t *pcBiosFont8x8();
+
+static bool     pcPcForce = true;          // repaint everything (set by pcxtForceRedraw / mode change)
+static uint32_t pcPcDig[100];              // text: 25 row digests; graphics: up to 100 band digests
+
+// CGA VRAM is 16KB; the 6845 start offset may wrap past the end (and may be odd: no word reads).
+static inline uint8_t pcVb(uint32_t i) {
+  return g_pcxtMachine.cgaBase()[(g_pcxtMachine.cgaMemOffset() + i) & (PCXT_VIDEOMEM_SIZE - 1)];
+}
+
+static bool pcPcRepaintCheck(bool fill) {
+  static bool lastFill = false;
+  bool force = pcPcForce || fill != lastFill;
+  lastFill = fill; pcPcForce = false;
+  if (force) tft.fillPanelRect(0, 0, PANEL_NATIVE_W, PANEL_NATIVE_H, TFT_BLACK);
+  return force;
+}
+
+static void pcxtRenderTextPico() {
+  static const uint8_t kBlank[8] = {0};
+  const uint8_t *font = pcBiosFont8x8();
+  fabgl::GraphicsAdapter* ga = g_pcxtMachine.graphicsAdapter();
+  const bool text80 = (ga->emulation() == fabgl::GraphicsAdapter::Emulation::PC_Text_80x25_16Colors);
+  const int  cols   = text80 ? 80 : 40;
+  const bool fill   = screenFill && !bootHintShowing();
+  const int  RH     = fill ? 12 : 9;
+  const int  top    = fill ? (PANEL_NATIVE_H - 25 * 12) / 2 : DISP_OFFSET_Y + (DISP_LOGICAL_H - 25 * 9) / 2;
+  const bool force  = pcPcRepaintCheck(fill);
+
+  const int  curR = (ga->cursorVisible() && ((millis() / 400) & 1) == 0) ? ga->cursorRow() : -1;
+  const int  curC = ga->cursorCol();
+  const int  msR  = pcMouseShown ? pcMouseY / 8 : -1;
+  const int  msC  = pcMouseX / (text80 ? 8 : 16);
+
+  for (int r = 0; r < 25; r++) {
+    uint32_t base = r * cols * 2;
+    uint32_t dig = 2166136261u;
+    for (int i = 0; i < cols * 2; i++) dig = (dig ^ pcVb(base + i)) * 16777619u;
+    if (r == curR) dig ^= 0x9E3779B9u * (curC + 1);
+    if (r == msR)  dig ^= 0x85EBCA6Bu * (msC + 1);
+    if (!font)     dig ^= 0xDEADu;
+    dig ^= cols;
+    if (!force && dig == pcPcDig[r]) continue;
+    pcPcDig[r] = dig;
+
+    tft.setPanelAddrWindow(0, top + r * RH, 320, RH);
+    tft.startWrite();
+    for (int y = 0; y < RH; y++) {
+      const int gy = fill ? (y * 2 / 3) : (y < 8 ? y : 7);
+      for (int c = 0; c < cols; c++) {
+        uint8_t ch = pcVb(base + c * 2), at = pcVb(base + c * 2 + 1);
+        uint16_t fg = kCgaRgb565[at & 0x0F], bg = kCgaRgb565[(at >> 4) & 0x07];
+        uint8_t bits = font ? font[ch * 8 + gy] : kBlank[gy];
+        if (r == curR && c == curC && gy >= 6) bits = 0xFF;                    // underline cursor
+        if (r == msR && c == msC) { uint16_t t = fg; fg = bg; bg = t; }        // mouse: reverse video
+        if (text80) {
+          uint8_t m = bits | (bits >> 1);                                       // OR column pairs
+          tft.writeColor((m & 0x80) ? fg : bg, 1);
+          tft.writeColor((m & 0x20) ? fg : bg, 1);
+          tft.writeColor((m & 0x08) ? fg : bg, 1);
+          tft.writeColor((m & 0x02) ? fg : bg, 1);
+        } else {
+          for (int b = 7; b >= 0; b--) tft.writeColor(((bits >> b) & 1) ? fg : bg, 1);
+        }
+      }
+    }
+    tft.endWrite();
+  }
+}
+
+static void pcxtRenderGraphicsPico(fabgl::GraphicsAdapter::Emulation emu) {
+  fabgl::GraphicsAdapter* ga = g_pcxtMachine.graphicsAdapter();
+  const uint8_t* vm = g_pcxtMachine.cgaBase();
+  const bool mode640 = (emu == fabgl::GraphicsAdapter::Emulation::PC_Graphics_640x200_2Colors);
+  uint16_t pal[4];
+  if (!mode640) {
+    static const uint8_t PC[4][3] = {{2,4,6},{10,12,14},{3,5,7},{11,13,15}};  // CGA 4-colour palettes
+    int pi = ga->graphPalette() & 3;
+    pal[0] = kCgaRgb565[ga->graphBackgroundIndex() & 0x0F];
+    pal[1] = kCgaRgb565[PC[pi][0]]; pal[2] = kCgaRgb565[PC[pi][1]]; pal[3] = kCgaRgb565[PC[pi][2]];
+  } else {
+    int fg = ga->graphForegroundIndex() & 0x0F;
+    pal[0] = kCgaRgb565[0]; pal[1] = pal[2] = pal[3] = kCgaRgb565[fg ? fg : 15];
+  }
+  const bool fill = screenFill && !bootHintShowing();
+  const int  G    = fill ? 2 : 5;              // source lines per band
+  const int  O    = fill ? 3 : 6;              // panel rows per band
+  const int  top  = fill ? (PANEL_NATIVE_H - 300) / 2 : DISP_OFFSET_Y;
+  const bool force = pcPcRepaintCheck(fill);
+  const uint32_t palDig = pal[0] ^ ((uint32_t)pal[1] << 7) ^ ((uint32_t)pal[2] << 13) ^
+                          ((uint32_t)pal[3] << 19) ^ ((uint32_t)mode640 << 30);
+
+  for (int b = 0; b < 200 / G; b++) {
+    uint32_t dig = 2166136261u ^ palDig;
+    for (int k = 0; k < G; k++) {
+      int sy = b * G + k;
+      const uint8_t* srow = vm + (sy & 1) * 0x2000 + (sy >> 1) * 80;
+      for (int i = 0; i < 80; i++) dig = (dig ^ srow[i]) * 16777619u;
+    }
+    if (!force && dig == pcPcDig[b]) continue;
+    pcPcDig[b] = dig;
+    tft.setPanelAddrWindow(0, top + b * O, 320, O);
+    tft.startWrite();
+    for (int y = 0; y < O; y++) {
+      int sy = b * G + y * G / O;
+      const uint8_t* srow = vm + (sy & 1) * 0x2000 + (sy >> 1) * 80;
+      if (!mode640) {
+        for (int i = 0; i < 80; i++) {
+          uint8_t v = srow[i];
+          tft.writeColor(pal[v >> 6], 1);       tft.writeColor(pal[(v >> 4) & 3], 1);
+          tft.writeColor(pal[(v >> 2) & 3], 1); tft.writeColor(pal[v & 3], 1);
+        }
+      } else {
+        for (int i = 0; i < 80; i++) {
+          uint8_t v = srow[i]; v |= v >> 1;       // 640->320: OR pixel pairs so thin lines survive
+          tft.writeColor(pal[(v >> 7) & 1], 1); tft.writeColor(pal[(v >> 5) & 1], 1);
+          tft.writeColor(pal[(v >> 3) & 1], 1); tft.writeColor(pal[(v >> 1) & 1], 1);
+        }
+      }
+    }
+    tft.endWrite();
+  }
+}
+#endif
+
 // Dispatch by CGA mode (text vs graphics). Returns true if it (re)drew, false if the picture was
 // unchanged and rendering was skipped. The render loop uses that to SKIP the QSPI flush when nothing
 // changed, freeing the shared MSPI bus for the core-1 8086 -> big speedup when the screen is static.
 static uint32_t pcRenderSig = 1;
 static int      pcRenderGfx = -1;
 
-void pcxtForceRedraw() { pcRenderSig = 1; pcRenderGfx = -1; }   // after a menu/clear: force a repaint
+void pcxtForceRedraw() {
+  pcRenderSig = 1; pcRenderGfx = -1;
+#if defined(BOARD_PICOCALC)
+  pcPcForce = true;
+#endif
+}   // after a menu/clear: force a repaint
 
 bool pcxtRenderFrame() {
   if (!pcInitDone) return false;
@@ -771,11 +996,19 @@ bool pcxtRenderFrame() {
               emu == fabgl::GraphicsAdapter::Emulation::PC_Graphics_640x200_2Colors);
 
   // Signature of everything that affects the picture (video bytes + mode/colour/cursor/blink).
-  const uint8_t* vbuf = g_pcxtMachine.videoMemory() + 0x8000 + g_pcxtMachine.cgaMemOffset();
+  uint32_t sig = 2166136261u;
+#if defined(BOARD_PICOCALC)
+  // byte-wise (the 6845 offset may be odd -> M0+ faults on unaligned words) and wrapped to 16KB
+  if (gfx) { const uint8_t* vm = g_pcxtMachine.cgaBase(); for (int i = 0; i < 16000; i++) sig = (sig ^ vm[i]) * 16777619u; }
+  else     { for (int i = 0; i < 4000; i++) sig = (sig ^ pcVb(i)) * 16777619u; }
+  sig ^= (uint32_t)(screenFill && !bootHintShowing()) * 0x51ED270Bu;
+  if (pcPcForce) sig ^= 0x7F4A7C15u;
+#else
+  const uint8_t* vbuf = g_pcxtMachine.cgaBase() + g_pcxtMachine.cgaMemOffset();
   const uint32_t* w32 = (const uint32_t*)vbuf;
   int nwords = (gfx ? 16000 : 4000) / 4;
-  uint32_t sig = 2166136261u;
   for (int i = 0; i < nwords; i++) sig = (sig ^ w32[i]) * 16777619u;
+#endif
   sig ^= (uint32_t)emu * 2654435761u;
   sig ^= (uint32_t)g_pcxtMachine.cgaColorReg() << 3;
   sig ^= (uint32_t)(ga->cursorRow() * 256 + ga->cursorCol()) << 11;
@@ -786,6 +1019,12 @@ bool pcxtRenderFrame() {
   if (sig == pcRenderSig && !modeChanged) return false;   // unchanged -> skip render + flush
   pcRenderSig = sig;
 
+#if defined(BOARD_PICOCALC)
+  if (modeChanged) { pcRenderGfx = (int)gfx; pcPcForce = true; }
+  if (gfx) pcxtRenderGraphicsPico(emu);
+  else     pcxtRenderTextPico();
+  return true;
+#endif
   if (modeChanged) {                         // text <-> graphics switch: wipe canvas + panel border
     pcRenderGfx = (int)gfx;
     displaySetUiMode(true);
@@ -923,4 +1162,4 @@ void pcxtUnmount(int slot) {
   pcUpdateBootDrive();
   printLog(slot == 0 ? "PCXT: ejected A:" : "PCXT: ejected C:");
 }
-#endif // !defined(BOARD_PICOCALC)
+#endif // !(BOARD_PICOCALC && RP2040)

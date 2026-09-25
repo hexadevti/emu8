@@ -384,6 +384,109 @@ static void smsApplyJoystick(const uint8_t *keys)   // b0 up b1 down b2 left b3 
 #endif
   smsSetInput(m);
 }
+// ColecoVision: arrows + fire buttons -> controller 1, and the 12-key keypad from the digit row.
+// '*' and '#' are Shift-8 / Shift-3 (what they are printed on, and how the PicoCalc sends them) or
+// '-' / '=' for one-key access. The keypad holds a single key, so the first one found wins.
+static void colecoApplyJoystick(uint8_t modifier, const uint8_t *keys)
+{
+  const bool shift = modifier & (KEYBOARD_MODIFIER_LEFTSHIFT | KEYBOARD_MODIFIER_RIGHTSHIFT);
+  uint8_t m = 0xFF;
+  if (kbContains(keys, HID_KEY_ARROW_UP))    m &= ~0x01;
+  if (kbContains(keys, HID_KEY_ARROW_DOWN))  m &= ~0x02;
+  if (kbContains(keys, HID_KEY_ARROW_LEFT))  m &= ~0x04;
+  if (kbContains(keys, HID_KEY_ARROW_RIGHT)) m &= ~0x08;
+  if (kbContains(keys, HID_KEY_SPACE) || kbContains(keys, HID_KEY_Z) || kbContains(keys, HID_KEY_F4)) m &= ~0x10;  // left fire
+  if (kbContains(keys, HID_KEY_X) || kbContains(keys, HID_KEY_F5))                                   m &= ~0x20;  // right fire
+  colecoSetInput(m);
+
+  int key = -1;
+  for (int i = 0; i < 6 && key < 0; i++) {
+    const uint8_t kc = keys[i];
+    if (shift && kc == HID_KEY_8)                          key = 10;   // '*'
+    else if (shift && kc == HID_KEY_3)                     key = 11;   // '#'
+    else if (kc == HID_KEY_MINUS || kc == HID_KEY_KEYPAD_MULTIPLY) key = 10;
+    else if (kc == HID_KEY_EQUAL)                          key = 11;
+    else if (kc == HID_KEY_0 || kc == HID_KEY_KEYPAD_0)    key = 0;
+    else if (kc >= HID_KEY_1 && kc <= HID_KEY_9)           key = kc - HID_KEY_1 + 1;
+    else if (kc >= HID_KEY_KEYPAD_1 && kc <= HID_KEY_KEYPAD_9) key = kc - HID_KEY_KEYPAD_1 + 1;
+  }
+  colecoSetKeypad(key);
+}
+
+// ============================ ZX Spectrum keyboard matrix =================================
+// The Spectrum's 40 keys sit in 8 half-rows of 5 (row = address line A8..A15, bit 0 = the key nearest
+// the edge), and everything else is a chord with CAPS SHIFT or SYMBOL SHIFT. So the matrix is rebuilt
+// from the whole report every time rather than tracked per key: a PC key that stands for a chord
+// (Backspace = CAPS+0, ',' = SYMBOL+N) can then overlap anything else without a key getting stuck.
+//   Shift = CAPS SHIFT, Ctrl/Alt = SYMBOL SHIFT, Backspace = DELETE, arrows = cursor keys,
+//   Esc = BREAK, Tab = EXTENDED MODE, and PC punctuation types the Spectrum symbol printed on it.
+// With JOY on, arrows + Space drive the Kempston joystick instead (as on the MSX).
+struct ZxPos { int8_t row, bit; };
+static const char ZX_ROWS[8][6] = { "cZXCV", "ASDFG", "QWERT", "12345", "09876", "POIUY", "eLKJH", "syMNB" };  // c/e/s/y = CAPS/ENTER/SPACE/SYMBOL
+static ZxPos zxFindChar(char ch)
+{
+  for (int r = 0; r < 8; r++) for (int b = 0; b < 5; b++) if (ZX_ROWS[r][b] == ch) return {(int8_t)r, (int8_t)b};
+  return {-1, -1};
+}
+static const ZxPos ZX_CAPS = {0, 0}, ZX_SYM = {7, 1}, ZX_SPACE = {7, 0}, ZX_ENTER = {6, 0};
+
+static void zxApplyKeyboard(uint8_t modifier, const uint8_t *keys)
+{
+  bool shift = modifier & (KEYBOARD_MODIFIER_LEFTSHIFT | KEYBOARD_MODIFIER_RIGHTSHIFT);
+  bool sym   = modifier & (KEYBOARD_MODIFIER_LEFTCTRL | KEYBOARD_MODIFIER_RIGHTCTRL |
+                           KEYBOARD_MODIFIER_LEFTALT  | KEYBOARD_MODIFIER_RIGHTALT);
+  bool caps  = shift;
+  uint8_t rows[8] = {0, 0, 0, 0, 0, 0, 0, 0};          // 1 = held
+  auto hold = [&](ZxPos p) { if (p.row >= 0) rows[p.row] |= (uint8_t)(1 << p.bit); };
+  uint8_t kemp = 0;
+  for (int i = 0; i < 6; i++) {
+    const uint8_t kc = keys[i];
+    if (!kc) continue;
+    if (joystick) {
+      switch (kc) {
+        case HID_KEY_ARROW_RIGHT: kemp |= 0x01; continue;
+        case HID_KEY_ARROW_LEFT:  kemp |= 0x02; continue;
+        case HID_KEY_ARROW_DOWN:  kemp |= 0x04; continue;
+        case HID_KEY_ARROW_UP:    kemp |= 0x08; continue;
+        case HID_KEY_SPACE:       kemp |= 0x10; continue;
+      }
+    }
+    if (kc >= HID_KEY_A && kc <= HID_KEY_Z) { hold(zxFindChar((char)('A' + kc - HID_KEY_A))); continue; }
+    if (kc >= HID_KEY_1 && kc <= HID_KEY_9) { hold(zxFindChar((char)('1' + kc - HID_KEY_1))); continue; }
+    // A punctuation key: its SYMBOL SHIFT chord, the shifted PC symbol when Shift is down (which
+    // then must not also press CAPS SHIFT).
+    char plain = 0, shifted = 0;
+    switch (kc) {
+      case HID_KEY_0:            hold(zxFindChar('0')); continue;
+      case HID_KEY_ENTER:
+      case HID_KEY_KEYPAD_ENTER: hold(ZX_ENTER); continue;
+      case HID_KEY_SPACE:        hold(ZX_SPACE); continue;
+      case HID_KEY_BACKSPACE:    hold(ZX_CAPS); hold(zxFindChar('0')); continue;
+      case HID_KEY_ESCAPE:       hold(ZX_CAPS); hold(ZX_SPACE); continue;   // BREAK
+      case HID_KEY_TAB:          hold(ZX_CAPS); hold(ZX_SYM); continue;     // EXTENDED MODE
+      case HID_KEY_ARROW_LEFT:   hold(ZX_CAPS); hold(zxFindChar('5')); continue;
+      case HID_KEY_ARROW_DOWN:   hold(ZX_CAPS); hold(zxFindChar('6')); continue;
+      case HID_KEY_ARROW_UP:     hold(ZX_CAPS); hold(zxFindChar('7')); continue;
+      case HID_KEY_ARROW_RIGHT:  hold(ZX_CAPS); hold(zxFindChar('8')); continue;
+      case HID_KEY_COMMA:        plain = 'N'; shifted = 'R'; break;   // ,  <
+      case HID_KEY_PERIOD:       plain = 'M'; shifted = 'T'; break;   // .  >
+      case HID_KEY_SEMICOLON:    plain = 'O'; shifted = 'Z'; break;   // ;  :
+      case HID_KEY_APOSTROPHE:   plain = '7'; shifted = 'P'; break;   // '  "
+      case HID_KEY_MINUS:        plain = 'J'; shifted = '0'; break;   // -  _
+      case HID_KEY_EQUAL:        plain = 'L'; shifted = 'K'; break;   // =  +
+      case HID_KEY_SLASH:        plain = 'V'; shifted = 'C'; break;   // /  ?
+      default: continue;
+    }
+    hold(zxFindChar(shift ? shifted : plain));
+    hold(ZX_SYM);
+    caps = false;
+  }
+  if (caps) hold(ZX_CAPS);
+  if (sym)  hold(ZX_SYM);
+  for (int r = 0; r < 8; r++)
+    for (int b = 0; b < 5; b++) zxKey(r, b, (rows[r] >> b) & 1);
+  zxSetKempston(kemp);
+}
 
 // ============================ public entry points ========================================
 // Called from the USB host task (usbgamepad.cpp onKeyboard) with the current and previous
@@ -432,7 +535,8 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
       if (kc == HID_KEY_F12) { smsHardReset();   continue; }   // soft power-cycle
     }
     if (currentPlatform == PLATFORM_PCXT && kc == HID_KEY_F12) { pcxtHardReset(); continue; }  // soft reboot
-    if (currentPlatform == PLATFORM_TINY386 && kc == HID_KEY_F12) { tiny386HardReset(); continue; }  // soft reboot
+    if (currentPlatform == PLATFORM_COLECO && kc == HID_KEY_F12) { colecoHardReset(); continue; } // power-cycle
+    if (currentPlatform == PLATFORM_ZX && kc == HID_KEY_F12) { zxHardReset(); continue; }         // power-cycle
 
     switch (currentPlatform) {
       case PLATFORM_APPLE2:
@@ -443,7 +547,6 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
       case PLATFORM_ATARI: if (atariKey(kc, true)) atariApply(); break;
       case PLATFORM_MSX:   if (!(joystick && msxIsJoyKey(kc))) msxKeyDown(kc); break;  // arrows+Space = joystick when JOY on
       case PLATFORM_PCXT:  pcxtKeyDown(kc, shift, ctrl, alt); break;                    // USB key -> XT make scancode
-      case PLATFORM_TINY386: tiny386KeyDown(kc, shift, ctrl, alt); break;              // USB key -> PS/2 make code
     }
   }
 
@@ -460,7 +563,6 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
       case PLATFORM_ATARI: if (atariKey(kc, false)) atariApply(); break;
       case PLATFORM_MSX:   if (!(joystick && msxIsJoyKey(kc))) msxKeyUp(kc); break;
       case PLATFORM_PCXT:  pcxtKeyUp(kc); break;   // USB key -> XT break scancode
-      case PLATFORM_TINY386: tiny386KeyUp(kc); break;   // USB key -> PS/2 break code
       default: break;   // Apple/IIGS keystrokes are edge-triggered (keymem); nothing to release
     }
   }
@@ -476,6 +578,10 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
     else          msxJoy(0xFF);             // typing mode: joystick released
   } else if (currentPlatform == PLATFORM_SMS) {
     smsApplyJoystick(keys);                 // joystick-only: arrows + Z/X/Space -> controller 1
+  } else if (currentPlatform == PLATFORM_COLECO) {
+    colecoApplyJoystick(modifier, keys);    // arrows + fire keys + digit-row keypad -> controller 1
+  } else if (currentPlatform == PLATFORM_ZX) {
+    zxApplyKeyboard(modifier, keys);        // the whole matrix (+ Kempston when JOY on), rebuilt per report
   } else if (currentPlatform == PLATFORM_PCXT) {
     // PC needs make/break for shift/ctrl/alt (they arrive as the modifier byte, not in keys[]).
     static uint8_t prevMod = 0;
@@ -512,6 +618,8 @@ void usbKeyboardReset()
     msxJoy(0xFF);
   }
   if (currentPlatform == PLATFORM_SMS) smsSetInput(0xFF);
+  if (currentPlatform == PLATFORM_COLECO) { colecoSetInput(0xFF); colecoSetKeypad(-1); }
+  if (currentPlatform == PLATFORM_ZX) { zxKeysReleaseAll(); zxSetKempston(0); }
 }
 
 #endif // BOARD_INPUT_USB

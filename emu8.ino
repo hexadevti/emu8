@@ -55,8 +55,13 @@ void setup() {
   // EEPROM (or an /emu8.cfg copied from a PSRAM board) can name a platform this build does not
   // link. Normalise it here, before anything reads it: otherwise setup() falls through to the
   // Apple II while loop() and renderLoop still dispatch on the stale value.
-  if (currentPlatform == PLATFORM_IIGS || currentPlatform == PLATFORM_PCXT ||
-      currentPlatform == PLATFORM_TINY386) {
+  if (currentPlatform == PLATFORM_IIGS) {
+    printLog("Platform needs PSRAM and this board has none -> falling back to Apple II");
+    currentPlatform = PLATFORM_APPLE2;
+  }
+#endif
+#if !BOARD_HAS_PCXT_CORE
+  if (currentPlatform == PLATFORM_PCXT) {
     printLog("Platform needs PSRAM and this board has none -> falling back to Apple II");
     currentPlatform = PLATFORM_APPLE2;
   }
@@ -66,6 +71,18 @@ void setup() {
   // from a build that did, and loop() would dispatch into a core that is gone.
   if (currentPlatform == PLATFORM_SMS) {
     printLog("Platform has no RAM budget on this board -> falling back to Apple II");
+    currentPlatform = PLATFORM_APPLE2;
+  }
+#endif
+#if !BOARD_HAS_COLECO_CORE
+  if (currentPlatform == PLATFORM_COLECO) {
+    printLog("Platform not linked on this board -> falling back to Apple II");
+    currentPlatform = PLATFORM_APPLE2;
+  }
+#endif
+#if !BOARD_HAS_ZX_CORE
+  if (currentPlatform == PLATFORM_ZX) {
+    printLog("Platform not linked on this board -> falling back to Apple II");
     currentPlatform = PLATFORM_APPLE2;
   }
 #endif
@@ -117,7 +134,7 @@ void setup() {
     oskSetup();
     joystickSetup();   // analog stick + buttons -> 2600 joystick + console switches
     atariAudioSetup(); // TIA audio -> I2S DAC (GPIO26), LAST so its I2S DMA comes after SD
-  // IIGS / PC-XT / tiny386 need 1-4MB of ps_malloc guest RAM. On boards without PSRAM
+  // IIGS / PC-XT need 1-4MB of ps_malloc guest RAM. On boards without PSRAM
   // (BOARD_HAS_BIGRAM_CORES 0, e.g. the PicoCalc's 520KB RP2350) they are neither selectable
   // on the splash nor linked, so their cores cost nothing in flash or RAM.
 #if BOARD_HAS_BIGRAM_CORES
@@ -157,23 +174,35 @@ void setup() {
     joystickSetup();    // analog stick + buttons -> SMS controller port 1
     smsPsgSetup();      // SN76489 -> I2S, LAST so its I2S DMA comes after SD
 #endif
-#if BOARD_HAS_BIGRAM_CORES
+#if BOARD_HAS_COLECO_CORE
+  } else if (currentPlatform == PLATFORM_COLECO) {
+    FSSetup();          // SD first: colecoSetup loads the BIOS and the saved cartridge off the card
+    colecoSetup();      // 1K RAM + 16K VRAM + BIOS; reset Z80/VDP/PSG; auto-load saved cartridge
+    loadColecoFilesSync(); // scan SD root so the options cartridge browser is populated
+    videoSetup();       // TFT + render loop (+ splash)
+    oskSetup();
+    joystickSetup();    // analog stick + buttons -> controller 1 (stick, fire buttons, keypad)
+    colecoPsgSetup();   // SN76489 -> I2S, LAST so its I2S DMA comes after SD
+#endif
+#if BOARD_HAS_ZX_CORE
+  } else if (currentPlatform == PLATFORM_ZX) {
+    FSSetup();          // SD first: zxSetup loads the ROM and the saved snapshot / tape off the card
+    zxSetup();          // 48K RAM (sharedBigBuf) + ROM; reset; auto-load the saved file
+    loadZxFilesSync();  // scan SD root so the options file browser is populated
+    videoSetup();       // TFT + render loop (+ splash)
+    oskSetup();
+    joystickSetup();    // analog stick + buttons -> Kempston joystick
+    zxAudioSetup();     // beeper -> I2S, LAST so its I2S DMA comes after SD
+#endif
+#if BOARD_HAS_PCXT_CORE
   } else if (currentPlatform == PLATFORM_PCXT) {
     FSSetup();          // SD first: pcxtSetup auto-mounts the saved A:/C: disk images
-    pcxtSetup();        // 1MB RAM (PSRAM) + 64K video RAM + install BIOS ROM + wire 8086/PIC/PIT/i8042/CGA
+    pcxtSetup();        // 1MB RAM (PSRAM; paged SRAM on the PicoCalc) + video RAM + install BIOS ROM + wire 8086/PIC/PIT/i8042/CGA
     loadPcxtFilesSync();// scan SD root so the options disk browser is populated
     videoSetup();       // TFT + render loop (+ splash)
     oskSetup();
     joystickSetup();    // gamepad -> arrow/enter scancodes
     speakerSetup();     // PC-speaker (PIT ch2) -> I2S amp, LAST so its I2S DMA comes after SD
-  } else if (currentPlatform == PLATFORM_TINY386) {
-    FSSetup();          // SD first: disk images live on the card
-    tiny386Setup();     // alloc guest RAM/VGA (PSRAM) + framebuffer + embedded SeaBIOS; reset the i386
-    loadTiny386FilesSync();
-    videoSetup();       // TFT + render loop (+ splash)
-    oskSetup();
-    joystickSetup();    // gamepad -> arrow/enter scancodes (M4)
-    speakerSetup();     // PC-speaker -> I2S amp, LAST so its I2S DMA comes after SD
 #endif
   } else {             // Apple II
     bootProgressStep(AppleIIe ? "Building the Apple IIe memory map"
@@ -221,9 +250,14 @@ void loop() {
 #if BOARD_HAS_SMS_CORE
     case PLATFORM_SMS:    smsLoop(); break;
 #endif
-#if BOARD_HAS_BIGRAM_CORES
+#if BOARD_HAS_COLECO_CORE
+    case PLATFORM_COLECO: colecoLoop(); break;
+#endif
+#if BOARD_HAS_ZX_CORE
+    case PLATFORM_ZX:     zxLoop(); break;
+#endif
+#if BOARD_HAS_PCXT_CORE
     case PLATFORM_PCXT:   pcxtLoop(); break;
-    case PLATFORM_TINY386: tiny386Loop(); break;
 #endif
     default:              cpuLoop(); break;
   }

@@ -87,7 +87,8 @@ void epromSetup() {
   dacSound = EEPROM.readBool(dacSoundEEPROMaddress);
   volume = EEPROM.readChar(VolumeEEPROMaddress);
   currentPlatform = EEPROM.readChar(PlatformEEPROMaddress);
-  if (currentPlatform > PLATFORM_TINY386) currentPlatform = PLATFORM_APPLE2;  // unset/garbage -> default
+  if (currentPlatform > PLATFORM_ZX || currentPlatform == PLATFORM_SDMANAGER)  // SD Manager is never saved
+    currentPlatform = PLATFORM_APPLE2;                                               // unset/garbage -> default
 
 #if defined(BOARD_DESKTOP)
   // Desktop debug: EMU_PLATFORM picks the platform (and esp_reset_reason() then skips the splash).
@@ -101,7 +102,8 @@ void epromSetup() {
     else if (s == "msx")                     currentPlatform = PLATFORM_MSX;
     else if (s == "sms")                     currentPlatform = PLATFORM_SMS;
     else if (s == "pcxt" || s == "pc")       currentPlatform = PLATFORM_PCXT;
-    else if (s == "tiny386" || s == "386")   currentPlatform = PLATFORM_TINY386;
+    else if (s == "coleco" || s == "cv")     currentPlatform = PLATFORM_COLECO;
+    else if (s == "zx" || s == "spectrum")   currentPlatform = PLATFORM_ZX;
   }
 #endif
 
@@ -115,6 +117,8 @@ void epromSetup() {
   msxFast = (EEPROM.readChar(MsxSpeedEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> NORMAL
   nesFast = (EEPROM.readChar(NesSpeedEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> NORMAL
   smsFast = (EEPROM.readChar(SmsSpeedEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> NORMAL
+  colecoFast = (EEPROM.readChar(ColecoSpeedEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> NORMAL
+  zxFast = (EEPROM.readChar(ZxSpeedEEPROMaddress) == 1);           // ==1 so fresh EEPROM (0xFF) -> NORMAL
   readStringFromEEPROM(C64FileNameEEPROMaddress, &selectedC64FileName);
   if (selectedC64FileName.length() == 0 || selectedC64FileName.length() > 120 ||
       selectedC64FileName[0] != '/') {
@@ -146,6 +150,18 @@ void epromSetup() {
       selectedSmsFileName[0] != '/')
     selectedSmsFileName = "";
 
+  // ColecoVision: last-loaded cartridge, auto-loaded on boot (validated; garbage -> none).
+  readStringFromEEPROM(ColecoFileNameEEPROMaddress, &selectedColecoFileName);
+  if (selectedColecoFileName.length() == 0 || selectedColecoFileName.length() > 120 ||
+      selectedColecoFileName[0] != '/')
+    selectedColecoFileName = "";
+
+  // ZX Spectrum: last-loaded snapshot / tape, auto-loaded on boot (validated; garbage -> none).
+  readStringFromEEPROM(ZxFileNameEEPROMaddress, &selectedZxFileName);
+  if (selectedZxFileName.length() == 0 || selectedZxFileName.length() > 120 ||
+      selectedZxFileName[0] != '/')
+    selectedZxFileName = "";
+
   // PCXT: last-mounted A: floppy + C: hard-disk images, auto-mounted on boot (validated; garbage -> none).
   readStringFromEEPROM(PcxtFileNameEEPROMaddress, &selectedPcFileName);
   if (selectedPcFileName.length() == 0 || selectedPcFileName.length() > 120 ||
@@ -155,16 +171,6 @@ void epromSetup() {
   if (selectedPcHdFileName.length() == 0 || selectedPcHdFileName.length() > 120 ||
       selectedPcHdFileName[0] != '/')
     selectedPcHdFileName = "";
-
-  readStringFromEEPROM(Tiny386FileNameEEPROMaddress, &selectedTiny386FileName);
-  if (selectedTiny386FileName.length() == 0 || selectedTiny386FileName.length() > 120 ||
-      selectedTiny386FileName[0] != '/')
-    selectedTiny386FileName = "";
-
-  readStringFromEEPROM(Tiny386FileNameAEEPROMaddress, &selectedTiny386FileNameA);
-  if (selectedTiny386FileNameA.length() == 0 || selectedTiny386FileNameA.length() > 120 ||
-      selectedTiny386FileNameA[0] != '/')
-    selectedTiny386FileNameA = "";
 
 
   apple2LoadMachineConfig();   // after currentPlatform (above): it picks the II+ or the IIe set
@@ -179,6 +185,8 @@ void epromSetup() {
   if (const char *d = getenv("EMU_DISK")) { selectedDiskFileName = d; HdDisk = false; }
   // EMU_C64=/x.d64 (or .prg) auto-loads + runs it on the C64 once BASIC is ready (debug/boot aid).
   if (const char *c = getenv("EMU_C64")) { selectedC64FileName = c; c64Autoload = true; }
+  // EMU_ZX=/x.tap (or .tzx/.sna/.z80) loads it on the ZX Spectrum at boot (tapes type LOAD "").
+  if (const char *z = getenv("EMU_ZX")) selectedZxFileName = z;
   // Default the Apple II to THROTTLED 1 MHz on desktop: uncapped runs the 6502 at tens of MHz on a PC,
   // which makes the 1-bit speaker ultrasonic/garbage. (Toggle it off in Control > Clock speed for a
   // speed-up, accepting bad audio.) EMU_FAST=1 forces uncapped instead.
@@ -230,6 +238,8 @@ void saveEEPROM() {
     EEPROM.writeChar(MsxSpeedEEPROMaddress, msxFast ? 1 : 0);
     EEPROM.writeChar(NesSpeedEEPROMaddress, nesFast ? 1 : 0);
     EEPROM.writeChar(SmsSpeedEEPROMaddress, smsFast ? 1 : 0);
+    EEPROM.writeChar(ColecoSpeedEEPROMaddress, colecoFast ? 1 : 0);
+    EEPROM.writeChar(ZxSpeedEEPROMaddress, zxFast ? 1 : 0);
   }
 
 // Persist every user-configurable option (all toggles, volume, and the selected
@@ -244,10 +254,10 @@ void saveConfig() {
     writeStringToEEPROM(AtariFileNameEEPROMaddress, selectedAtariFileName);
     writeStringToEEPROM(MsxFileNameEEPROMaddress, selectedMsxFileName);
     writeStringToEEPROM(SmsFileNameEEPROMaddress, selectedSmsFileName);
+    writeStringToEEPROM(ColecoFileNameEEPROMaddress, selectedColecoFileName);
+    writeStringToEEPROM(ZxFileNameEEPROMaddress, selectedZxFileName);
     writeStringToEEPROM(PcxtFileNameEEPROMaddress, selectedPcFileName);
     writeStringToEEPROM(PcxtHdFileNameEEPROMaddress, selectedPcHdFileName);
-    writeStringToEEPROM(Tiny386FileNameEEPROMaddress, selectedTiny386FileName);
-    writeStringToEEPROM(Tiny386FileNameAEEPROMaddress, selectedTiny386FileNameA);
     EEPROM.commit();
   }
   

@@ -1,7 +1,7 @@
-// Not built for the PicoCalc (RP2350): this core needs multi-megabyte ps_malloc'd guest RAM,
-// and the board has 520KB of SRAM with its 8MB PSRAM on plain GPIOs (not memory-mapped). The
-// shared dispatch/render/UI code links against src/picocalc/bigram_stubs.cpp instead.
-#if !defined(BOARD_PICOCALC)
+// Not built for the PicoCalc on an RP2040 (Cortex-M0+): its heap leaves ~75KB of guest RAM, too
+// little for DOS ("Configuration too large for memory"). The RP2350 runs it paged (fabgl/pcmem.h);
+// see BOARD_HAS_PCXT_CORE in board.h. The RP2040 links against src/picocalc/bigram_stubs.cpp.
+#if !(defined(BOARD_PICOCALC) && defined(__ARM_ARCH_6M__))
 /*
   Created by Fabrizio Di Vittorio (fdivitto2013@gmail.com) - <http://www.fabgl.com>
   Copyright (c) 2019-2022 Fabrizio Di Vittorio.
@@ -305,4 +305,4 @@ void PIT8253::tick()
 
 
 } // namespace fabgl
-#endif // !defined(BOARD_PICOCALC)
+#endif // !(BOARD_PICOCALC && RP2040)

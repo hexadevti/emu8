@@ -1,7 +1,7 @@
-// Not built for the PicoCalc (RP2350): this core needs multi-megabyte ps_malloc'd guest RAM,
-// and the board has 520KB of SRAM with its 8MB PSRAM on plain GPIOs (not memory-mapped). The
-// shared dispatch/render/UI code links against src/picocalc/bigram_stubs.cpp instead.
-#if !defined(BOARD_PICOCALC)
+// Not built for the PicoCalc on an RP2040 (Cortex-M0+): its heap leaves ~75KB of guest RAM, too
+// little for DOS ("Configuration too large for memory"). The RP2350 runs it paged (fabgl/pcmem.h);
+// see BOARD_HAS_PCXT_CORE in board.h. The RP2040 links against src/picocalc/bigram_stubs.cpp.
+#if !(defined(BOARD_PICOCALC) && defined(__ARM_ARCH_6M__))
 // pcxt_machine.cpp - PC-XT machine glue (8086 + PIC x2 + PIT + i8042 + MC146818 + CGA).
 //
 // Trimmed port of FabGL's PCEmulator Machine. Memory-agnostic: the 1MB RAM and
@@ -37,6 +37,7 @@ Machine::DiskCloseFn Machine::s_diskClose = nullptr;
 Machine::SpeakerFn  Machine::s_speakerCb  = nullptr;
 Machine::Int33Fn    Machine::s_int33      = nullptr;
 Machine::StepHook   Machine::s_stepHook   = nullptr;
+uint16_t            Machine::s_ramKB      = 0;
 
 // the single instance
 Machine g_pcxtMachine;
@@ -53,7 +54,12 @@ void Machine::setMemoryBuffers(uint8_t * ram, uint8_t * videoRam)
 
 void Machine::init()
 {
+#if PCXT_PAGED_MEM
+  // the guest RAM pages were zeroed and mapped by the caller (pcxtSetup); s_memory is page 0
+#else
+  pcmem::flat = s_memory;
   memset(s_memory, 0, PCXT_RAM_SIZE);
+#endif
   memset(s_videoMemory, 0, PCXT_VIDEOMEM_SIZE);
 
   m_i8042.init();
@@ -283,23 +289,32 @@ bool Machine::interrupt(void * context, int num)
         return true;
 
       case 0xf6: { // set/reset CF before IRET
-        auto sf = (uint16_t*)(s_memory + i8086::SS() * 16 + (uint16_t)(i8086::SP() + 4));
-        *sf = (*sf & 0xfffe) | i8086::flagCF();
+        uint32_t sf = i8086::SS() * 16 + (uint16_t)(i8086::SP() + 4);
+        pcmem::wr16(sf, (pcmem::rd16(sf) & 0xfffe) | i8086::flagCF());
         return true;
       }
       case 0xf7: { // set/reset ZF before IRET
-        auto sf = (uint16_t*)(s_memory + i8086::SS() * 16 + (uint16_t)(i8086::SP() + 4));
-        *sf = (*sf & 0xffbf) | (i8086::flagZF() << 6);
+        uint32_t sf = i8086::SS() * 16 + (uint16_t)(i8086::SP() + 4);
+        pcmem::wr16(sf, (pcmem::rd16(sf) & 0xffbf) | (i8086::flagZF() << 6));
         return true;
       }
       case 0xf8: { // set/reset IF before IRET
-        auto sf = (uint16_t*)(s_memory + i8086::SS() * 16 + (uint16_t)(i8086::SP() + 4));
-        *sf = (*sf & 0xfdff) | (i8086::flagIF() << 9);
+        uint32_t sf = i8086::SS() * 16 + (uint16_t)(i8086::SP() + 4);
+        pcmem::wr16(sf, (pcmem::rd16(sf) & 0xfdff) | (i8086::flagIF() << 9));
         return true;
       }
 
       case 0xfb:   // disk handler (INT 13h) - serialize SD/HSPI vs core-0 touch/render
         if (s_diskLock) s_diskLock();
+        // The BIOS stores a fixed 640KB memory size in the BDA during POST; with less RAM behind it
+        // DOS would load into holes. The first INT 13h (the boot-sector read) comes after POST and
+        // before DOS asks INT 12h, so correct it here.
+        // INT 12h does not read the BDA either: it returns the word at F000:2526 (the BIOS's own copy
+        // of the BDA template, 0x027F = 639KB), so patch that too when it holds the stock value.
+        if (s_ramKB) {
+          pcmem::wr16(BIOS_DATAAREA_ADDR + 0x13, s_ramKB);
+          if (pcmem::rd16(0xF2526) == 0x027F) pcmem::wr16(0xF2526, s_ramKB);
+        }
         m->m_BIOS.diskHandlerEntry();
         if (s_diskUnlock) s_diskUnlock();
         return true;
@@ -360,7 +375,7 @@ void Machine::setCGAMode()
     return;
   }
 
-  m_frameBuffer = s_videoMemory + 0x8000 + m_CGAMemoryOffset;  // 0xB8000 window
+  m_frameBuffer = cgaBase() + (m_CGAMemoryOffset & (PCXT_VIDEOMEM_SIZE - PCXT_CGA_WINDOW - 1));  // 0xB8000 window
   m_graphicsAdapter.setVideoBuffer(m_frameBuffer);
 
   if ((m_CGAModeReg & CGA_MODECONTROLREG_GRAPHICS) == 0) {
@@ -484,4 +499,4 @@ void Machine::autoDetectDriveGeometry(int drive)
   m_diskHeads[drive]     = h;
   m_diskSectors[drive]   = s;
 }
-#endif // !defined(BOARD_PICOCALC)
+#endif // !(BOARD_PICOCALC && RP2040)

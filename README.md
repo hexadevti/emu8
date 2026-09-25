@@ -4,8 +4,8 @@
 ESP32 boards with a built-in TFT and microSD. Pick a system on the boot splash and it boots disk/cartridge images
 straight off a microSD card — no PC, no external ROM files.
 
-Nine systems share one firmware, dispatched at runtime from the boot splash — the classic 8-bit cores
-plus the experimental **Apple IIGS**, **PC-XT** and **386** targets that are still in development:
+Eight systems share one firmware, dispatched at runtime from the boot splash — the classic 8-bit cores
+plus the experimental **Apple IIGS** and **PC-XT** targets that are still in development:
 
 | System | CPU | Status | Image formats |
 | --- | --- | --- | --- |
@@ -14,10 +14,10 @@ plus the experimental **Apple IIGS**, **PC-XT** and **386** targets that are sti
 | **NES** | 2A03 (6502) | Playable; mappers 0–4 | `.nes` (iNES) |
 | **Atari 2600** | 6507 (6502) | Playable | `.a26` `.bin` (2K/4K/8K/16K/32K) |
 | **MSX1** | Z80 | Playable (TMS9918 VDP + AY-3-8910 PSG); BIOS from SD or embedded C-BIOS | `.rom` `.mx1` `.dsk` |
+| **ZX Spectrum 48K** | Z80 | Playable (ULA screen + per-line border, beeper, Kempston); instant tape loading through a ROM trap (no turbo loaders); ROM from SD | `.sna` `.z80` `.tap` `.tzx` |
 | **Sega Master System** | Z80 | Playable (Mode 4 VDP + SN76489 PSG); Sega mapper + line interrupts; boots cartridges directly (no BIOS) | `.sms` `.bin` |
 | **Apple IIGS** | 65C816 | **In development** — boots ROM 01, 40-col text + HiRes/DHiRes, standard ProDOS 5.25″/800 KB disks, 1-bit speaker. SHR-heavy/protected titles and GS-native (Ensoniq) sound are not done. | `.dsk` `.po` `.2mg` `.hdv` |
 | **PC-XT** | Intel 8086 | **In development** — fabgl-based IBM PC-XT: BIOS POST, CGA text/graphics, PC speaker; mounts floppy (A:) and hard-disk (C:) images and boots DOS. BIOS from `/roms/pcxt/bios.bin` | `.img` `.ima` `.dsk` `.vhd` `.hdd` |
-| **386** | Intel i386 | **In development** — vendored [tiny386](https://github.com/hchunhui/tiny386) core + VGA, SeaBIOS/VGABIOS from `/roms/tiny386`; PS/2 keyboard + mouse, A:/C: disk mounts, boots DOS and heavier PC OSes. PSRAM-heavy, so it targets the **P4** (not built for the S3) | `.img` `.ima` `.vhd` `.hdd` |
 
 > Derived from [hexadevti/Apple2Esp32](https://github.com/hexadevti/Apple2Esp32). The original was a
 > single-system Apple II emulator; emu8 generalises the renderer, input, audio and SD layers into a
@@ -77,9 +77,9 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
 
 ### Shared core
 
-- **Boot-splash platform selector** — tap **APPLE / C64 / NES / ATARI / IIGS / MSX / SMS / PCXT / 386**
-  to choose a system; the selection persists in EEPROM and auto-boots next time. (**IIGS**, **PCXT** and
-  **386** are experimental / in development.)
+- **Boot-splash platform selector** — tap **APPLE / C64 / NES / ATARI / IIGS / MSX / SMS / PCXT**
+  to choose a system; the selection persists in EEPROM and auto-boots next time. (**IIGS** and **PCXT** are
+  experimental / in development.)
 - **microSD storage** for every platform, with on-screen file browsers per system.
 - **On-screen touch keyboard** (OSK) on both boards, plus PS/2 on the CYD and a **USB keyboard** on the JC4827W543.
 - **Audio** routed to the board's amplifier — internal DAC on the CYD, I2S Class-D on the S3.
@@ -136,6 +136,19 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
   bank-switched carts; `.sms` / `.bin` images.
 - 8-way d-pad + two fire buttons on controller port 1; **F11** = the SMS **PAUSE** button (NMI).
 
+### ZX Spectrum 48K
+
+- **Z80** at 3.5 MHz (69888 T-states per 50 Hz frame), **ULA** screen with FLASH and a border colour
+  per scanline (loading stripes show), the 1-bit **beeper** and a **Kempston** joystick on port `0x1F`.
+  Memory contention and the floating bus are not emulated.
+- Needs the 16 KB Sinclair ROM on the SD card at `/roms/zxspectrum/spec48.rom` (or `48.rom`).
+- Loads `.sna` and `.z80` (v1/v2/v3, 48K) snapshots. `.tap` / `.tzx` tapes are "inserted" and
+  `LOAD ""` is typed for you; the ROM's LD-BYTES routine is trapped so each block loads instantly.
+  Custom/turbo loaders that bypass the ROM routine do not load.
+- USB keyboard: `Shift` = CAPS SHIFT, `Ctrl`/`Alt` = SYMBOL SHIFT, `Backspace` = DELETE, `Esc` = BREAK,
+  arrows = cursor keys (Kempston stick + `Space` fire when **JOYSTICK** is on), common punctuation is
+  translated to its SYMBOL SHIFT chord, `F12` = reset.
+
 ### PC-XT *(in development)*
 
 - fabgl-derived **Intel 8086** IBM PC-XT: runs the embedded PC BIOS (POST text in the CGA buffer),
@@ -145,22 +158,12 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
   `/roms/pcxt/bios.bin` on the SD card.
 - USB keyboard → XT scancodes; gamepad → arrow/enter injection.
 
-### 386 *(in development)*
-
-- Vendored **[tiny386](https://github.com/hchunhui/tiny386)** (hchunhui, BSD-3) **Intel i386** PC with
-  **VGA** (RGB565 framebuffer, nearest-scaled to the panel). **SeaBIOS** + **VGABIOS** are read from
-  `/roms/tiny386` on the SD card.
-- **PS/2 keyboard + mouse** emulation, A:/C: disk mounts (`.img` / `.ima` / `.vhd` / `.hdd`), boots
-  MS-DOS and heavier PC operating systems.
-- The machine is allocated in PSRAM, so it targets the **JC1060P470 (ESP32-P4)** — it is **not built
-  for the S3** (too large for that toolchain).
-
 ---
 
 ## Boot & platform selection
 
 On power-up emu8 shows a boot splash with one button per system — **APPLE**, **C64**, **NES**,
-**ATARI**, **IIGS**, **MSX**, **SMS**, **PCXT** and **386** (the IIGS, PCXT and 386 still in
+**ATARI**, **IIGS**, **MSX**, **SMS** and **PCXT** (the IIGS and PCXT still in
 development). Tap one to switch systems (this saves the choice and reboots into it); tap elsewhere or
 wait for the timeout to boot the currently-selected platform. On the CYD a joystick button also
 dismisses the splash.
@@ -322,8 +325,8 @@ on the device). Full setup, toolchain and status notes live in
    - Atari 2600: `.a26` / `.bin`
    - MSX1: `.rom` / `.mx1` / `.dsk` (plus an `MSXBIOS.ROM`, or it falls back to the embedded C-BIOS)
    - Sega Master System: `.sms` / `.bin`
+   - ZX Spectrum 48K: `.sna` / `.z80` / `.tap` / `.tzx` (plus the ROM at `/roms/zxspectrum/spec48.rom`)
    - PC-XT: `.img` / `.ima` / `.dsk` / `.vhd` / `.hdd` (plus the BIOS at `/roms/pcxt/bios.bin`)
-   - 386: `.img` / `.ima` / `.vhd` / `.hdd` (plus SeaBIOS + VGABIOS under `/roms/tiny386/`)
 3. Insert the card, power on, pick a platform on the splash, then choose an image from its on-screen
    file browser.
 
@@ -434,11 +437,11 @@ emulated system. The top-level sketch wires them together:
 | [`src/c64/`](src/c64/) | 6510, VIC-II, SID, CIA, keyboard, disk, `.crt` loader, ROMs |
 | [`src/nes/`](src/nes/) | 2A03 CPU, PPU, APU, iNES loader, mappers 0–4 |
 | [`src/atari/`](src/atari/) | 6507 CPU, TIA, RIOT, cartridge bank-switching, audio |
-| [`src/z80/`](src/z80/) | Shared Z80 CPU core (MSX1 + SMS) |
+| [`src/z80/`](src/z80/) | Shared Z80 CPU core (MSX1, SMS, ColecoVision, ZX Spectrum) |
 | [`src/msx/`](src/msx/) | MSX1 — TMS9918 VDP, AY-3-8910 PSG, 8255 PPI, slot/BIOS, disk |
+| [`src/zx/`](src/zx/) | ZX Spectrum 48K — ULA screen/border, keyboard, beeper, Kempston, SNA/Z80 loaders, TAP/TZX tape trap |
 | [`src/sms/`](src/sms/) | Sega Master System — 315-5124 VDP (Mode 4), SN76489 PSG, Sega mapper, cart loader |
 | [`src/pcxt/`](src/pcxt/) | PC-XT — fabgl i8086 machine, CGA, PC speaker, disk mount (in development) |
-| [`src/tiny386/`](src/tiny386/) | 386 — vendored tiny386 i386 + VGA core and emu8 glue (in development) |
 | [`src/iigs/`](src/iigs/) | Apple IIGS core — 65C816, banked memory, ROM 01 boot, video, disk (in development) + the original feasibility benchmark |
 | [`src/desktop/`](src/desktop/) | SDL2 desktop debug build — Arduino/FreeRTOS shims, SDL display/audio/input backends (see its [README](src/desktop/README.md)) |
 | [`host/`](host/) | Off-device debug harnesses (MSX / SMS / IIGS cores on a PC, SD serial server) |

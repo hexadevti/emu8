@@ -20,6 +20,7 @@
 #include "i8042.h"
 #include "MC146818.h"
 #include "bios.h"     // defines DISKCOUNT and class BIOS
+#include "pcmem.h"
 
 using fabgl::GraphicsAdapter;
 using fabgl::PIC8259;
@@ -29,7 +30,15 @@ using fabgl::MC146818;
 using fabgl::i8086;
 
 #define PCXT_RAM_SIZE      1048576    // 1 MB, must match BIOS MEMSIZE
+#if PCXT_PAGED_MEM
+// PicoCalc: the video buffer is just the CGA's 16KB at 0xB8000 (mirrored at 0xBC000), mapped as
+// ordinary guest pages; the renderer reads it through cgaBase().
+#define PCXT_VIDEOMEM_SIZE 16384
+#define PCXT_CGA_WINDOW    0
+#else
 #define PCXT_VIDEOMEM_SIZE 65536      // 64 KB video window (0xB0000..0xBFFFF)
+#define PCXT_CGA_WINDOW    0x8000     // 0xB8000 inside that window
+#endif
 
 
 class Machine {
@@ -78,6 +87,9 @@ public:
   // Called once per instruction (between instructions, before step()). The device glue uses it to
   // inject the INT 33h mouse event-handler far-call into the running program (QBASIC uses callbacks).
   typedef void (*StepHook)();
+  // PicoCalc: KB of conventional memory reported to DOS (BDA 0x413); 0 = leave the BIOS value.
+  static void setReportedRamKB(uint16_t kb) { s_ramKB = kb; }
+
   static void setStepHook(StepHook f) { s_stepHook = f; }
 
   // Disk backend (set by the device glue: SD/File on device, stdio on the host harness).
@@ -102,6 +114,7 @@ public:
   MC146818 * getMC146818()     { return &m_MC146818; }
   uint8_t *  memory()          { return s_memory; }
   uint8_t *  videoMemory()     { return s_videoMemory; }
+  uint8_t *  cgaBase()         { return s_videoMemory + PCXT_CGA_WINDOW; }   // guest 0xB8000
   uint8_t *  frameBuffer()     { return m_frameBuffer; }
   GraphicsAdapter * graphicsAdapter() { return &m_graphicsAdapter; }
 
@@ -167,6 +180,7 @@ private:
   static SpeakerFn   s_speakerCb;
   static Int33Fn     s_int33;
   static StepHook    s_stepHook;
+  static uint16_t    s_ramKB;
 
   PIC8259   m_PIC8259A;   // master
   PIC8259   m_PIC8259B;   // slave

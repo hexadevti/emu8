@@ -4,15 +4,16 @@ import { zipStore } from './zip.js';
 
 const $ = id => document.getElementById(id);
 const DEFAULT_BAUD = 115200;
-const PLACES = ['/', '/roms', '/roms/apple2', '/roms/c64', '/roms/msx', '/roms/iigs', '/roms/pcxt', '/roms/tiny386'];
+const PLACES = ['/', '/roms', '/roms/apple2', '/roms/c64', '/roms/msx', '/roms/iigs', '/roms/pcxt'];
 
 // Extension -> which emu8 system opens it (README "microSD card preparation").
 const SYSTEMS = {
   dsk: 'Apple · MSX · PC', do: 'Apple II', po: 'Apple II', nib: 'Apple II', hdv: 'Apple II', '2mg': 'Apple II / IIGS',
   prg: 'C64', d64: 'C64', crt: 'C64',
   nes: 'NES', a26: 'Atari 2600', sms: 'Master System',
+  sna: 'ZX Spectrum', z80: 'ZX Spectrum', tap: 'ZX Spectrum', tzx: 'ZX Spectrum',
   rom: 'MSX / ROM', mx1: 'MSX', bin: 'ROM / Atari / SMS',
-  img: 'PC-XT / 386', ima: 'PC-XT / 386', vhd: 'PC-XT / 386', hdd: 'PC-XT / 386',
+  img: 'PC-XT', ima: 'PC-XT', vhd: 'PC-XT', hdd: 'PC-XT',
   cfg: 'Settings',
 };
 

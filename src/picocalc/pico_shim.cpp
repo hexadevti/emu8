@@ -1,7 +1,6 @@
 // pico_shim.cpp - out-of-line half of the ESP-IDF compatibility layer (see pico_shim/pico_shim.h).
 //
-// Only the pieces that must be real symbols rather than inline code live here: ps_malloc (the
-// tiny386 core forward-declares it as an extern "C" function, so it cannot be a macro), the
+// Only the pieces that must be real symbols rather than inline code live here: ps_malloc, the
 // heap_caps_* family, and esp_reset_reason(). Guarded so arduino-cli, which compiles every .cpp
 // under src/ for every target, produces an empty object file on the other boards.
 #include "../../board.h"

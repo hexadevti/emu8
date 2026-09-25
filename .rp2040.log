@@ -5,13 +5,7 @@ C:\Users\lucia\repos\emu8\board.h:86:9: warning: 'BOARD_NAME' redefined
       |         ^~~~~~~~~~
 <command-line>: note: this is the location of the previous definition
 In file included from C:\Users\lucia\repos\emu8\emu.h:11,
-                 from C:\Users\lucia\repos\emu8\src\picocalc\input_picocalc.cpp:56:
-C:\Users\lucia\repos\emu8\board.h:86:9: warning: 'BOARD_NAME' redefined
-   86 | #define BOARD_NAME            "ClockworkPi PicoCalc (RP2350)"
-      |         ^~~~~~~~~~
-<command-line>: note: this is the location of the previous definition
-In file included from C:\Users\lucia\repos\emu8\emu.h:11,
-                 from C:\Users\lucia\repos\emu8\src\shared\usbkeyboard.cpp:23:
+                 from C:\Users\lucia\repos\emu8\src\msx\msx.cpp:5:
 C:\Users\lucia\repos\emu8\board.h:86:9: warning: 'BOARD_NAME' redefined
    86 | #define BOARD_NAME            "ClockworkPi PicoCalc (RP2350)"
       |         ^~~~~~~~~~
@@ -23,17 +17,11 @@ C:\Users\lucia\repos\emu8\board.h:86:9: warning: 'BOARD_NAME' redefined
       |         ^~~~~~~~~~
 <command-line>: note: this is the location of the previous definition
 C:\Users\lucia\repos\emu8\src\shared\video.cpp: In function 'void renderLoop(void*)':
-C:\Users\lucia\repos\emu8\src\shared\video.cpp:1331:43: warning: top-level comma expression in array subscript changed meaning in C++23 [-Wcomma-subscript]
- 1331 |                         bottomChr = auxram[0, (ushort)(0x400 + (bb * 0x28) + (lb * 0x80) + j / 2)];
+C:\Users\lucia\repos\emu8\src\shared\video.cpp:1339:43: warning: top-level comma expression in array subscript changed meaning in C++23 [-Wcomma-subscript]
+ 1339 |                         bottomChr = auxram[0, (ushort)(0x400 + (bb * 0x28) + (lb * 0x80) + j / 2)];
       |                                           ^
-C:\Users\lucia\repos\emu8\src\shared\video.cpp:1345:33: warning: top-level comma expression in array subscript changed meaning in C++23 [-Wcomma-subscript]
- 1345 |                     chr = auxram[0, (ushort)(0x400 + (b * 0x28) + (l * 0x80) + j / 2)];
+C:\Users\lucia\repos\emu8\src\shared\video.cpp:1353:33: warning: top-level comma expression in array subscript changed meaning in C++23 [-Wcomma-subscript]
+ 1353 |                     chr = auxram[0, (ushort)(0x400 + (b * 0x28) + (l * 0x80) + j / 2)];
       |                                 ^
-In file included from C:\Users\lucia\repos\emu8\emu.h:11,
-                 from C:\Users\lucia\repos\emu8\src\shared\optionsui.cpp:1:
-C:\Users\lucia\repos\emu8\board.h:86:9: warning: 'BOARD_NAME' redefined
-   86 | #define BOARD_NAME            "ClockworkPi PicoCalc (RP2350)"
-      |         ^~~~~~~~~~
-<command-line>: note: this is the location of the previous definition
-Sketch uses 450140 bytes (22%) of program storage space. Maximum is 2027520 bytes.
-Global variables use 131552 bytes (50%) of dynamic memory, leaving 130592 bytes for local variables. Maximum is 262144 bytes.
+Sketch uses 482972 bytes (23%) of program storage space. Maximum is 2027520 bytes.
+Global variables use 140096 bytes (53%) of dynamic memory, leaving 122048 bytes for local variables. Maximum is 262144 bytes.

@@ -52,8 +52,7 @@ extern "C" {
 #define MALLOC_CAP_INTERNAL   (1 << 11)
 #define MALLOC_CAP_DEFAULT    (1 << 12)
 
-// ps_malloc() is a REAL symbol, not a macro: src/tiny386/tiny386_core.cpp forward-declares it
-// as `extern "C" void *ps_malloc(size_t)`, which a macro would break. Defined in pico_shim.cpp.
+// ps_malloc() is a real symbol, defined in pico_shim.cpp.
 void  *ps_malloc(size_t n);
 void  *ps_calloc(size_t n, size_t size);
 void  *ps_realloc(void *p, size_t n);

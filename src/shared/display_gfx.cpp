@@ -171,23 +171,6 @@ void DisplayGFX::pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uin
   }
 }
 
-// Direct 1:1 blit of an RGB565 image into the canvas at PANEL-native (x,y) — no logical 320x240
-// scaling, no centering offset (unlike pushImage). The tiny386 PC renderer composes its own
-// full-panel image and needs exact placement; clipped to the canvas, the UI-mode flush pushes it 1:1.
-void DisplayGFX::drawCanvasRGB565(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data) {
-  if (!_fb || !data) return;
-  for (int32_t r = 0; r < h; r++) {
-    int32_t cy = y + r;
-    if (cy < 0 || cy >= PANEL_NATIVE_H) continue;
-    const uint16_t *srow = data + (size_t)r * w;
-    uint16_t *drow = _fb + (size_t)cy * PANEL_NATIVE_W;
-    for (int32_t c = 0; c < w; c++) {
-      int32_t cx = x + c;
-      if (cx >= 0 && cx < PANEL_NATIVE_W) drow[cx] = srow[c];
-    }
-  }
-}
-
 // --- NES direct-to-panel fast path: push a converted band straight to the panel at the centered
 //     video offset, bypassing the PSRAM canvas write AND the full 480x272 QSPI flush. This removes
 //     the core-0 PSRAM round-trip that contends with the core-1 interpreter on the shared S3 MSPI bus.
@@ -198,17 +181,6 @@ void DisplayGFX::pushPanelBand(int32_t logicalX, int32_t logicalY, int32_t w, in
 #else
   if (!_panel) return;
   _panel->draw16bitRGBBitmap(logicalX + DISP_OFFSET_X, logicalY + DISP_OFFSET_Y, (uint16_t *)data, w, h);
-#endif
-}
-// Raw 1:1 blit straight to the panel at panel coords (no DISP_OFFSET). Used by the tiny386 renderer
-// to bypass the PSRAM canvas + its full flush (it composes the whole panel itself).
-void DisplayGFX::drawPanelRGB565(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data) {
-  if (!data) return;
-#if BOARD_PANEL_DSI
-  dsiPanelDrawBitmap(x, y, w, h, data);
-#else
-  if (!_panel) return;
-  _panel->draw16bitRGBBitmap(x, y, (uint16_t *)data, w, h);
 #endif
 }
 void DisplayGFX::fillPanelBlack() {
@@ -443,29 +415,6 @@ void DisplayGFX::flushDSI() {
   dsiPanelDrawBitmap(0, 0, PANEL_NATIVE_W, PANEL_NATIVE_H, frame);
 }
 
-// Composite + push ONLY the keyboard's band (logical y >= ~100 -> the bottom of the panel) in one DSI
-// transfer. Used by the tiny386 render loop when ONLY the keyboard changed (a key press) so it doesn't
-// re-flush the whole 1024x600 frame -- the full composite made the on-screen keyboard laggy.
-void DisplayGFX::flushOskBand() {
-  if (!_fb || !_oskFb) return;
-  const int y0 = PANEL_NATIVE_H * 100 / DISP_LOGICAL_H;   // keyboard top (logical ~100) -> panel row
-  const int h  = PANEL_NATIVE_H - y0;
-  static uint16_t *band = nullptr;
-  if (!band) band = (uint16_t *)ps_malloc((size_t)PANEL_NATIVE_W * h * 2);
-  if (!band) { flushDSI(); return; }   // fall back to the full flush if the band buffer won't allocate
-  for (int r = 0; r < h; r++) {
-    const uint16_t *vrow = _fb    + (size_t)(y0 + r) * PANEL_NATIVE_W;
-    const uint16_t *orow = _oskFb + (size_t)(y0 + r) * PANEL_NATIVE_W;
-    uint16_t *drow = band + (size_t)r * PANEL_NATIVE_W;
-    for (int x = 0; x < PANEL_NATIVE_W; x++) {
-      uint16_t o = orow[x];
-      drow[x] = (o != OSK_OVERLAY_TRANSPARENT)
-                ? (uint16_t)(((o >> 1) & 0x7BEF) + ((vrow[x] >> 1) & 0x7BEF))   // 50/50 blend
-                : vrow[x];
-    }
-  }
-  dsiPanelDrawBitmap(0, y0, PANEL_NATIVE_W, h, band);
-}
 #endif // BOARD_PANEL_DSI
 
 // Touch (XPT2046 on its own SPI) is read directly in touchkeyboard.cpp; these stay stubs.

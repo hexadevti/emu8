@@ -1,7 +1,7 @@
-// Not built for the PicoCalc (RP2350): this core needs multi-megabyte ps_malloc'd guest RAM,
-// and the board has 520KB of SRAM with its 8MB PSRAM on plain GPIOs (not memory-mapped). The
-// shared dispatch/render/UI code links against src/picocalc/bigram_stubs.cpp instead.
-#if !defined(BOARD_PICOCALC)
+// Not built for the PicoCalc on an RP2040 (Cortex-M0+): its heap leaves ~75KB of guest RAM, too
+// little for DOS ("Configuration too large for memory"). The RP2350 runs it paged (fabgl/pcmem.h);
+// see BOARD_HAS_PCXT_CORE in board.h. The RP2040 links against src/picocalc/bigram_stubs.cpp.
+#if !(defined(BOARD_PICOCALC) && defined(__ARM_ARCH_6M__))
 // =============================================================================
 //
 // Based on code from:
@@ -31,6 +31,7 @@
 #include <string.h>
 
 #include "i8086.h"
+#include "pcmem.h"
 
 
 namespace fabgl {
@@ -107,7 +108,7 @@ namespace fabgl {
 
 
 // Global variable definitions
-static uint8_t    regs[48];
+alignas(4) static uint8_t regs[48];   // aligned: regs16/CBW/CWD access it as halfwords
 static uint8_t    flags[10];
 static int32_t    regs_offset;
 static uint8_t    * regs8, i_mod_size, i_d, i_w, raw_opcode_id, xlat_opcode_id, extra, rep_mode, seg_override_en, rep_override_en;
@@ -657,6 +658,49 @@ bool i8086::IRQ(uint8_t interrupt_num)
 /////////////////////////////////////////////////////////////////////////////
 
 
+#if PCXT_PAGED_MEM
+
+// PicoCalc: guest memory is 4KB pages (pcmem.h). MEM16 must stay an lvalue (it is assigned to), so
+// it is a tiny proxy doing byte-wise page accesses -- the M0+ faults on unaligned halfwords. Video
+// RAM is an ordinary page there too (the CGA renderer reads it directly), so RMEM/WMEM need no
+// video-window check and the video callbacks are never called.
+struct Mem16Ref {
+  uint32_t a;
+  operator uint16_t() const                { return pcmem::rd16(a); }
+  Mem16Ref & operator=(uint16_t v)         { pcmem::wr16(a, v); return *this; }
+  Mem16Ref & operator=(const Mem16Ref & o) { pcmem::wr16(a, (uint16_t)o); return *this; }
+};
+#define MEM8(addr)  pcmem::rd8(addr)
+#define MEM16(addr) (Mem16Ref{ (uint32_t)(addr) })
+
+
+uint8_t i8086::RMEM8(int addr)
+{
+  return pcmem::rd8(addr);
+}
+
+
+uint16_t i8086::RMEM16(int addr)
+{
+  return pcmem::rd16(addr);
+}
+
+
+inline __attribute__((always_inline)) uint8_t i8086::WMEM8(int addr, uint8_t value)
+{
+  pcmem::wr8(addr, value);
+  return value;
+}
+
+
+inline __attribute__((always_inline)) uint16_t i8086::WMEM16(int addr, uint16_t value)
+{
+  pcmem::wr16(addr, value);
+  return value;
+}
+
+#else
+
 // direct RAM access (not video RAM)
 #define MEM8(addr)  s_memory[addr]
 #define MEM16(addr) (*(uint16_t*)(s_memory + (addr)))
@@ -702,6 +746,8 @@ inline __attribute__((always_inline)) uint16_t i8086::WMEM16(int addr, uint16_t 
   }
   return value;
 }
+
+#endif
 
 /////////////////////////////////////////////////////////////////////////////
 
@@ -771,10 +817,10 @@ void i8086::pc_interrupt(uint8_t interrupt_num)
     uint16_t newCS     = MEM16(4 * interrupt_num + 2);
 
     regs16[REG_SP] -= 6;
-    uint16_t * stack = &MEM16(16 * regs16[REG_SS] + regs16[REG_SP]);
-    stack[2] = make_flags();
-    stack[1] = regs16[REG_CS];
-    stack[0] = reg_ip;
+    uint32_t sa = 16 * regs16[REG_SS] + regs16[REG_SP];
+    MEM16(sa + 4) = make_flags();
+    MEM16(sa + 2) = regs16[REG_CS];
+    MEM16(sa)     = reg_ip;
 
     reg_ip         = newIP;
     regs16[REG_CS] = newCS;
@@ -838,10 +884,17 @@ static int32_t DAA_DAS()
 
 void i8086::reset()
 {
+#if PCXT_PAGED_MEM
+  regs_offset = pcmem::REGS_BASE;
+  pcmem::mapRegs(regs);
+  regs8  = regs;
+  regs16 = (uint16_t *)regs;
+#else
   regs_offset = (int32_t)(regs - s_memory);
 
   regs8  = (uint8_t *)(s_memory + regs_offset);
   regs16 = (uint16_t *)(s_memory + regs_offset);
+#endif
 
   memset(regs8, 0, sizeof(regs));
   set_flags(0);
@@ -912,7 +965,22 @@ void i8086::step()
     if (rep_override_en)
       --rep_override_en;
 
+#if PCXT_PAGED_MEM
+    // up to 6 opcode bytes are read through this pointer: use the page directly unless the
+    // instruction may straddle a page boundary, then gather it byte-wise
+    uint8_t fetchBuf[6];
+    uint32_t fetchAddr = 16 * regs16[REG_CS] + reg_ip;
+    uint8_t const * opcode_stream;
+    if ((fetchAddr & pcmem::PAGE_MASK) <= pcmem::PAGE_SIZE - sizeof(fetchBuf)) {
+      opcode_stream = pcmem::rdPtr(fetchAddr);
+    } else {
+      for (int i = 0; i < (int)sizeof(fetchBuf); ++i)
+        fetchBuf[i] = pcmem::rd8(fetchAddr + i);
+      opcode_stream = fetchBuf;
+    }
+#else
     uint8_t const * opcode_stream = s_memory + 16 * regs16[REG_CS] + reg_ip;
+#endif
 
     #if I8086_SHOW_OPCODE_STATS
     static uint32_t opcodeStats[256] = {0};
@@ -1004,7 +1072,7 @@ void i8086::step()
       case 6:
       {
         uint16_t pIP = reg_ip + 3;
-        reg_ip = pIP + *(uint16_t*)(opcode_stream + 1);
+        reg_ip = pIP + (uint16_t)(opcode_stream[1] | (opcode_stream[2] << 8));
         regs16[REG_SP] -= 2;
         MEM16(16 * regs16[REG_SS] + regs16[REG_SP]) = pIP;
         return;
@@ -1043,7 +1111,7 @@ void i8086::step()
       // MOV reg16, data16
       // opcodes 0xb8 ... 0xbf
       case 11:
-        regs16[*opcode_stream & 0x7] = *(uint16_t*)(opcode_stream + 1);
+        regs16[*opcode_stream & 0x7] = opcode_stream[1] | (opcode_stream[2] << 8);
         reg_ip += 3;
         return;
 
@@ -1089,10 +1157,10 @@ void i8086::step()
       // opcode 0xcf
       case 16:
       {
-        uint16_t * stack = &MEM16(16 * regs16[REG_SS] + regs16[REG_SP]);
-        reg_ip         = stack[0];
-        regs16[REG_CS] = stack[1];
-        set_flags(stack[2]);
+        uint32_t sa = 16 * regs16[REG_SS] + regs16[REG_SP];
+        reg_ip         = MEM16(sa);
+        regs16[REG_CS] = MEM16(sa + 2);
+        set_flags(MEM16(sa + 4));
         regs16[REG_SP] += 6;
         return;
       }
@@ -1101,9 +1169,9 @@ void i8086::step()
       // opcode 0xcb
       case 17:
       {
-        uint16_t * stack = &MEM16(16 * regs16[REG_SS] + regs16[REG_SP]);
-        reg_ip         = stack[0];
-        regs16[REG_CS] = stack[1];
+        uint32_t sa = 16 * regs16[REG_SS] + regs16[REG_SP];
+        reg_ip         = MEM16(sa);
+        regs16[REG_CS] = MEM16(sa + 2);
         regs16[REG_SP] += 4;
         return;
       }
@@ -1199,7 +1267,7 @@ void i8086::stepEx(uint8_t const * opcode_stream)
         }
       } else if (i_reg != 6) {
         // JMP|CALL
-        uint16_t jumpTo = i_w ? MEM16(op_from_addr) : MEM8(op_from_addr);
+        uint16_t jumpTo = i_w ? (uint16_t)MEM16(op_from_addr) : MEM8(op_from_addr);
         if (i_reg - 3 == 0) {
           // CALL (far)
           i_w = 1;
@@ -1790,9 +1858,9 @@ void i8086::stepEx(uint8_t const * opcode_stream)
     case 32: // CALL FAR imm16:imm16
     {
       regs16[REG_SP] -= 4;
-      uint16_t * stack = &MEM16(16 * regs16[REG_SS] + regs16[REG_SP]);
-      stack[1] = regs16[REG_CS];
-      stack[0] = reg_ip + 5;
+      uint32_t sa = 16 * regs16[REG_SS] + regs16[REG_SP];
+      MEM16(sa + 2) = regs16[REG_CS];
+      MEM16(sa)     = reg_ip + 5;
       regs16[REG_CS]  = i_data2;
       reg_ip          = i_data0;
       return; // no calc ip, no flags
@@ -1995,4 +2063,4 @@ void i8086::stepEx(uint8_t const * opcode_stream)
 
 
 }   // namespace fabgl
-#endif // !defined(BOARD_PICOCALC)
+#endif // !(BOARD_PICOCALC && RP2040)

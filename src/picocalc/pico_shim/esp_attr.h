@@ -1,7 +1,7 @@
 // esp_attr.h - PicoCalc shim for the ESP-IDF section attributes.
 //
-// Kept separate from (and included by) pico_shim.h because the tiny386 core's .c files include
-// this header on its own, so it must stay valid C with no other dependencies.
+// Kept separate from (and included by) pico_shim.h so it can be included on its own; it must stay
+// valid C with no other dependencies.
 //
 //   IRAM_ATTR       ESP-IDF: place this function in internal RAM so it never stalls on a flash
 //                   cache miss. pico-sdk's equivalent is the ".time_critical" section, which

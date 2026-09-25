@@ -32,7 +32,7 @@ extern bool screenFill;           // Settings: SCREEN FILL (zoom video to fill w
 extern bool OptionsWindow;        // settings menu open -> always show ORIG so the menu isn't zoomed
 extern bool DebugWindow;
 
-// Emulator framebuffer size. Defaults to 320x240 (like the CYD); PC-XT / tiny386 enlarge it via
+// Emulator framebuffer size. Defaults to 320x240 (like the CYD); PC-XT enlarge it via
 // desktopSetEmuResolution() so their authentic PC fonts render at native resolution (not squished).
 static int W = DISP_LOGICAL_W, H = DISP_LOGICAL_H;
 static int            g_winW   = 1024, g_winH = 768;   // default desktop window (4:3, like 320x240)
@@ -44,7 +44,7 @@ static SDL_Texture   *g_tex    = nullptr;
 // displaySetVideoRect/Fill). FILL mode zooms this rect to the whole window; defaults = the full fb.
 static int g_vidTop = 0, g_vidH = H, g_vidLeft = 0, g_vidW = W;
 
-// Resize the emulator framebuffer. PC-XT / tiny386 setup() call this BEFORE begin(), so begin() just
+// Resize the emulator framebuffer. PC-XT setup() call this BEFORE begin(), so begin() just
 // allocates _fb / g_tex at the new size. (No live-resize path is needed: desktop platform switching
 // re-execs, so the size is chosen once per process — at begin() — for the booted platform.)
 void desktopSetEmuResolution(int w, int h) {

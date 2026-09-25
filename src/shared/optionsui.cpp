@@ -124,13 +124,12 @@ static bool ouiIsAtari() { return currentPlatform == PLATFORM_ATARI; }
 static bool ouiIsIIgs() { return currentPlatform == PLATFORM_IIGS; }   // shares the Apple grid, minus MACHINE
 static bool ouiIsMsx() { return currentPlatform == PLATFORM_MSX; }     // ROM/disk browser like NES/Atari
 static bool ouiIsSms() { return currentPlatform == PLATFORM_SMS; }     // ROM browser like NES/Atari/MSX
+static bool ouiIsColeco() { return currentPlatform == PLATFORM_COLECO; } // cartridge browser like SMS
+static bool ouiIsZx() { return currentPlatform == PLATFORM_ZX; }       // snapshot/tape browser
 static bool ouiIsPcxt() { return currentPlatform == PLATFORM_PCXT; }   // disk-image browser
-static bool ouiIsTiny386() { return currentPlatform == PLATFORM_TINY386; }   // i386 disk-image browser
-// PC platforms (PC-XT + tiny386) share the A:/C: two-slot disk UI. ouiPcA/ouiPcC are the A: floppy /
-// C: hard-disk image markers for the current one.
-static bool ouiIsPC() { return ouiIsPcxt() || ouiIsTiny386(); }
-static String &ouiPcA() { return ouiIsTiny386() ? selectedTiny386FileNameA : selectedPcFileName; }
-static String &ouiPcC() { return ouiIsTiny386() ? selectedTiny386FileName  : selectedPcHdFileName; }
+// The PC-XT has the A:/C: two-slot disk UI. ouiPcA/ouiPcC are the A: floppy / C: hard-disk image markers.
+static String &ouiPcA() { return selectedPcFileName; }
+static String &ouiPcC() { return selectedPcHdFileName; }
 
 static std::vector<std::string> &ouiFiles()
 {
@@ -139,8 +138,9 @@ static std::vector<std::string> &ouiFiles()
   if (ouiIsAtari()) return atariFiles;
   if (ouiIsMsx()) return msxFiles;
   if (ouiIsSms()) return smsFiles;
+  if (ouiIsColeco()) return colecoFiles;
+  if (ouiIsZx()) return zxFiles;
   if (ouiIsPcxt()) return pcFiles;
-  if (ouiIsTiny386()) return tiny386Files;
   return HdDisk ? hdFiles : diskFiles;
 }
 
@@ -151,8 +151,9 @@ static std::string ouiSel()
   if (ouiIsAtari()) return std::string(selectedAtariFileName.c_str());
   if (ouiIsMsx()) return std::string(selectedMsxFileName.c_str());
   if (ouiIsSms()) return std::string(selectedSmsFileName.c_str());
+  if (ouiIsColeco()) return std::string(selectedColecoFileName.c_str());
+  if (ouiIsZx()) return std::string(selectedZxFileName.c_str());
   if (ouiIsPcxt()) return std::string(selectedPcFileName.c_str());
-  if (ouiIsTiny386()) return std::string(selectedTiny386FileName.c_str());
   return std::string((HdDisk ? selectedHdFileName : selectedDiskFileName).c_str());
 }
 
@@ -184,8 +185,9 @@ static void ouiBrowse(const std::string &entry)
   else if (ouiIsAtari())   { if (up) atariBrowseUp();   else atariBrowseEnter(p); }
   else if (ouiIsMsx())     { if (up) msxBrowseUp();     else msxBrowseEnter(p); }
   else if (ouiIsSms())     { if (up) smsBrowseUp();     else smsBrowseEnter(p); }
+  else if (ouiIsColeco())  { if (up) colecoBrowseUp();  else colecoBrowseEnter(p); }
+  else if (ouiIsZx())      { if (up) zxBrowseUp();      else zxBrowseEnter(p); }
   else if (ouiIsPcxt())    { if (up) pcxtBrowseUp();    else pcxtBrowseEnter(p); }
-  else if (ouiIsTiny386()) { if (up) tiny386BrowseUp(); else tiny386BrowseEnter(p); }
   else if (HdDisk)         { if (up) hdBrowseUp();      else hdBrowseEnter(p); }
   else                     { if (up) diskBrowseUp();    else diskBrowseEnter(p); }
   shownFile = 0xff; firstShowFile = 0;
@@ -289,12 +291,13 @@ static void ouiDrawToggles()
     ouiDrawScreenToggle();
     return;
   }
-  if (ouiIsSms()) {                           // SMS grid: SOUND / JOYSTICK / VIDEO / SPEED + Z80 readout
-    char mhz[12]; snprintf(mhz, sizeof(mhz), "%.1fMHz", smsMeasuredMhz);
+  if (ouiIsSms() || ouiIsColeco() || ouiIsZx()) {   // SMS / Coleco / ZX grid: SOUND / JOYSTICK / VIDEO / SPEED + Z80 readout
+    char mhz[12]; snprintf(mhz, sizeof(mhz), "%.1fMHz", ouiIsSms() ? smsMeasuredMhz : ouiIsZx() ? zxMeasuredMhz : colecoMeasuredMhz);
+    const bool fast = ouiIsSms() ? smsFast : ouiIsZx() ? zxFast : colecoFast;
     ouiDrawToggle(0, "SOUND",    sound ? "ON" : "MUTE",          OUI_TXT);
     ouiDrawToggle(1, "JOYSTICK", joystick ? "ON" : "OFF",        OUI_TXT);
     ouiDrawToggle(2, "VIDEO",    videoColor ? "COLOR" : "MONO",  OUI_TXT);
-    ouiDrawToggle(3, "SPEED",    smsFast ? "FAST" : "NORMAL",    OUI_TXT);
+    ouiDrawToggle(3, "SPEED",    fast ? "FAST" : "NORMAL",       OUI_TXT);
     ouiDrawToggle(4, "Z80",      mhz,                            OUI_TXT);   // measured uncapped speed (read-only)
     for (int i = 5; i < 8; i++) ouiClearToggle(i);
     ouiDrawScreenToggle();
@@ -305,15 +308,6 @@ static void ouiDrawToggles()
     ouiDrawToggle(0, "SOUND",    sound ? "ON" : "MUTE",          OUI_TXT);
     ouiDrawToggle(1, "VIDEO",    videoColor ? "COLOR" : "MONO",  OUI_TXT);
     ouiDrawToggle(2, "8086",     mhz,                            OUI_TXT);   // measured equiv speed (read-only)
-    for (int i = 3; i < 8; i++) ouiClearToggle(i);
-    ouiDrawScreenToggle();
-    return;
-  }
-  if (ouiIsTiny386()) {                        // tiny386 grid: SOUND / VIDEO + i386 speed readout
-    char mhz[14]; snprintf(mhz, sizeof(mhz), "%.0fki/s", tiny386MeasuredMhz);
-    ouiDrawToggle(0, "SOUND",    sound ? "ON" : "MUTE",          OUI_TXT);
-    ouiDrawToggle(1, "VIDEO",    videoColor ? "COLOR" : "MONO",  OUI_TXT);
-    ouiDrawToggle(2, "i386",     mhz,                            OUI_TXT);   // measured throughput (read-only)
     for (int i = 3; i < 8; i++) ouiClearToggle(i);
     ouiDrawScreenToggle();
     return;
@@ -396,8 +390,9 @@ static void ouiDrawFiles()
                          : ouiIsAtari() ? "A26/BIN ROMS"
                          : ouiIsMsx() ? "MSX ROM/DSK"
                          : ouiIsSms() ? "SMS ROMS"
+                         : ouiIsColeco() ? "CARTRIDGES"
+                         : ouiIsZx() ? "SNA/Z80/TAP"
                          : ouiIsPcxt() ? "PC DISK IMG"
-                         : ouiIsTiny386() ? "386 DISK IMG"
                          : (HdDisk ? "HD IMAGES" : "DISK IMAGES"),
           (int)files.size());
   tft.setTextDatum(BL_DATUM);
@@ -417,8 +412,8 @@ static void ouiDrawFiles()
       if (idx >= (int)files.size()) { tft.fillRect(0, ry, 300, OUI_FB_ROWH, OUI_CARD2); continue; }
 
       bool selected = (idx == shownFile);
-      bool mntA = ouiIsPC() && ouiPcA().length() && (files[idx] == std::string(ouiPcA().c_str()));
-      bool mntC = ouiIsPC() && ouiPcC().length() && (files[idx] == std::string(ouiPcC().c_str()));
+      bool mntA = ouiIsPcxt() && ouiPcA().length() && (files[idx] == std::string(ouiPcA().c_str()));
+      bool mntC = ouiIsPcxt() && ouiPcC().length() && (files[idx] == std::string(ouiPcC().c_str()));
       bool mounted  = (files[idx] == sel) || mntA || mntC;
       uint16_t rowbg = selected ? OUI_SEL : OUI_CARD2;
       tft.fillRect(0, ry, 300, OUI_FB_ROWH, rowbg);
@@ -513,13 +508,12 @@ static void ouiDrawFileHints()
   const bool dir = shownFile < fl.size() && ouiIsDir(fl[shownFile]);
   // What Enter (inside the list) and Ctrl-Enter do -- mirrors optionsUiKeyEnter / ouiMount.
   const char *enterAct = dir               ? "open folder"
-                       : ouiIsTiny386()    ? "mount C:"
                        : ouiIsPcxt()       ? "mount A:"
                        : ouiIsIIgs()       ? "mount + reboot"
-                       : (ouiIsC64() || ouiIsNES() || ouiIsAtari() || ouiIsMsx() || ouiIsSms())
+                       : (ouiIsC64() || ouiIsNES() || ouiIsAtari() || ouiIsMsx() || ouiIsSms() || ouiIsColeco() || ouiIsZx())
                                            ? "load & run" : "mount";
   const char *ctrlAct  = dir               ? NULL
-                       : ouiIsPC()         ? "mount C:"
+                       : ouiIsPcxt()       ? "mount C:"
                        : (currentPlatform == PLATFORM_APPLE2) ? "mount + reboot" : NULL;
 
   const int y = OUI_ACT_TOP, h = OUI_ACT_H;
@@ -551,7 +545,7 @@ static void ouiDrawActions()
   uint16_t mc = canMount ? OUI_MOUNT : OUI_CARD2;
   uint16_t mt = canMount ? OUI_TXT : OUI_LBL;
 
-  if (ouiIsPC()) {                         // PC-XT / tiny386: MOUNT/EJECT A: | MOUNT/EJECT C: | REBOOT
+  if (ouiIsPcxt()) {                       // PC-XT: MOUNT/EJECT A: | MOUNT/EJECT C: | REBOOT
     std::vector<std::string> &fl = ouiFiles();
     bool curA = shownFile < fl.size() && ouiPcA().length() && (fl[shownFile] == std::string(ouiPcA().c_str()));
     bool curC = shownFile < fl.size() && ouiPcC().length() && (fl[shownFile] == std::string(ouiPcC().c_str()));
@@ -560,7 +554,7 @@ static void ouiDrawActions()
     ouiActBtn(214, 102, "REBOOT",   OUI_REBOOT, OUI_TXT, OUI_FOC_REBOOT);
     return;
   }
-  if (ouiIsC64() || ouiIsNES() || ouiIsAtari() || ouiIsMsx() || ouiIsSms()) {   // LOAD & RUN + REBOOT
+  if (ouiIsC64() || ouiIsNES() || ouiIsAtari() || ouiIsMsx() || ouiIsSms() || ouiIsColeco() || ouiIsZx()) {   // LOAD & RUN + REBOOT
     ouiActBtn(6,   120, "LOAD & RUN", mc, mt, OUI_FOC_MOUNT);
     ouiActBtn(132, 182, "REBOOT",     OUI_REBOOT, OUI_TXT, OUI_FOC_REBOOT);
     return;
@@ -581,8 +575,9 @@ static void ouiDrawTitle()
                : ouiIsAtari() ? "ATARI 2600  SETTINGS"
                : ouiIsMsx() ? "MSX1  SETTINGS"
                : ouiIsSms() ? "MASTER SYSTEM  SETTINGS"
+               : ouiIsColeco() ? "COLECOVISION  SETTINGS"
+               : ouiIsZx() ? "ZX SPECTRUM 48K  SETTINGS"
                : ouiIsPcxt() ? "PC-XT (8086)  SETTINGS"
-               : ouiIsTiny386() ? "PC 386  SETTINGS"
                : AppleIIe ? "APPLE IIe  SETTINGS" : "APPLE II+  SETTINGS",
                  10, OUI_TITLE_H / 2, 2);
   int cw = OUI_TITLE_H, cx = 320 - cw;
@@ -721,6 +716,38 @@ static void ouiDrawHelp()
     ouiHelpHdr(y, "SMS  -  KEYBOARD");
     ouiHelpRow(y, "Arrows", "D-pad");
     ouiHelpRow(y, "Z / X",  "Button 1 / 2");
+  } else if (ouiIsColeco()) {
+#if !defined(BOARD_PICOCALC)   // no gamepad port on this board; see the note at the Apple section
+    ouiHelpHdr(y, "COLECO  -  GAMEPAD");
+    ouiHelpRow(y, "D-pad",  "Stick");
+    ouiHelpRow(y, "A / B",  "Left / right fire");
+    ouiHelpRow(y, "Btn 3/4","Keypad * / 1");
+#endif
+    ouiHelpHdr(y, "COLECO  -  KEYBOARD");
+    ouiHelpRow(y, "Arrows", "Stick");
+#if defined(BOARD_PICOCALC)
+    ouiHelpRow(y, "Space/F4", "Left fire");
+    ouiHelpRow(y, "X / F5",   "Right fire");
+#else
+    ouiHelpRow(y, "Space/Z", "Left fire");
+    ouiHelpRow(y, "X",       "Right fire");
+#endif
+    ouiHelpRow(y, "0-9",    "Keypad");
+    ouiHelpRow(y, "- / =",  "Keypad * / #");
+    ouiHelpRow(y, "F12",    "Reset");
+  } else if (ouiIsZx()) {
+#if !defined(BOARD_PICOCALC)   // no gamepad port on this board; see the note at the Apple section
+    ouiHelpHdr(y, "ZX SPECTRUM  -  GAMEPAD");
+    ouiHelpRow(y, "D-pad",  "Kempston stick");
+    ouiHelpRow(y, "A / B",  "Kempston fire");
+#endif
+    ouiHelpHdr(y, "ZX SPECTRUM  -  KEYBOARD");
+    ouiHelpRow(y, "Shift",     "CAPS SHIFT");
+    ouiHelpRow(y, "Ctrl/Alt",  "SYMBOL SHIFT");
+    ouiHelpRow(y, "Backspace", "DELETE");
+    ouiHelpRow(y, "Esc",       "BREAK");
+    ouiHelpRow(y, "Arrows",    "Cursor (JOYSTICK on: Kempston)");
+    ouiHelpRow(y, "F12",       "Reset");
   } else if (ouiIsPcxt()) {
     ouiHelpHdr(y, "PC-XT  -  KEYBOARD");
     ouiHelpRow(y, "Keys",   "Type into DOS");
@@ -730,12 +757,6 @@ static void ouiDrawHelp()
     ouiHelpRow(y, "D-pad",  "Arrow keys");
     ouiHelpRow(y, "A / B",  "Enter / Esc");
 #endif
-  } else if (ouiIsTiny386()) {
-    ouiHelpHdr(y, "PC 386  -  DISK");
-    ouiHelpRow(y, "Tap img", "Boot it (reboots)");
-    ouiHelpHdr(y, "PC 386  -  KEYBOARD");
-    ouiHelpRow(y, "Keys",   "Type into the PC");
-    ouiHelpRow(y, "F12",    "Reboot PC");
   } else {   // Apple II / IIGS
     ouiHelpHdr(y, "APPLE  -  KEYBOARD");
     ouiHelpRow(y, "Keys",   "Type into Apple");
@@ -827,20 +848,33 @@ static void ouiToggle(int idx)
     optionsUiDirty = true;
     return;
   }
+  if (ouiIsColeco()) {                    // Coleco grid: same as the SMS one
+    switch (idx) {
+      case 0: sound = !sound;           break;
+      case 1: joystick = !joystick;     break;
+      case 2: videoColor = !videoColor; break;
+      case 3: colecoFast = !colecoFast; break;
+      default: return;
+    }
+    optionsUiDirty = true;
+    return;
+  }
+  if (ouiIsZx()) {                        // ZX grid: same as the SMS one
+    switch (idx) {
+      case 0: sound = !sound;           break;
+      case 1: joystick = !joystick;     break;
+      case 2: videoColor = !videoColor; break;
+      case 3: zxFast = !zxFast;         break;   // NORMAL (3.5 MHz) <-> FAST (uncapped)
+      default: return;
+    }
+    optionsUiDirty = true;
+    return;
+  }
   if (ouiIsPcxt()) {                      // PCXT grid: SOUND / VIDEO (8086 MHz readout = read-only)
     switch (idx) {
       case 0: sound = !sound;           break;
       case 1: videoColor = !videoColor; break;
       default: return;                            // slot 2 (8086 MHz) is read-only
-    }
-    optionsUiDirty = true;
-    return;
-  }
-  if (ouiIsTiny386()) {                   // tiny386 grid: SOUND / VIDEO (i386 readout = read-only)
-    switch (idx) {
-      case 0: sound = !sound;           break;
-      case 1: videoColor = !videoColor; break;
-      default: return;                            // slot 2 (i386 throughput) is read-only
     }
     optionsUiDirty = true;
     return;
@@ -954,16 +988,22 @@ static void ouiMount()
       showHideOptionsWindow();            // close only on success (failure keeps the old ROM)
     return;
   }
+  if (ouiIsColeco()) {                     // Coleco: load the highlighted cartridge + reset into it
+    if (shownFile >= files.size()) return;
+    if (colecoLoadSelected(files[shownFile].c_str()))
+      showHideOptionsWindow();            // close only on success (failure keeps the old cartridge)
+    return;
+  }
+  if (ouiIsZx()) {                         // ZX: load the highlighted snapshot, or insert the tape + LOAD ""
+    if (shownFile >= files.size()) return;
+    if (zxLoadSelected(files[shownFile].c_str()))
+      showHideOptionsWindow();            // close only on success (failure keeps the running program)
+    return;
+  }
   if (ouiIsPcxt()) {                       // PCXT: double-tap a file -> mount it as A: (floppy)
     if (shownFile >= files.size()) return;
     if (pcxtMountA(files[shownFile].c_str()))
       showHideOptionsWindow();            // close only on success (failure keeps the old disk)
-    return;
-  }
-  if (ouiIsTiny386()) {                     // tiny386: double-tap mounts the image as C: (re-attach + PC re-POST)
-    if (shownFile >= files.size()) return;
-    tiny386MountC(files[shownFile].c_str());
-    showHideOptionsWindow();
     return;
   }
   if (ouiIsIIgs()) {                       // IIGS: persist the highlighted image + reboot -> auto-mounted on boot
@@ -986,11 +1026,6 @@ static void ouiPcMountA()   // A: floppy
   if (files.empty() || shownFile >= files.size()) return;
   if (ouiIsDir(files[shownFile])) { ouiBrowse(files[shownFile]); return; }  // dir row -> navigate
   bool isCur = ouiPcA().length() && files[shownFile] == std::string(ouiPcA().c_str());
-  if (ouiIsTiny386()) {                            // tiny386: live mount/eject, NO device reboot
-    tiny386MountA(isCur ? "" : files[shownFile].c_str());
-    if (isCur) optionsUiDirty = true; else showHideOptionsWindow();
-    return;
-  }
   if (isCur) { pcxtUnmount(0); optionsUiDirty = true; }       // PC-XT: live mount/eject
   else if (pcxtMountA(files[shownFile].c_str())) showHideOptionsWindow();
 }
@@ -1000,11 +1035,6 @@ static void ouiPcMountC()   // C: hard disk
   if (files.empty() || shownFile >= files.size()) return;
   if (ouiIsDir(files[shownFile])) { ouiBrowse(files[shownFile]); return; }  // dir row -> navigate
   bool isCur = ouiPcC().length() && files[shownFile] == std::string(ouiPcC().c_str());
-  if (ouiIsTiny386()) {                            // tiny386: re-attach C: + soft-reboot the PC (not the device)
-    tiny386MountC(isCur ? "" : files[shownFile].c_str());
-    showHideOptionsWindow();
-    return;
-  }
   if (isCur) { pcxtUnmount(2); optionsUiDirty = true; }
   else if (pcxtMountC(files[shownFile].c_str())) showHideOptionsWindow();
 }
@@ -1078,8 +1108,8 @@ void optionsUiActivate()              // joystick fire button on the focused con
   else if (f == OUI_FOC_SCREEN)    ouiToggleScreenFill();
 #endif
   else if (f == OUI_FOC_FILES)     ouiMount();
-  else if (f == OUI_FOC_MOUNT)     { if (ouiIsPC()) ouiPcMountA(); else ouiMount(); }       // PC: MOUNT A:
-  else if (f == OUI_FOC_MNTREBOOT) { if (ouiIsPC()) ouiPcMountC(); else ouiMountReboot(); } // PC: MOUNT C:
+  else if (f == OUI_FOC_MOUNT)     { if (ouiIsPcxt()) ouiPcMountA(); else ouiMount(); }       // PC: MOUNT A:
+  else if (f == OUI_FOC_MNTREBOOT) { if (ouiIsPcxt()) ouiPcMountC(); else ouiMountReboot(); } // PC: MOUNT C:
   else if (f == OUI_FOC_REBOOT)    ouiReboot();
   else if (f == OUI_FOC_HELP)      ouiOpenHelp();
   // FOC_VOL: nothing (adjust with up/down)
@@ -1174,7 +1204,7 @@ void optionsUiKeyEnter(bool ctrl)
   // still just navigates, which ouiMountReboot/ouiPcMountC check for themselves -- rebooting
   // into a folder is not a thing.
   if (f == OUI_FOC_FILES && ctrl) {
-    if (ouiIsPC()) ouiPcMountC();
+    if (ouiIsPcxt()) ouiPcMountC();
     else if (currentPlatform == PLATFORM_APPLE2 || ouiIsIIgs()) ouiMountReboot();
     else ouiMount();      // C64/NES/Atari/MSX/SMS: no reboot variant, Ctrl-Enter = LOAD & RUN
     return;
@@ -1247,11 +1277,11 @@ static void ouiHandleTap(int16_t x, int16_t y)
 
   // action buttons
   if (y >= OUI_ACT_TOP && y < OUI_ACT_TOP + OUI_ACT_H) {
-    if (ouiIsPC()) {                        // MOUNT A: (4..106) | MOUNT C: (109..211) | REBOOT (214..316)
+    if (ouiIsPcxt()) {                        // MOUNT A: (4..106) | MOUNT C: (109..211) | REBOOT (214..316)
       if (x >= 4 && x < 106)        ouiPcMountA();
       else if (x >= 109 && x < 211) ouiPcMountC();
       else if (x >= 214 && x < 316) ouiReboot();
-    } else if (ouiIsC64() || ouiIsNES() || ouiIsAtari() || ouiIsMsx() || ouiIsSms()) {   // LOAD & RUN (6..126) | REBOOT (132..314)
+    } else if (ouiIsC64() || ouiIsNES() || ouiIsAtari() || ouiIsMsx() || ouiIsSms() || ouiIsColeco() || ouiIsZx()) {   // LOAD & RUN (6..126) | REBOOT (132..314)
       if (x >= 6 && x < 126)        ouiMount();
       else if (x >= 132 && x < 314) ouiReboot();
     } else {                                // MOUNT (4..106) | M+REBOOT (109..211) | REBOOT (214..316)
@@ -1288,8 +1318,9 @@ void optionsUiOpen()
   if (ouiIsAtari() && atariFiles.empty()) atariScanFiles(); // populate the .a26/.bin browser
   if (ouiIsMsx() && msxFiles.empty()) msxScanFiles();       // populate the .rom/.dsk browser
   if (ouiIsSms() && smsFiles.empty()) smsScanFiles();       // populate the .sms/.bin browser
+  if (ouiIsColeco() && colecoFiles.empty()) colecoScanFiles(); // populate the .col/.rom browser
+  if (ouiIsZx() && zxFiles.empty()) zxScanFiles();          // populate the .sna/.z80/.tap/.tzx browser
   if (ouiIsPcxt() && pcFiles.empty()) pcxtScanFiles();      // populate the disk-image browser
-  if (ouiIsTiny386() && tiny386Files.empty()) tiny386ScanFiles();  // populate the 386 disk-image browser
   // Reopen where the menu was left: same focused control (and still inside VOL / the file list if
   // it was closed from there), same highlighted row. Only the very first open, or a list that no
   // longer has that row, falls back to the mounted file.

@@ -5,13 +5,12 @@
 #   pwsh tools/run_desktop.ps1 -Platform apple2                      # just run (Ctrl-C to stop)
 #   pwsh tools/run_desktop.ps1 -Platform c64 -Capture cap.png -At 120 -Quit   # screenshot frame 120 then exit
 #   pwsh tools/run_desktop.ps1 -Platform pcxt    -Floppy dos-622-disk1.img    # boot PC-XT from a DOS floppy
-#   pwsh tools/run_desktop.ps1 -Platform tiny386 -Hd DOSHDD.IMG               # boot tiny386 (i386) from a hard disk
-# Valid -Platform values: apple2 c64 nes atari iigs msx sms pcxt tiny386
+# Valid -Platform values: apple2 c64 nes atari iigs msx sms coleco pcxt zx
 param(
   [string]$Platform = 'apple2',
   [string]$Sd       = 'C:/Users/lucia/repos/emu8/build/sdcard',
-  [string]$Floppy   = '',          # boot floppy image (A:)  — PC-XT / tiny386 (else generic EMU_DISK)
-  [string]$Hd       = '',          # boot hard-disk image (C:) — PC-XT / tiny386
+  [string]$Floppy   = '',          # boot floppy image (A:)  — PC-XT (else generic EMU_DISK)
+  [string]$Hd       = '',          # boot hard-disk image (C:) — PC-XT
   [string]$Capture  = '',          # output PNG path (relative to build/) — empty = no capture
   [int]   $At       = 120,         # frame to capture at
   [switch]$Quit,                   # exit right after the capture
@@ -24,12 +23,11 @@ Set-Location $build
 $env:EMU_PLATFORM = $Platform
 $env:EMU_SD_DIR   = $Sd
 
-# Route the boot disk(s) to the right per-platform env var so PC-XT / tiny386 boot INTO a disk on
-# launch (they have no persisted EEPROM selection on a fresh run, so without this they boot blank).
+# Route the boot disk(s) to the right per-platform env var so PC-XT boots INTO a disk on
+# launch (it has no persisted EEPROM selection on a fresh run, so without this it boots blank).
 # Paths are SD-relative names (mapped under -Sd) or absolute host paths.
 switch ($Platform) {
   'pcxt'    { if ($Floppy) { $env:EMU_PCXT_A   = $Floppy }; if ($Hd) { $env:EMU_PCXT_C   = $Hd } }
-  'tiny386' { if ($Floppy) { $env:EMU_T386_FDA = $Floppy }; if ($Hd) { $env:EMU_T386_HDA = $Hd } }
   default   { if ($Floppy) { $env:EMU_DISK     = $Floppy } }
 }
 if ($Capture) {
