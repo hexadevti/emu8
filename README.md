@@ -335,8 +335,12 @@ Ghostbusters); copy them to the SD root. A few C64 test files are in [`resources
 ## Managing the SD card over USB
 
 The firmware includes a small file server on the USB serial port. You can browse, upload, download,
-rename and delete files on the card **without removing it**, while the emulator keeps running. Two
-clients speak its protocol:
+rename and delete files on the card **without removing it**. The server is a separate mode, not a
+background task: pick **SD MGR** on the system menu (the splash) and the board reboots into it,
+with no emulator running and a status screen showing whether a host is connected. To leave it,
+press **Ctrl-F6** on the PicoCalc or tap the screen on the touch boards. The board then reboots to
+the system menu, and the system you were last running stays selected. Two clients speak its
+protocol:
 
 - **Web app**, [`tools/sdmanager/web/`](tools/sdmanager/web/): runs in Chrome, Edge or Opera on
   Windows, macOS, Linux, ChromeOS and Android. It's a Vite app: run `npm install` and then

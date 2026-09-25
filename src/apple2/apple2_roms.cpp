@@ -99,7 +99,13 @@ static bool a2LoadRomSet() {
 
 static void a2FreeRomSet() {
   free((void*)rom);                  rom                  = nullptr;
-  free((void*)appleiieenhancedc0ff); appleiieenhancedc0ff = nullptr;
+#if !BOARD_A2_ROM_IN_FLASH
+  // Where iie.bin is the const array in flash this pointer never came from the heap: free() on it
+  // would thread a flash address into the free list and corrupt the heap on the very path -- out
+  // of RAM, falling back to a II+ -- that most needs the heap intact.
+  free((void*)appleiieenhancedc0ff);
+#endif
+  appleiieenhancedc0ff = nullptr;
   free((void*)diskiicardrom);        diskiicardrom        = nullptr;
   free((void*)mousecardrom);         mousecardrom         = nullptr;
   free((void*)hdrom);                hdrom                = nullptr;   // a2EnsureHdRom reloads it

@@ -17,21 +17,24 @@
 // The PicoCalc panel is square: the emulators letterbox into its middle 320x240, but the menu
 // switches the display to full-panel mode (tft.setFullPanel) and spends the extra 80 rows on a
 // taller grid and, mostly, on more and taller file rows drawn in the larger list font (font 3).
+// Order differs from the touch boards: the file list comes first (it is what the menu is opened
+// for), then its MOUNT / REBOOT buttons, then the option grid and VOLUME. The keyboard row map
+// (ouiRows, further down) follows the same order so Up/Down walk the page top to bottom.
 #define OUI_SCR_H     320
 #define OUI_TITLE_H   28
-#define OUI_TG_TOP    30          // toggle grid: 4 columns x 2 rows
-#define OUI_TG_W      80
-#define OUI_TG_H      38
-#define OUI_VOL_TOP   108
-#define OUI_VOL_H     22
-#define OUI_FB_TOP    132         // file browser header
+#define OUI_FB_TOP    30          // file browser header
 #define OUI_FB_HDR_H  16
-#define OUI_FB_LIST   148         // file rows
+#define OUI_FB_LIST   46          // file rows
 #define OUI_FB_ROWH   17
 #define OUI_FB_ROWS   8
 #define OUI_FB_FONT   3           // display_picocalc.cpp: FreeSans at 4/5, between fonts 1 and 2
-#define OUI_ACT_TOP   288         // action buttons
+#define OUI_ACT_TOP   186         // action buttons (or the key hints while the list is focused)
 #define OUI_ACT_H     30
+#define OUI_TG_TOP    220         // toggle grid: 4 columns x 2 rows
+#define OUI_TG_W      80
+#define OUI_TG_H      38
+#define OUI_VOL_TOP   297
+#define OUI_VOL_H     22
 #define OUI_HELP_ROWH 15
 #else
 // ---- Layout (320 x 240) ----
@@ -106,7 +109,11 @@ static void ouiCloseHelp();
 // include it, because the PicoCalc has no touchscreen and this was the one control on the
 // page that no key could reach.
 #define OUI_FOC_HELP      OUI_FOC_COUNT
+#if defined(BOARD_PICOCALC)
+static int optionsUiFocus = OUI_FOC_FILES;   // the top of this board's page (see the layout)
+#else
 static int optionsUiFocus = 0;
+#endif
 
 // The settings window is shared by every platform. These accessors pick the active
 // file list / selection so the file browser, scrolling and actions are platform-aware
@@ -643,7 +650,7 @@ static void ouiDrawHelp()
   ouiHelpHdr(y, "GLOBAL");
 #if defined(BOARD_PICOCALC)
   ouiHelpRow(y, "Ctrl-F1",       "Open / close menu");
-  ouiHelpRow(y, "Ctrl-F8",       "System menu (Ct-Sh-F3)");
+  ouiHelpRow(y, "Ctrl-F6",       "System menu (Ct-Sh-F3)");
   ouiHelpRow(y, "Ctrl-Shift-F1", "Reboot the device");
 #else
   ouiHelpRow(y, "F10",           "Open / close menu");
@@ -1088,7 +1095,7 @@ void optionsUiActivate()              // joystick fire button on the focused con
 // the CYD's analog stick and the touch handler keep behaving exactly as before.
 //
 // The rows mirror the drawn layout: a 4-wide toggle grid, then VOLUME, then the file list,
-// then the action buttons side by side.
+// then the action buttons side by side (PicoCalc: file list, buttons, grid, VOLUME).
 static const uint8_t ouiRow0[] = { 0, 1, 2, 3 };
 #if BOARD_HAS_SCREENFILL
 static const uint8_t ouiRow1[] = { 4, 5, OUI_FOC_SCREEN, OUI_FOC_HELP };
@@ -1098,10 +1105,17 @@ static const uint8_t ouiRow1[] = { 4, 5, OUI_FOC_HELP };
 static const uint8_t ouiRow2[] = { OUI_FOC_VOL };
 static const uint8_t ouiRow3[] = { OUI_FOC_FILES };
 static const uint8_t ouiRow4[] = { OUI_FOC_MOUNT, OUI_FOC_MNTREBOOT, OUI_FOC_REBOOT };
+#if defined(BOARD_PICOCALC)   // files, buttons, grid, volume -- the order this board draws them in
+static const uint8_t *const ouiRows[]  = { ouiRow3, ouiRow4, ouiRow0, ouiRow1, ouiRow2 };
+static const uint8_t        ouiRowLen[] = { (uint8_t)(sizeof(ouiRow3)), (uint8_t)(sizeof(ouiRow4)),
+                                            (uint8_t)(sizeof(ouiRow0)), (uint8_t)(sizeof(ouiRow1)),
+                                            (uint8_t)(sizeof(ouiRow2)) };
+#else
 static const uint8_t *const ouiRows[]  = { ouiRow0, ouiRow1, ouiRow2, ouiRow3, ouiRow4 };
 static const uint8_t        ouiRowLen[] = { (uint8_t)(sizeof(ouiRow0)), (uint8_t)(sizeof(ouiRow1)),
                                             (uint8_t)(sizeof(ouiRow2)), (uint8_t)(sizeof(ouiRow3)),
                                             (uint8_t)(sizeof(ouiRow4)) };
+#endif
 #define OUI_ROW_COUNT ((int)(sizeof(ouiRows) / sizeof(ouiRows[0])))
 
 static void ouiFindCell(int &row, int &col)

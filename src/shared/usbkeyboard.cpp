@@ -37,6 +37,19 @@ static bool kbContains(const uint8_t *arr, uint8_t kc)
   return false;
 }
 
+// Does this report carry a key that TYPES -- i.e. anything but the four arrows? Used to tell a
+// SHIFT that is modifying a keystroke from one held on its own (the PicoCalc's fire button).
+static bool kbHasTypingKey(const uint8_t *arr)
+{
+  for (int i = 0; i < 6; i++) {
+    if (!arr[i]) continue;
+    if (arr[i] == HID_KEY_ARROW_UP || arr[i] == HID_KEY_ARROW_DOWN ||
+        arr[i] == HID_KEY_ARROW_LEFT || arr[i] == HID_KEY_ARROW_RIGHT) continue;
+    return true;
+  }
+  return false;
+}
+
 // US-layout HID keycode -> ASCII, reusing the library's conversion table.
 static char kbToAscii(uint8_t kc, bool shift)
 {
@@ -174,31 +187,40 @@ static void c64KeyUp(uint8_t kc)
 // On the PicoCalc, either SHIFT key is fire as well: the cursor cluster sits at the bottom right and
 // the space bar is a long reach from it, while the two shifts flank that same bottom row. The keyboard
 // reports both shifts as one modifier bit (input_picocalc.cpp), so the plain `shift` flag covers left
-// and right. Space still fires. SHIFT is the one key JOYSTICK mode withholds from the C64 matrix --
-// a fire button that also shifted whatever you typed would be no use to either side. Other boards
-// have a full keyboard within reach of the arrows and keep SHIFT for typing.
+// and right. Space still fires. Other boards have a full keyboard within reach of the arrows and
+// keep SHIFT for typing only.
 #if defined(BOARD_PICOCALC)
 #define C64_SHIFT_IS_FIRE 1
 #else
 #define C64_SHIFT_IS_FIRE 0
 #endif
 
-// JOYSTICK mode takes nothing away from the C64 keyboard: the arrows and Space drive the stick AND
-// still reach the matrix, the double duty the Apple II paddles already give their arrows. It used
-// to hold the arrows exclusively, which left the C64 with no cursor keys at the BASIC prompt --
-// and since JOYSTICK is ON by default, the only way to get them back was to open the menu and turn
-// it off. The one key that is still withheld is the PicoCalc's SHIFT (see below): it is the fire
-// button there, and a fire button that also shifts whatever you type is no use to either side.
+// JOYSTICK mode takes NOTHING away from the C64 keyboard: the arrows, Space and (on the PicoCalc)
+// SHIFT drive the stick AND still reach the matrix, the double duty the Apple II paddles already
+// give their arrows. It used to hold the arrows exclusively, which left the C64 with no cursor keys
+// at the BASIC prompt -- and since JOYSTICK is ON by default, the only way to get them back was to
+// open the menu and turn it off. SHIFT was withheld for longer, which cost the PicoCalc every
+// shifted character: no quotes for LOAD"$",8 and no upper case, with the same menu round trip as
+// the only way out. It now does both jobs too (see c64ApplyModifiers).
 
 // Refresh the modifier matrix lines from the live report each call. Cursor LEFT/UP are SHIFT+CRSR
 // on the C64, so a held LEFT or UP also asserts SHIFT.
 static void c64ApplyModifiers(bool shift, bool ctrl, bool alt, const uint8_t *keys)
 {
   bool wantShift = shift;
-  // The PicoCalc's SHIFT keys are the fire button while JOYSTICK is on, so they must not press the
-  // C64's SHIFT line -- every shot would otherwise arrive as a shifted keystroke. Dropped first, so
-  // the cursor-derived SHIFT below still gets applied.
-  if (C64_SHIFT_IS_FIRE && joystick) wantShift = false;
+  // The PicoCalc's SHIFT keys fire AND type. Both at once needs one distinction, because the two
+  // jobs never happen in the same report: SHIFT pressed ALONE is a shot, SHIFT pressed WITH a
+  // character key is a keystroke. So the C64's SHIFT line is asserted only when the report also
+  // carries a typing key -- firing then shifts nothing, and the arrows don't count, so holding
+  // fire while steering stays clean.
+  //
+  // This is exact rather than a guess, because of how the keyboard reports shift
+  // (hidModifiers, input_picocalc.cpp): the bit is set from the CHARACTER (a vs A, which is also
+  // the only thing that gets caps lock right) as well as from the physical key, so a shifted
+  // character is never in flight without its own key in the same report.
+  //
+  // Dropped first, so the cursor-derived SHIFT below still gets applied.
+  if (C64_SHIFT_IS_FIRE && joystick && !kbHasTypingKey(keys)) wantShift = false;
   // Cursor LEFT/UP are SHIFT+CRSR on the C64, so a held LEFT or UP also asserts SHIFT. The arrows
   // are cursor keys in every mode now, so this applies whether or not the stick is reading them.
   wantShift = wantShift || kbContains(keys, HID_KEY_ARROW_LEFT) || kbContains(keys, HID_KEY_ARROW_UP);
@@ -366,6 +388,10 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
   bool ctrl  = modifier & (KEYBOARD_MODIFIER_LEFTCTRL  | KEYBOARD_MODIFIER_RIGHTCTRL);
   bool alt   = modifier & (KEYBOARD_MODIFIER_LEFTALT   | KEYBOARD_MODIFIER_RIGHTALT |
                            KEYBOARD_MODIFIER_LEFTGUI   | KEYBOARD_MODIFIER_RIGHTGUI);
+
+  // SD Manager mode has no core to type into and no settings menu to open (F10 would open one the
+  // render loop never draws). Its one key, Ctrl-F6 back to the system menu, is taken upstream.
+  if (currentPlatform == PLATFORM_SDMANAGER) return;
 
   // --- new key-down events ---
   for (int i = 0; i < 6; i++) {

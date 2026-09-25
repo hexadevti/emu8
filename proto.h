@@ -13,10 +13,10 @@ void bootProgressBegin();               // panel up + logo + the first step
 void bootProgressStep(const char *what);// replace the status line ("Loading iie.bin", ...)
 void bootProgressEnd();                 // hand the panel to the render loop
 
-// "Ctrl-F1 for options" hint: five seconds in the TOP letterbox bar once the emulator is up, so
-// the one key you cannot guess is on screen at least once per boot without ever covering the
-// picture. bootHintTick() is the render task's per-frame poke (it owns all drawing);
-// bootHintDismiss() is the keyboard's, and only sets a flag. No-ops off the PicoCalc.
+// Boot key hint: five seconds in the BOTTOM letterbox bar once the emulator is up -- the Ctrl
+// keys and the joystick/button keys, so the ones you cannot guess are on screen at least once per
+// boot without ever covering the picture. bootHintTick() is the render task's per-frame poke (it
+// owns all drawing); bootHintDismiss() is the keyboard's, and only sets a flag. No-op elsewhere.
 void bootHintTick();
 void bootHintDismiss();
 #if defined(BOARD_PICOCALC)
@@ -34,7 +34,7 @@ uint64_t sdFreeBytes();   // free space on the mounted card (see sd.cpp for the 
 extern bool sdCardMounted;   // FSSetup() mounted a card
 
 // sdserial.cpp - SD card file manager over the serial port (host side: tools/sdmanager)
-void sdSerialSetup();                 // start the server task (after FSSetup)
+void sdSerialSetup();                 // start the server task (after FSSetup); SD Manager mode only
 extern volatile bool sdSerialActive;  // a host session is live: printLog() stays quiet
 #if defined(BOARD_JC4827W543) || defined(BOARD_JC1060P470)
 #define SDSERIAL_MAX_PAYLOAD 4096     // largest frame payload; the UART RX buffer holds two
@@ -48,6 +48,7 @@ int writeStringToEEPROM(int addrOffset, const String &strToWrite);
 int readStringFromEEPROM(int addrOffset, String *strToRead);
 void saveEEPROM();
 void saveConfig();
+void apple2LoadMachineConfig();  // (re)load the running Apple II's own DEVICE/SPEED/disk/HD settings
 
 // interface.cpp
 void setCursor(uint8_t x, uint8_t y);
@@ -129,6 +130,7 @@ void uiDirScanProgress(int count);    // draw a "Loading…" bar while a directo
 void videoSetup();
 void requestSplashOnNextBoot();       // arrange for the boot splash to show after the next reboot
 extern bool splashActive;             // true until the boot splash times out or is dismissed
+bool sdManagerBootRequested();        // this boot is the SD Manager one the splash asked for (consumes it)
 #if defined(BOARD_PICOCALC)
 // Keyboard-driven splash navigation: the PicoCalc has no touch panel, so input_picocalc.cpp
 // swallows left/right/Enter while splashActive and posts one of these instead. Defined in
@@ -136,6 +138,8 @@ extern bool splashActive;             // true until the boot splash times out or
 #define SPLASH_KEY_LEFT   (-1)
 #define SPLASH_KEY_RIGHT  (1)
 #define SPLASH_KEY_SELECT (2)
+#define SPLASH_KEY_UP     (3)          // the buttons are two rows: up/down move between them
+#define SPLASH_KEY_DOWN   (4)
 extern volatile int8_t splashKeyEvent;
 #endif
 int red(int color);

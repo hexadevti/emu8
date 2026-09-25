@@ -51,7 +51,13 @@ void smsPsgSetup() {
   printLog("SMS audio: SN76489 on (I2S DAC GPIO26)");
 #else
   ampBegin(SMS_AUD_FS);
+#if defined(BOARD_PICOCALC)
+  // Static stack -- a 4KB task create that fails is FATAL on this board, and this is the
+  // last thing the boot asks of the heap. See picocalcStartAudioTask (audio_picocalc.cpp).
+  picocalcStartAudioTask(smsAudioTask, "smsAud", 2);
+#else
   xTaskCreatePinnedToCore(smsAudioTask, "smsAud", 4096, NULL, 2, NULL, 0);
+#endif
   printLog("SMS audio: SN76489 on (I2S amp)");
 #endif
 }

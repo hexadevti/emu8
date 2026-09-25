@@ -118,9 +118,12 @@ static volatile bool     spkTogLost = false;   // producer had nowhere to put a 
 // is never more than 23us and the table never needs more than 32 entries. Q15 keeps the whole
 // thing in 32-bit integer arithmetic: this runs 45454 times a second on an FPU-less Cortex-M0+.
 static const uint16_t SPK_K[32] = {
-  32768, 31356, 30004, 28711, 27474, 26290, 25157, 24073,
-  23035, 22043, 21093, 20184, 19314, 18481, 17685, 16923,
-  16193, 15496, 14828, 14189, 13577, 12992, 12432, 11896,
+  32768, 31356, 30004, 28711, 27474, 26290, 25157, 24073,
+
+  23035, 22043, 21093, 20184, 19314, 18481, 17685, 16923,
+
+  16193, 15496, 14828, 14189, 13577, 12992, 12432, 11896,
+
   11384, 10893, 10424,  9974,  9545,  9133,  8740,  8363,
 };
 #define SPK_UNIT 1024                     // filter full scale; the volume multiply happens at the end
@@ -352,12 +355,27 @@ static void speakerTask(void *)
   vTaskDelete(NULL);
 }
 
+#define SPK_STACK_WORDS 512   // 2KB, what the dynamic create below asks for in bytes
+
 void speakerSetup()
 {
   ampBegin(SPK_FS);
   // Core 0: the task only blocks on the I2S DMA (no spin), so it won't starve the render loop the
   // way the old tight feed loop did; the timer ISR (armed inside the task) also lands on core 0.
+#if defined(BOARD_PICOCALC)
+  // No heap here, which the IIe cannot spare (A2_IIE_RESERVE, src/apple2/memory.cpp). The stack
+  // is the idle end of sharedBigBuf: the Apple II map stops at 0xF000 (48K of main RAM plus three
+  // 4K IIe banks) and the buffer runs to 64064, which leaves 2624 bytes nothing touches while an
+  // Apple II runs -- the only machine that calls this on this board. Not the static sound-core
+  // stack: a IIe borrows that for one of its banks (picocalcLendAudioStack).
+  static_assert(sizeof(sharedBigBuf) >= 0xF000 + 8 + SPK_STACK_WORDS * sizeof(StackType_t),
+                "the speaker stack must fit past the Apple II map in sharedBigBuf");
+  static StaticTask_t spkTCB;
+  StackType_t *stk = (StackType_t *)(((uintptr_t)(sharedBigBuf + 0xF000) + 7) & ~(uintptr_t)7);
+  xTaskCreateStaticPinnedToCore(speakerTask, "speaker", SPK_STACK_WORDS, NULL, 2, stk, &spkTCB, 0);
+#else
   xTaskCreatePinnedToCore(speakerTask, "speaker", 2048, NULL, 2, NULL, 0);
+#endif
 }
 // Called from the 6502 (and the IIGS) on every $C030 access, from the other core. Records WHEN
 // the flip happened so the sampler can reconstruct it; the timestamp is stored before the index is

@@ -87,4 +87,52 @@ void ampWriteMono(const int16_t *mono, int n)
     dacPutMono(mono[i]);
 }
 
+
+// ---------------------------------------------------------------------------------------
+// The sound core's task, on a STATIC stack.
+//
+// Every sound core (SID, APU, TIA, PSG) ends its setup with a 4KB task, and on this board that
+// one call is the single most dangerous allocation in the whole boot: arduino-pico builds the
+// kernel with configUSE_MALLOC_FAILED_HOOK, so a FreeRTOS allocation that comes back NULL does
+// not fail softly the way every other allocation here does -- it lands in
+// vApplicationMallocFailedHook() and parks the board (src/picocalc/fault_picocalc.cpp). And it
+// is the LAST thing the emulator asks for: by then the heap is carrying the guest's 64K of RAM,
+// its ROMs and the SD buffers, so 4KB CONTIGUOUS is exactly what it is least able to give --
+// the same trap that cost the render task its dynamic stack (see renderTaskStack, video.cpp).
+//
+// Static storage cannot fail and cannot be fragmented out. One buffer is enough for all of them:
+// the platform is fixed for the life of the boot, so only ever one sound core starts.
+//
+// 1024 WORDS = the 4KB the call sites ask for in bytes -- the static create takes a depth in
+// StackType_t units and must match the array length, so unlike the dynamic wrapper it does NOT
+// divide by 4 (see xTaskCreateStaticPinnedToCore in pico_shim.h).
+#define AUDIO_TASK_STACK_WORDS 1024
+static StaticTask_t audioTaskTCB;
+static StackType_t  audioTaskStack[AUDIO_TASK_STACK_WORDS];
+static bool         audioTaskStarted = false;
+static bool         audioStackLent   = false;   // see picocalcLendAudioStack below
+
+bool picocalcStartAudioTask(TaskFunction_t fn, const char *name, UBaseType_t prio)
+{
+  if (audioTaskStarted) return true;    // idempotent, like ampBegin() above
+  if (audioStackLent)   return false;   // an Apple II bank lives here (picocalcLendAudioStack)
+  TaskHandle_t h = xTaskCreateStaticPinnedToCore(fn, name, AUDIO_TASK_STACK_WORDS, NULL, prio,
+                                                 audioTaskStack, &audioTaskTCB, 0);  // core 0
+  audioTaskStarted = (h != NULL);
+  return audioTaskStarted;
+}
+
+// The Apple II never starts a sound-core task -- its speaker has its own stack (speakerSetup,
+// src/shared/speaker.cpp) -- so on an Apple boot the 4KB above would be .bss paid for and never
+// used, and the IIe is the one machine on this board that cannot spare it: those 4297 bytes are
+// what took its memory map below A2_IIE_RESERVE and greyed it out. So it lends the buffer out
+// instead, for one of the IIe's 4K RAM banks (src/apple2/memory.cpp). A lent buffer is gone for
+// the boot: picocalcStartAudioTask refuses it from then on.
+uint8_t *picocalcLendAudioStack(size_t n)
+{
+  if (audioTaskStarted || n > sizeof(audioTaskStack)) return nullptr;
+  audioStackLent = true;
+  return (uint8_t *)audioTaskStack;
+}
+
 #endif // BOARD_PICOCALC

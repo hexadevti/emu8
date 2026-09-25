@@ -69,13 +69,26 @@ void setup() {
     currentPlatform = PLATFORM_APPLE2;
   }
 #endif
+  // SD Manager: picked on the splash, which reboots into it for exactly this one boot. Checked after
+  // the normalisation above because it is not a saved platform -- currentPlatform still names the
+  // emulator it was entered from until here, and saveConfig() never writes this one back.
+  if (sdManagerBootRequested()) currentPlatform = PLATFORM_SDMANAGER;
   c64FreeBtMem();   // BOTH platforms: reclaim the unused BT controller DRAM (~36K) up front so
                     // tasks/buffers have heap room (Apple's render/joystick tasks were failing).
 
   // Platform-specific core init. The display (videoSetup -> renderLoop + boot splash)
   // and touch keyboard (oskSetup) are shared; each core initialises before videoSetup
   // so the render loop has valid state to draw (C64's render is null-guarded anyway).
-  if (currentPlatform == PLATFORM_C64) {
+  if (currentPlatform == PLATFORM_SDMANAGER) {
+    // No emulator: the card, the panel (a status screen, see sdManagerRender in video.cpp) and the
+    // file server. The keyboard needs nothing of its own here -- on the PicoCalc it is pumped from
+    // the render loop's flush, which is also where Ctrl-F8 takes it back to the system menu.
+    bootProgressStep("Mounting SD card");
+    FSSetup();
+    bootProgressStep("Starting the SD manager");
+    videoSetup();
+    sdSerialSetup();
+  } else if (currentPlatform == PLATFORM_C64) {
     bootProgressStep("Mounting SD card");
     FSSetup();         // SD next: its DMA buffer needs the contiguous low-DRAM region before
                        // the big C64 allocations (64K RAM + framebuffer) fragment it.
@@ -184,7 +197,6 @@ void setup() {
     speakerSetup();
     joystickSetup();
   }
-  sdSerialSetup();     // SD file manager over this serial port (tools/sdmanager); idle until a host talks
   printLog("Ready.");
 }
 
@@ -197,6 +209,7 @@ void loop() {
     case PLATFORM_C64:    c64Loop(); break;
     case PLATFORM_NES:    nesLoop(); break;
     case PLATFORM_ATARI:  atariLoop(); break;
+    case PLATFORM_SDMANAGER: delay(50); break;   // the server is its own task; nothing to run here
 #if BOARD_HAS_BIGRAM_CORES
     case PLATFORM_IIGS:   iigsLoop(); break;
 #endif

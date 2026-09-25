@@ -43,14 +43,14 @@
 // the emulated machine and cannot be hit by accident mid-game:
 //   Ctrl-F1                  -> HID_KEY_F10  open / close the settings menu
 //   Ctrl-F3                  -> HID_KEY_F11  CPU reset (Apple II / IIGS); PAUSE/NMI on SMS
-//   Ctrl-F8 / Ctrl-Shift-F3  -> reboot into the system selection menu (the boot splash)
+//   Ctrl-F6 / Ctrl-Shift-F3  -> reboot into the system selection menu (the boot splash)
 //   Ctrl-Shift-F1            -> reboot the Pico itself (see the note at the handler)
 // Bare keys pass through:
 //   F1, F2 -> HID_KEY_F1, HID_KEY_F2
 //   F3     -> HID_KEY_F12    hard reset (SMS / PC-XT / tiny386) -- unchanged
 //   F4, F5 -> HID_KEY_F4, HID_KEY_F5   Apple II paddle buttons 0 and 1; MSX matrix keys
 // F6..F10 are translated too in case a unit's firmware emits them; the stock PicoCalc keyboard
-// only sends F1..F5, which is why Ctrl-Shift-F3 exists as an alias for Ctrl-F8.
+// only sends F1..F5, which is why Ctrl-Shift-F3 exists as an alias for Ctrl-F6.
 // usbkeyboard.cpp is untouched; the remap happens here at translation time.
 
 #include "../../emu.h"
@@ -283,21 +283,21 @@ static void handleEvent(uint8_t state, uint8_t code)
     }
     if (code == PCK_F1) { tapHid(HID_KEY_F10); return; }              // settings menu
 
-    // Ctrl-F8 -> back to the system selection menu. Same three steps as the REBOOT button in
+    // Ctrl-F6 -> back to the system selection menu. Same three steps as the REBOOT button in
     // the settings window (ouiReboot in src/shared/optionsui.cpp): persist first so the trip
     // through the splash does not silently discard a setting, then ask for the splash, then
     // restart. Without requestSplashOnNextBoot() the firmware would come straight back up in
     // the platform it is already running, which is the one thing this key exists to escape.
     // The delay lets the log line reach the serial port before the core goes down.
-    if (code == PCK_F8 || (code == PCK_F3 && g_shiftHeld)) {
-      printLog("Ctrl-F8: rebooting to the system menu");
+    if (code == PCK_F6 || (code == PCK_F3 && g_shiftHeld)) {
+      printLog("Ctrl-F6: rebooting to the system menu");
       saveConfig();
       requestSplashOnNextBoot();
       delay(50);
       ESP.restart();
     }
 
-    // CPU reset moved here off Ctrl-F8 when that became the system menu. This MUST stay below
+    // CPU reset moved here when Ctrl-F8 (now Ctrl-F6) became the system menu. This MUST stay below
     // the branch above, which claims Ctrl-Shift-F3 for the system menu: the two share a key and
     // are told apart only by shift, so testing the unshifted form first would swallow both.
     // (Safe as written either way -- the branch above restarts the board rather than returning.)
@@ -313,6 +313,8 @@ static void handleEvent(uint8_t state, uint8_t code)
     switch (code) {
       case PCK_LEFT:  splashKeyEvent = SPLASH_KEY_LEFT;   return;
       case PCK_RIGHT: splashKeyEvent = SPLASH_KEY_RIGHT;  return;
+      case PCK_UP:    splashKeyEvent = SPLASH_KEY_UP;     return;
+      case PCK_DOWN:  splashKeyEvent = SPLASH_KEY_DOWN;   return;
       case PCK_ENTER: splashKeyEvent = SPLASH_KEY_SELECT; return;
       default: break;                               // anything else falls through to the core
     }

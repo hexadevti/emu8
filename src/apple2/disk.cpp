@@ -273,8 +273,7 @@ void prevDiskFile()
 void saveDiskFile()
 {
   paused = true;
-  writeStringToEEPROM(DiskFileNameEEPROMaddress, selectedDiskFileName.c_str());
-  saveEEPROM();
+  saveEEPROM();         // writes selectedDiskFileName to the II+'s or the IIe's slot
   EEPROM.commit();
   paused = false;
 }

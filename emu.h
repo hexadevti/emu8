@@ -156,7 +156,7 @@ extern char keymem;
 #define JOY_MAX 1024
 #define JOY_MID 512
 #define JOY_MIN 0
-#define EEPROM_SIZE 1664   // ... + Tiny386FileName (1280, C:) + Tiny386FileNameA (1408, A:)
+#define EEPROM_SIZE 1792   // ... + Tiny386FileNameA (1408, A:) + the Apple IIe's own disk/HD names (1536, 1664)
 extern int fnSelected;
 extern int joystickCycles0;
 extern int joystickCycles1;
@@ -211,8 +211,11 @@ extern uint8_t volume;
 
 // Target system for the multi-platform emulator. Apple II is implemented; C64 and
 // NES are placeholders selectable from the boot splash (see src/shared/video.cpp
-// splashService and the dispatch in emu8.ino). Persisted in EEPROM.
-enum Platform : uint8_t { PLATFORM_APPLE2 = 0, PLATFORM_C64 = 1, PLATFORM_NES = 2, PLATFORM_ATARI = 3, PLATFORM_IIGS = 4, PLATFORM_MSX = 5, PLATFORM_SMS = 6, PLATFORM_PCXT = 7, PLATFORM_TINY386 = 8 };
+// splashService and the dispatch in emu8.ino). Persisted in EEPROM -- all but PLATFORM_SDMANAGER,
+// which is not an emulator: the SD card file manager as a boot mode of its own (sdserial.cpp), so it
+// has the whole heap to itself. It is entered for one boot only (sdManagerBootRequested) and never
+// saved, so leaving it lands back on the system the user was running.
+enum Platform : uint8_t { PLATFORM_APPLE2 = 0, PLATFORM_C64 = 1, PLATFORM_NES = 2, PLATFORM_ATARI = 3, PLATFORM_IIGS = 4, PLATFORM_MSX = 5, PLATFORM_SMS = 6, PLATFORM_PCXT = 7, PLATFORM_TINY386 = 8, PLATFORM_SDMANAGER = 9 };
 extern uint8_t currentPlatform;
 
 // Log Config
@@ -237,6 +240,11 @@ extern int logLineCount;
 #define SmsSpeedEEPROMaddress 14       // SMS: 1 = FAST (uncapped) / 0 = NORMAL (paced to 3.58 MHz)
 #define PcxtSpeedEEPROMaddress 15      // PCXT: reserved speed flag (currently always uncapped)
 #define NesSpeedEEPROMaddress 17       // NES: 1 = FAST (uncapped) / 0 = NORMAL (paced ~60fps/1.79MHz)
+// The Apple IIe keeps its own copy of the Apple-only settings (DEVICE, SPEED, the disk and HD
+// images); the addresses above without "IIe" are the II+'s (and the IIGS's). See eprom.cpp.
+#define IIeHdDiskEEPROMaddress 18
+#define IIeFast1MhzSpeedEEPROMaddress 19
+#define IIeConfigMarkerEEPROMaddress 20  // IIE_CONFIG_MARKER once the IIe set has been seeded
 #define NewDeviceConfigEEPROMaddress 50
 #define DiskFileNameEEPROMaddress 128
 #define HdFileNameEEPROMaddress 256
@@ -249,6 +257,8 @@ extern int logLineCount;
 #define PcxtHdFileNameEEPROMaddress 1152 // PCXT: last-mounted C: hard-disk image (auto-mounted on boot)
 #define Tiny386FileNameEEPROMaddress 1280 // tiny386: last C: hard-disk image (auto-mounted on boot)
 #define Tiny386FileNameAEEPROMaddress 1408 // tiny386: last A: floppy image (auto-mounted on boot)
+#define IIeDiskFileNameEEPROMaddress 1536  // Apple IIe: last .dsk (the II+'s is DiskFileNameEEPROMaddress)
+#define IIeHdFileNameEEPROMaddress 1664    // Apple IIe: last HD image (the II+'s is HdFileNameEEPROMaddress)
 extern String selectedDiskFileName;
 extern String selectedHdFileName;
 extern String selectedC64FileName;

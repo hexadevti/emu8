@@ -425,3 +425,14 @@
 //     FATAL: FreeRTOS pvPortMalloc failed (out of heap) in task 'CORE0'
 // which presents as a black screen, because the emulator never starts. Measure the heap before
 // relocating anything else.
+//
+// That FATAL is worth understanding, because it is the ONLY way this board dies of a full heap.
+// A plain malloc() that comes back NULL is handled everywhere in this tree (the VIC falls back to
+// text mode, the Apple II says so on the panel). But arduino-pico builds FreeRTOS with
+// configUSE_MALLOC_FAILED_HOOK, so an allocation made by the KERNEL -- a task stack, a queue, a
+// semaphore -- has no soft path: pvPortMalloc() calls the hook, which parks the board
+// (src/picocalc/fault_picocalc.cpp, where the message now also carries the free/used heap).
+// The C64 boot used to end with exactly such an allocation, the 4KB sound-core task stack, asked
+// for AFTER the guest's 64K of RAM and its ROMs were already on the heap. Both it and the render
+// task now use static stacks (picocalcStartAudioTask in src/picocalc/audio_picocalc.cpp, and
+// renderTaskStack in src/shared/video.cpp), so nothing in a normal boot can reach the hook.

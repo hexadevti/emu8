@@ -49,7 +49,11 @@ static unsigned char* a2Alloc(size_t n, const char* what) {
 //
 // It is still only an estimate of what comes later, so it is the cheap early exit rather than the
 // decision: apple2LoadRoms() makes the real call once FSSetup's buffers are also on the books.
-#if BOARD_A2_ROM_IN_FLASH
+#if defined(BOARD_PICOCALC)
+// Less the speaker's 2K task stack, which on this board sits in sharedBigBuf's idle end instead
+// of the heap (speakerSetup, src/shared/speaker.cpp).
+#define A2_IIE_RESERVE (20000 - 2048)
+#elif BOARD_A2_ROM_IN_FLASH
 #define A2_IIE_RESERVE 20000    // 1072 of card ROM + SD buffers + scan + task stacks
 #else
 #define A2_IIE_RESERVE 34000    // ...and 16696 more when iie.bin comes off the card
@@ -60,6 +64,26 @@ static unsigned char* a2Alloc(size_t n, const char* what) {
 // sharedBigBuf and must never be freed.
 static bool a2IIeMapOnHeap = false;
 
+// IIe bank-switched RAM 2.1 (4K). On the PicoCalc it is the static sound-core stack, which an
+// Apple II never runs a task on (picocalcLendAudioStack, src/picocalc/audio_picocalc.cpp): 4K of
+// .bss that would otherwise sit idle on the one board where the IIe map is short of exactly that
+// much heap. Everywhere else, and if the lend is refused, it comes off the heap like its siblings.
+static unsigned char* a2LentBank = nullptr;
+
+static unsigned char* a2AllocMb21()
+{
+#if defined(BOARD_PICOCALC)
+  if (!a2LentBank) a2LentBank = picocalcLendAudioStack(0x1000);
+  if (a2LentBank) return a2LentBank;
+#endif
+  return a2Alloc(0x1000, "IIe bank-switched RAM 2.1");
+}
+
+static void a2FreeMb21(unsigned char* p)
+{
+  if (p != a2LentBank) free(p);          // the lent buffer is .bss: never handed to free()
+}
+
 static bool a2AllocIIeMap()
 {
   static_assert(sizeof(sharedBigBuf) >= 0xc000 + 3 * 0x1000,
@@ -69,7 +93,7 @@ static bool a2AllocIIeMap()
   unsigned char* ax   = a2Alloc(0xc000, "aux RAM");
   unsigned char* ab1  = a2Alloc(0x2000, "IIe aux bank-switched RAM 1");
   unsigned char* mb1  = a2Alloc(0x2000, "IIe bank-switched RAM 1");
-  unsigned char* mb21 = a2Alloc(0x1000, "IIe bank-switched RAM 2.1");
+  unsigned char* mb21 = a2AllocMb21();
   size_t freeLeft = apple2MemAllocFailed ? 0 : heap_caps_get_free_size(MALLOC_CAP_8BIT);
   if (!apple2MemAllocFailed) {
     sprintf(buf, "Apple II: IIe map fits, %u bytes left, want %d more for ROM/disk/stacks",
@@ -77,7 +101,7 @@ static bool a2AllocIIeMap()
     printLog(buf);
   }
   if (apple2MemAllocFailed || freeLeft < A2_IIE_RESERVE) {
-    free(ax); free(ab1); free(mb1); free(mb21);
+    free(ax); free(ab1); free(mb1); a2FreeMb21(mb21);
     apple2MemAllocFailed = false;   // not fatal: memoryAlloc() falls back to the II+ map
     apple2RomLoadFailed  = false;
     return false;
@@ -127,7 +151,7 @@ void apple2FallbackToIIplus(const char* why)
     free(auxram);                        // the three sharedBigBuf-backed banks are NOT freed
     free(IIEAuxBankSwitchedRAM1);
     free(IIEmemoryBankSwitchedRAM1);
-    free(IIEmemoryBankSwitchedRAM2_1);
+    a2FreeMb21(IIEmemoryBankSwitchedRAM2_1);
     a2IIeMapOnHeap = false;
   }
   AppleIIe = false;
@@ -142,7 +166,10 @@ void apple2FallbackToIIplus(const char* why)
   // Write the downgrade back to EEPROM. Without this the card still says IIe, so every power-on
   // repeats this whole dance and lands on the splash again; the user picking II+ there does not
   // save it either, because by then AppleIIe already reads false and splashSelect sees no change.
-  // One flash write on the one boot that discovers the board cannot do it.
+  // One flash write on the one boot that discovers the board cannot do it. The II+'s own disk / HD
+  // / speed settings are loaded first: the IIe's were loaded at boot, and saving now would both
+  // run the II+ on them and write them over the II+'s (eprom.cpp keeps the two apart).
+  apple2LoadMachineConfig();
   saveConfig();
   // Show the boot splash on THIS boot rather than dropping the user into a II+ with no explanation.
   // We run before videoSetup(), which is what reads the magic, so the panel comes up on the system

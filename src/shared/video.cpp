@@ -26,6 +26,20 @@ RTC_NOINIT_ATTR static uint32_t splashOnBootMagic;
 #define SPLASH_ON_BOOT_MAGIC 0x5350A5AAu
 void requestSplashOnNextBoot() { splashOnBootMagic = SPLASH_ON_BOOT_MAGIC; }
 
+// Same mechanism for the SD Manager button: it is a boot mode, not a saved platform (emu.h), so the
+// splash leaves the choice here instead of in EEPROM and reboots. Honoured only after a software
+// reset -- RTC_NOINIT memory holds garbage at power-on -- and consumed on read, so the boot after
+// this one (Ctrl-F6, a power cycle) comes back to the system the user was running.
+RTC_NOINIT_ATTR static uint32_t sdManagerOnBootMagic;
+#define SDMGR_ON_BOOT_MAGIC 0x53444D47u
+static void requestSdManagerOnNextBoot() { sdManagerOnBootMagic = SDMGR_ON_BOOT_MAGIC; }
+bool sdManagerBootRequested()
+{
+  bool yes = (esp_reset_reason() == ESP_RST_SW) && sdManagerOnBootMagic == SDMGR_ON_BOOT_MAGIC;
+  sdManagerOnBootMagic = 0;
+  return yes;
+}
+
 // colors[] / colors16[] are defined in globals.cpp (after tft, for static-init order).
 int flashCount = 0;
 int touchCount = 0;
@@ -114,31 +128,64 @@ void bootProgressStep(const char *) {}
 void bootProgressEnd() {}
 #endif
 
-// ---- "Ctrl-F1 for options" hint ------------------------------------------------------------
-// Lives in the TOP letterbox bar (panel rows 0..39), which no core and no menu ever draws in, so
-// it cannot cover the emulated screen and the emulator's own clear-screen -- which writes exactly
-// 320x240 through the addr window -- cannot erase it early. The bottom bar was the other option
-// and is taken by the Disk II drive light further down this file.
+// ---- boot key hint ---------------------------------------------------------------------------
+// Two lines in the BOTTOM letterbox bar (panel rows 280..319) for five seconds after the emulator
+// comes up: the emulator-level Ctrl keys, then how the joystick and its buttons are reached. The
+// bar is the right home for it because no core and no menu ever draws there, so it cannot cover
+// the picture, and the emulator's clear-screen -- which writes exactly 320x240 through the addr
+// window -- cannot wipe it early either.
+//
+// It stops short of the right-hand 26px so the Disk II drive light below keeps its corner. That
+// matters more than it looks: the light is redrawn only when DriveMotorON_OFF changes, so erasing
+// it here would leave it dark until the next time the motor happened to switch.
 #if defined(BOARD_PICOCALC)
 static uint8_t  s_hintState = 0;              // 0 = waiting for the splash, 1 = showing, 2 = done
 static uint32_t s_hintUntil = 0;
 static volatile bool s_hintKeyed = false;     // set from the keyboard task, read here
 
-static void hintClearBar() { tft.fillPanelRect(0, 0, PANEL_NATIVE_W, DISP_OFFSET_Y, TFT_BLACK); }
+static const int32_t kHintTop = DISP_OFFSET_Y + DISP_LOGICAL_H;          // 280
+static const int32_t kHintH   = PANEL_NATIVE_H - kHintTop;               // 40
+static const int32_t kHintW   = PANEL_NATIVE_W - 26;                     // clear of the drive light
+
+static void hintClearBar() { tft.fillPanelRect(0, kHintTop, kHintW, kHintH, TFT_BLACK); }
+
+// Per platform, because none of it generalises: the reset key only exists on the Apples, and the
+// fire button is a different key on every core (see the dispatch in src/shared/usbkeyboard.cpp --
+// appleIsButtonKey, nesBit, atariKey, msxApplyJoystick are the authorities for these strings).
+static void hintText(const char **keys, const char **joy)
+{
+  const bool apple = (currentPlatform == PLATFORM_APPLE2 || currentPlatform == PLATFORM_IIGS);
+  *keys = apple ? "Ctrl-F1 options   Ctrl-F3 reset   Ctrl-F6 systems"
+                : "Ctrl-F1 options   Ctrl-F6 systems";
+  switch (currentPlatform) {
+    case PLATFORM_APPLE2:
+    case PLATFORM_IIGS:  *joy = "Arrows joystick   Space/F4 btn0   F5 btn1";   break;
+    case PLATFORM_C64:   *joy = "Arrows joystick   Space fire";                break;
+    case PLATFORM_NES:   *joy = "Arrows dpad   X=A  Z=B  Tab select  Enter start"; break;
+    case PLATFORM_ATARI: *joy = "Arrows stick   Space fire   F4 select   F3 reset"; break;
+    case PLATFORM_MSX:   *joy = "Arrows joystick   Space trigger";             break;
+    default:             *joy = "Arrows joystick   Space fire";                break;
+  }
+}
 
 void bootHintDismiss() { s_hintKeyed = true; }   // no drawing: this runs on the keyboard's task
 
 void bootHintTick()
 {
   if (s_hintState == 2) return;
+  if (currentPlatform == PLATFORM_SDMANAGER) { s_hintState = 2; return; }   // its screen says it
   if (s_hintState == 0) {
     // Armed on the first frame after the splash closes, not in videoSetup(), because the splash
     // owns the whole panel and would be sitting on top of the hint for as long as it is up.
     s_hintKeyed = false;                      // the keypress that dismissed the splash is not ours
+    const char *keys, *joy;
+    hintText(&keys, &joy);
     hintClearBar();
     tft.setTextDatum(MC_DATUM);
-    tft.setTextColor(tft.color565(190, 190, 90));
-    tft.drawPanelString("Ctrl-F1 for options", PANEL_NATIVE_W / 2, DISP_OFFSET_Y / 2, 2);
+    tft.setTextColor(tft.color565(200, 200, 90));
+    tft.drawPanelString(keys, kHintW / 2, kHintTop + 12, 1);
+    tft.setTextColor(tft.color565(150, 160, 175));
+    tft.drawPanelString(joy,  kHintW / 2, kHintTop + 27, 1);
     s_hintUntil = millis() + 5000;
     s_hintState = 1;
     return;
@@ -224,9 +271,17 @@ uint16_t last_x = 0;
 // loaded, and since that is now decided once at startup for the selected machine -- rather than
 // both maps being allocated so a MACHINE toggle could flip between them -- the model has to be
 // chosen here, like any other system. Every other entry is one platform with iie = -1 ("n/a").
-#define SPLASH_MS    12000   // generous: time to read the menu and tap a system
-#define SPLASH_BTN_Y 164
-#define SPLASH_BTN_H 44
+//
+// Eleven buttons do not fit one row of the 320px panel at a readable width, so they sit in two:
+// SPLASH_COLS across, the second row centred under the first. The logo and the SELECT SYSTEM line
+// moved up to make the room.
+#define SPLASH_MS      12000   // generous: time to read the menu and tap a system
+#define SPLASH_LOGO_Y  22
+#define SPLASH_SUB_Y   122     // "SELECT SYSTEM" / "Loading..." line (centre)
+#define SPLASH_BTN_Y   136     // top of the first row
+#define SPLASH_BTN_H   40
+#define SPLASH_ROW_GAP 4
+#define SPLASH_COLS    6
 struct SplashSystem { const char *label; uint8_t platform; int8_t iie; const char *why; };
 static const SplashSystem splashSystems[] = {
   { "II+",   PLATFORM_APPLE2,   0, "SOON"   },
@@ -239,16 +294,29 @@ static const SplashSystem splashSystems[] = {
   { "SMS",   PLATFORM_SMS,     -1, "SOON"   },
   { "PCXT",  PLATFORM_PCXT,    -1, "SOON"   },
   { "386",   PLATFORM_TINY386, -1, "SOON"   },
+  { "SD MGR", PLATFORM_SDMANAGER, -1, "N/A"  },   // not an emulator: the SD card file manager
 };
 #define SPLASH_N     ((int)(sizeof(splashSystems) / sizeof(splashSystems[0])))
-#define SPLASH_PITCH (320 / SPLASH_N)      // ten buttons across the 320px panel: 32px pitch,
-#define SPLASH_BTN_W (SPLASH_PITCH - 1)    // 31px wide, 1px gap
+#define SPLASH_PITCH (320 / SPLASH_COLS)   // 53px pitch,
+#define SPLASH_BTN_W (SPLASH_PITCH - 2)    // 51px wide, 2px gap
+
+// Top-left corner of button i. A row shorter than SPLASH_COLS (the last one) is centred.
+static void splashBtnPos(int i, int *x, int *y)
+{
+  int row = i / SPLASH_COLS, col = i % SPLASH_COLS;
+  int inRow = SPLASH_N - row * SPLASH_COLS;
+  if (inRow > SPLASH_COLS) inRow = SPLASH_COLS;
+  *x = (320 - inRow * SPLASH_PITCH) / 2 + col * SPLASH_PITCH + 1;
+  *y = SPLASH_BTN_Y + row * (SPLASH_BTN_H + SPLASH_ROW_GAP);
+}
 
 static int splashHitTest(int16_t x, int16_t y)
 {
-  if (y < SPLASH_BTN_Y || y >= SPLASH_BTN_Y + SPLASH_BTN_H) return -1;
-  for (int i = 0; i < SPLASH_N; i++)
-    if (x >= i * SPLASH_PITCH && x < i * SPLASH_PITCH + SPLASH_BTN_W) return i;
+  for (int i = 0; i < SPLASH_N; i++) {
+    int bx, by;
+    splashBtnPos(i, &bx, &by);
+    if (x >= bx && x < bx + SPLASH_BTN_W && y >= by && y < by + SPLASH_BTN_H) return i;
+  }
   return -1;
 }
 
@@ -275,6 +343,12 @@ static bool splashEnabled(int i)
 #else
       return false;                    // S3 (not built here) / CYD (no PSRAM)
 #endif
+    case PLATFORM_SDMANAGER:
+#if defined(BOARD_DESKTOP)
+      return false;                    // the "card" is a host folder already (sdserial.cpp)
+#else
+      return true;
+#endif
     default:                return true;
   }
 }
@@ -299,7 +373,8 @@ static void splashDrawBtn(int i, bool enabled)
 {
   const char *label = splashSystems[i].label;
   bool active = (i == splashHighlight());
-  int x = i * SPLASH_PITCH, w = SPLASH_BTN_W, y = SPLASH_BTN_Y, h = SPLASH_BTN_H;
+  int x, y, w = SPLASH_BTN_W, h = SPLASH_BTN_H;
+  splashBtnPos(i, &x, &y);
   uint16_t face = !enabled ? tft.color565(28, 30, 38)
                 : active   ? tft.color565(0, 120, 215)
                            : tft.color565(44, 48, 60);
@@ -334,12 +409,20 @@ static void splashSelect(int idx)
   splashCursor = -1;                   // ...so stop overriding it with the keyboard cursor
   if (prevIdx != idx) splashDrawBtn(prevIdx, splashEnabled(prevIdx));
   splashDrawBtn(idx, splashEnabled(idx));
-  tft.fillRect(0, 140, 320, 20, TFT_BLACK);            // wipe the "SELECT SYSTEM" subtitle
+  tft.fillRect(0, SPLASH_SUB_Y - 10, 320, 20, TFT_BLACK);   // wipe the "SELECT SYSTEM" subtitle
   tft.setTextDatum(MC_DATUM);
   tft.setTextColor(tft.color565(0, 200, 120), TFT_BLACK);
-  tft.drawString("Loading...", 160, 150, 2);
+  tft.drawString("Loading...", 160, SPLASH_SUB_Y, 2);
   displayFlush();
   delay(1000);
+
+  if (currentPlatform == PLATFORM_SDMANAGER) {
+    // Always a reboot, and never a saved platform: saveConfig() keeps the emulator's byte in
+    // EEPROM (eprom.cpp) and the one-boot flag carries the choice across the restart instead.
+    saveConfig();
+    requestSdManagerOnNextBoot();
+    ESP.restart();
+  }
 
   if (prevPlat == currentPlatform && prevIIe == (bool)AppleIIe) { splashFinish(); return; }
   // Switching systems needs a reboot to re-init. ESP.restart() (an on-chip reset from firmware)
@@ -357,11 +440,11 @@ static void splashService()
     startMs = millis();
     tft.fillScreen(TFT_BLACK);
     tft.setSwapBytes(true);
-    tft.pushImage((320 - BOOT_LOGO_W) / 2, 38, BOOT_LOGO_W, BOOT_LOGO_H, bootLogo);
+    tft.pushImage((320 - BOOT_LOGO_W) / 2, SPLASH_LOGO_Y, BOOT_LOGO_W, BOOT_LOGO_H, bootLogo);
     tft.setSwapBytes(false);
     tft.setTextDatum(MC_DATUM);
     tft.setTextColor(tft.color565(150, 160, 175), TFT_BLACK);
-    tft.drawString("SELECT SYSTEM", 160, 150, 2);
+    tft.drawString("SELECT SYSTEM", 160, SPLASH_SUB_Y, 2);
     for (int i = 0; i < SPLASH_N; i++) splashDrawBtn(i, splashEnabled(i));
     drawn = true;
   }
@@ -376,15 +459,22 @@ static void splashService()
 
 #if defined(BOARD_PICOCALC)
   // No touch panel here, so the splash is driven from the keyboard instead: left/right move
-  // the highlight over the enabled platforms, Enter commits (the same path a tap takes). Any
-  // nav key also restarts the timeout, so browsing the list cannot boot out from under you.
+  // the highlight over the enabled platforms, up/down jump between the two rows, Enter commits
+  // (the same path a tap takes). Any nav key also restarts the timeout, so browsing the list
+  // cannot boot out from under you.
   int8_t ev = splashKeyEvent;
   splashKeyEvent = 0;
   if (ev) {
     int cur = splashHighlight();
     if (ev == SPLASH_KEY_SELECT) { if (splashEnabled(cur)) splashSelect(cur); return; }
     int n = cur;
-    do { n = (n + ev + SPLASH_N) % SPLASH_N; } while (!splashEnabled(n) && n != cur);   // skip SOON
+    if (ev == SPLASH_KEY_UP || ev == SPLASH_KEY_DOWN) {
+      int t = cur + (ev == SPLASH_KEY_DOWN ? SPLASH_COLS : -SPLASH_COLS);
+      if (t >= SPLASH_N) t = SPLASH_N - 1;               // the bottom row is the shorter one
+      if (t >= 0 && splashEnabled(t)) n = t;             // a SOON button there: stay put
+    } else {
+      do { n = (n + ev + SPLASH_N) % SPLASH_N; } while (!splashEnabled(n) && n != cur);   // skip SOON
+    }
     if (n != cur) {
       splashCursor = n;
       splashDrawBtn(cur, splashEnabled(cur));
@@ -395,6 +485,48 @@ static void splashService()
   }
 #endif
   if (millis() - startMs >= SPLASH_MS || Pb0 || Pb1 || Pb2 || Pb3) splashFinish();
+}
+
+// SD Manager mode (PLATFORM_SDMANAGER): no emulator runs, the USB serial port belongs to the
+// file-manager server (sdserial.cpp), and the panel just says how to use it and what state it is
+// in. Redrawn only when that state changes.
+static void sdManagerRender()
+{
+  static int shown = -1;
+  int state = (sdSerialActive ? 1 : 0) | (sdCardMounted ? 2 : 0);
+  if (clearScr) { shown = -1; clearScr = false; }
+  if (state != shown) {
+    shown = state;
+    uint16_t dim = tft.color565(150, 160, 175);
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.drawString("SD MANAGER", 160, 34, 2);
+    tft.setTextColor(dim, TFT_BLACK);
+    tft.drawString("Connect this board over USB and open", 160, 72, 2);
+    tft.drawString("the emu8 SD Manager web app", 160, 90, 2);
+    tft.drawString("(or emu8sd.py) on the computer.", 160, 108, 2);
+    if (!sdCardMounted) {
+      tft.setTextColor(tft.color565(220, 40, 40), TFT_BLACK);
+      tft.drawString("SD card not mounted", 160, 146, 2);
+    } else if (sdSerialActive) {
+      tft.setTextColor(tft.color565(0, 200, 120), TFT_BLACK);
+      tft.drawString("Host connected", 160, 146, 2);
+    } else {
+      tft.setTextColor(tft.color565(230, 180, 40), TFT_BLACK);
+      tft.drawString("Waiting for a host...", 160, 146, 2);
+    }
+    tft.setTextColor(dim, TFT_BLACK);
+#if defined(BOARD_PICOCALC)
+    tft.drawString("Ctrl-F6: back to the system menu", 160, 200, 2);
+#else
+    tft.drawString("Tap the screen: back to the system menu", 160, 200, 2);
+#endif
+  }
+  // Leaving is a reboot into the splash, like Ctrl-F6 is on the PicoCalc (input_picocalc.cpp):
+  // the emulator the user comes back to is set up from scratch, with the whole heap.
+  int16_t tx, ty;
+  if (touchRead(&tx, &ty)) { requestSplashOnNextBoot(); ESP.restart(); }
 }
 
 #if defined(BOARD_PICOCALC)
@@ -475,6 +607,14 @@ void renderLoop(void *pvParameters)
     // on-screen keyboard); the per-platform emulator-video sections switch to video mode (centered
     // 320x240) just before they draw, and back to UI for any keyboard overlay.
     displaySetUiMode(true);
+
+    if (currentPlatform == PLATFORM_SDMANAGER)
+    {
+      sdManagerRender();
+      Vertical_blankingOn_Off = true;
+      vTaskDelay(pdMS_TO_TICKS(50));
+      continue;
+    }
 
     // NES startup ROM-skip warning: hold a full-screen note (skipped/over-budget ROMs) for a few
     // seconds after boot, before normal rendering / touch handling kicks in.

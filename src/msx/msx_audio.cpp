@@ -51,7 +51,13 @@ void msxPsgSetup() {
   printLog("MSX audio: AY-3-8910 on (I2S DAC GPIO26)");
 #else
   ampBegin(MSX_AUD_FS);
+#if defined(BOARD_PICOCALC)
+  // Static stack -- a 4KB task create that fails is FATAL on this board, and this is the
+  // last thing the boot asks of the heap. See picocalcStartAudioTask (audio_picocalc.cpp).
+  picocalcStartAudioTask(msxAudioTask, "msxAud", 2);
+#else
   xTaskCreatePinnedToCore(msxAudioTask, "msxAud", 4096, NULL, 2, NULL, 0);
+#endif
   printLog("MSX audio: AY-3-8910 on (I2S amp)");
 #endif
 }

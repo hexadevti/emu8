@@ -335,7 +335,13 @@ static void apuSetup() {
 #else
   // ESP32-S3: external I2S amp (no internal DAC).
   ampBegin(APU_FS);
+#if defined(BOARD_PICOCALC)
+  // Static stack -- a 4KB task create that fails is FATAL on this board, and this is the
+  // last thing the boot asks of the heap. See picocalcStartAudioTask (audio_picocalc.cpp).
+  picocalcStartAudioTask(apuTask, "apuTask", 2);
+#else
   xTaskCreatePinnedToCore(apuTask, "apuTask", 4096, NULL, 2, NULL, 0);   // core 0
+#endif
   printLog("APU: pulse x2 + triangle + noise on (I2S amp)");
 #endif
 }

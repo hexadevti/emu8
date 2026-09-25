@@ -136,6 +136,17 @@ static inline void esp_task_wdt_reset(void) {}
         xTaskCreateStaticAffinitySet((fn), (name), (stackWords), (param), (prio), (stack),    \
                                      (tcb), PICO_CORE_MASK(core))
 
+// The sound core's task gets a static stack on this board -- a failed 4KB task create is FATAL
+// here (it parks the board via the malloc-failed hook), and 4KB contiguous is the hardest thing
+// to get once the guest's RAM and ROMs are on the heap. Defined in src/picocalc/audio_picocalc.cpp,
+// where the reasoning lives; returns false only if the task could not start.
+#ifdef __cplusplus
+bool picocalcStartAudioTask(TaskFunction_t fn, const char *name, UBaseType_t prio);
+// The same buffer handed out as plain RAM, for a platform that never starts a sound core (the
+// Apple II's IIe banks, src/apple2/memory.cpp). Null if it is too small or already a task stack.
+uint8_t *picocalcLendAudioStack(size_t n);
+#endif
+
 // The PLAIN xTaskCreate() call sites (the four Apple II disk/HD loader tasks) were written for
 // Arduino-ESP32 too, where the stack argument is likewise in BYTES. Vanilla FreeRTOS reads it as
 // WORDS, so an unconverted `4096` quietly reserves 16KB -- 64KB across the four, an eighth of

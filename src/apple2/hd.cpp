@@ -189,8 +189,7 @@ void saveHdFile()
 {
   paused = true;
   Serial.printf("Saving HD file: %s\n", selectedHdFileName.c_str());
-  writeStringToEEPROM(HdFileNameEEPROMaddress, selectedHdFileName.c_str());
-  saveEEPROM();
+  saveEEPROM();         // writes selectedHdFileName to the II+'s or the IIe's slot
   EEPROM.commit();
   paused = false;
 }

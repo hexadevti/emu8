@@ -541,6 +541,9 @@ static void feed(uint8_t b) {
 
 void sdSerialPoll() {
   if (!rxBuf) {
+    // Lazily, on the first byte from a host -- not on the first poll, which is right after boot.
+    // Until something talks to us these 2K belong to the heap the emulator is still using.
+    if (portAvailable() <= 0) return;
     rxBuf = (uint8_t *)malloc(6 + SDS_MAX_PAYLOAD + 2);
     txBuf = (uint8_t *)malloc(2 + 4 + SDS_MAX_PAYLOAD + 2);
     if (!rxBuf || !txBuf) { free(rxBuf); free(txBuf); rxBuf = txBuf = nullptr; return; }
@@ -573,9 +576,10 @@ static void sdSerialTask(void *) {
   }
 }
 
+// Started only in SD Manager mode (emu8.ino), where no emulator is set up and the whole heap is
+// free. It used to run beside every emulator, and on the PicoCalc's RP2040 its task was the
+// allocation that tipped a IIe boot into "FATAL: pvPortMalloc failed".
 void sdSerialSetup() {
-  // Core 0, priority 1: below the audio (2) and joystick (3) tasks, which block on their own I/O,
-  // so the server only ever takes idle time from the emulator's side of the chip.
   xTaskCreatePinnedToCore(sdSerialTask, "sdserial", 4096, NULL, 1, NULL, 0);
 }
 #endif

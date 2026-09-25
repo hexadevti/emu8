@@ -20,11 +20,23 @@
 
 // Printed straight to Serial rather than through printLog(): printLog takes an Arduino String,
 // which allocates -- and one of the two callers is here precisely because allocation just failed.
-static void __attribute__((noreturn)) reportAndPark(const char *what, const char *who) {
+static void __attribute__((noreturn)) reportAndPark(const char *what, const char *who, bool heap) {
+  // Sampled once, before the park starts printing: these are cheap (mallinfo + a walk of the
+  // free list) but they are still the numbers as of the failure, not as of the tenth reprint.
+  const int freeHeap = heap ? rp2040.getFreeHeap() : 0;
+  const int usedHeap = heap ? rp2040.getUsedHeap() : 0;
   for (;;) {
     Serial.print("FATAL: ");
     Serial.print(what);
     if (who) { Serial.print(" in task '"); Serial.print(who); Serial.print("'"); }
+    // An out-of-heap abort says nothing about how much was left, and on this board the answer
+    // decides the fix: a few hundred bytes free means trim a buffer, tens of KB free means the
+    // request itself was oversized (or the heap is too fragmented to serve it contiguously --
+    // getFreeHeap is a sum of holes, not a largest-block figure, see RP2040Support.h).
+    if (heap) {
+      Serial.print(" -- heap free="); Serial.print(freeHeap);
+      Serial.print(" used=");         Serial.print(usedHeap);
+    }
     Serial.println();
     vTaskDelay(2000 / portTICK_PERIOD_MS);   // repeat: the host may attach after the fact
   }
@@ -33,12 +45,12 @@ static void __attribute__((noreturn)) reportAndPark(const char *what, const char
 extern "C" void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName);
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName) {
   (void)xTask;
-  reportAndPark("FreeRTOS stack overflow", pcTaskName);
+  reportAndPark("FreeRTOS stack overflow", pcTaskName, false);
 }
 
 extern "C" void vApplicationMallocFailedHook(void);
 void vApplicationMallocFailedHook(void) {
-  reportAndPark("FreeRTOS pvPortMalloc failed (out of heap)", pcTaskGetName(NULL));
+  reportAndPark("FreeRTOS pvPortMalloc failed (out of heap)", pcTaskGetName(NULL), true);
 }
 
 #endif // BOARD_PICOCALC
