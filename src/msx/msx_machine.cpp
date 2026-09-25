@@ -1,9 +1,9 @@
 // This MSX translation unit is compiled out entirely on boards that clear
-// BOARD_HAS_Z80_CORES (the PicoCalc's original RP2040 mainboard -- see board.h for why).
+// BOARD_HAS_MSX_CORE (currently none -- see board.h; it is on for every board).
 // emu.h must be included FIRST because it is what pulls in board.h and defines the macro;
-// the guard below then empties the file, handing this core's static RAM to the Apple II.
+// the guard below then empties the file, keeping the Z80 core's static RAM out of the image.
 #include "../../emu.h"
-#if BOARD_HAS_Z80_CORES
+#if BOARD_HAS_MSX_CORE
 
 // msx_machine.cpp - MSX1 machine: primary-slot memory map, Z80<->VDP/PSG/PPI I/O routing, and the
 // per-frame run loop (Z80 time + VDP VBlank interrupt). Arduino-free so it also links into
@@ -163,4 +163,4 @@ void msxHostDumpText() {
 }
 #endif
 
-#endif  // BOARD_HAS_Z80_CORES
+#endif  // BOARD_HAS_MSX_CORE

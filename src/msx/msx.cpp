@@ -1,9 +1,9 @@
 // This MSX translation unit is compiled out entirely on boards that clear
-// BOARD_HAS_Z80_CORES (the PicoCalc's original RP2040 mainboard -- see board.h for why).
+// BOARD_HAS_MSX_CORE (currently none -- see board.h; it is on for every board).
 // emu.h must be included FIRST because it is what pulls in board.h and defines the macro;
-// the guard below then empties the file, handing this core's static RAM to the Apple II.
+// the guard below then empties the file, keeping the Z80 core's static RAM out of the image.
 #include "../../emu.h"
-#if BOARD_HAS_Z80_CORES
+#if BOARD_HAS_MSX_CORE
 
 // msx.cpp - device-side glue for the MSX1 platform: allocation, BIOS/C-BIOS load, the core-0 render
 // push, the core-1 run loop, input injection, and the settings (file browser / load) hooks. This is
@@ -79,6 +79,15 @@ static bool loadBiosFromSD() {
     if (!f) continue;
     int len = f.size();
     if (len >= 0x4000 && len <= 0x8000) {
+#if BOARD_ROM_IN_FLASH
+      // PicoCalc: no PSRAM, so the BIOS is copied into spare flash and read through XIP (a no-op
+      // compare on every boot after the first). See src/picocalc/romflash_picocalc.cpp.
+      const uint8_t* fb = romFlashLoad(ROMFLASH_BIOS, f, len); f.close();
+      if (fb) { msx::bios = fb; msx::biosLen = len;
+                msx::biosIsCbios = strstr(nm, "cbios") || strstr(nm, "CBIOS");
+                sprintf(buf, "MSX: BIOS %s (%dK, flash)", nm, len / 1024); printLog(buf); return true; }
+      continue;
+#endif
       uint8_t* b = msxAllocFast(0x8000);
       if (b) {
         int got = f.read(b, len); f.close();
@@ -112,17 +121,33 @@ void msxBrowseUp()           { fbUp(msxBrowser); }
 void msxSetup() {
   printLog("MSX1 Setup... (Z80 + TMS9918 VDP + AY-3-8910 PSG + 8255 PPI)");
 
+#if defined(BOARD_PICOCALC)
+  // No PSRAM, so the heap has to hold the 80K of RAM + VRAM below. The ~6.8K of side buffers go in
+  // sharedBigBuf past the 49152-byte framebuffer instead: that tail is only used while an Apple II
+  // runs (its IIe banks and speaker stack), and a platform switch reboots.
+  static_assert(sizeof(sharedBigBuf) >= 256 * 192 + 256 * 8 * 2 + 2 * 0x546,
+                "MSX framebuffer + scratch band + menu buffers must fit in sharedBigBuf");
+  msxScratch = (uint16_t*)(sharedBigBuf + 256 * 192);           // 4096 bytes, 16-bit aligned
+  menuScreen = sharedBigBuf + 256 * 192 + 256 * 8 * 2;
+  menuColor  = menuScreen + 0x546;
+#else
   // shared text UI buffers (settings window) - allocate like the C64/NES/Atari paths
   menuScreen = (unsigned char*)malloc(0x546);
   menuColor  = (unsigned char*)malloc(0x546);
+  msxScratch = (uint16_t*)malloc(256 * 8 * sizeof(uint16_t));
+#endif
 
   msx::ram  = msxAllocFast(0x10000);            // 64 KB work RAM (slot 3) - keep internal for speed
   msx::vram = msxAllocFast(msx::VRAM_SIZE);     // 16 KB VDP RAM - read every frame
   msx::framebuffer = sharedBigBuf;              // 256*192 = 49152 <= sizeof(sharedBigBuf)
   if (msx::ram)  memset(msx::ram, 0, 0x10000);
   if (msx::vram) memset(msx::vram, 0, msx::VRAM_SIZE);
-
-  msxScratch = (uint16_t*)malloc(256 * 8 * sizeof(uint16_t));
+  if (!msx::ram || !msx::vram) {
+    sprintf(buf, "MSX: out of memory for RAM/VRAM (heap=%u)", (unsigned)ESP.getFreeHeap());
+    printLog(buf);
+    msx::biosLen = 0;                            // msxLoop idles on biosLen == 0 instead of crashing
+    return;
+  }
 
   loadBiosFromSD();                              // SD BIOS, else embedded C-BIOS, else biosLen=0 (warning)
 
@@ -235,12 +260,20 @@ static bool msxLoadCart(const char* path) {
   if (!f) { sprintf(buf, "MSX: cannot open %s", path); printLog(buf); return false; }
   int len = f.size();
   if (len <= 0 || len > 0x100000) { f.close(); printLog("MSX: cart size out of range"); return false; }
+#if BOARD_ROM_IN_FLASH
+  // PicoCalc: the image goes to the flash cartridge window (only changed sectors are rewritten).
+  // Pull the old cart out first -- its bytes are about to be overwritten in place.
+  msxCartEject(1);
+  const uint8_t* cb = romFlashLoad(ROMFLASH_CART, f, len); f.close();
+  if (!cb) { printLog("MSX: cart does not fit in flash"); return false; }
+#else
   if (g_cartBuf) { free(g_cartBuf); g_cartBuf = nullptr; }
   uint8_t* cb = (uint8_t*)ps_malloc(len);
   if (!cb) { f.close(); printLog("MSX: cart malloc failed"); return false; }
   int got = f.read(cb, len); f.close();
   if (got != len) { free(cb); printLog("MSX: cart read short"); return false; }
   g_cartBuf = cb;
+#endif
   msxCartLoadImage(1, cb, len);
   msxDiskClose();                                  // flush + close any disk write-back handle
   msx::diskSetRom(nullptr, 0); msx::diskEject();   // disk off when a cart is inserted
@@ -323,4 +356,4 @@ bool msxRenderLoadWarning() {
   return false;   // embedded/SD BIOS present -> boot straight into it (no overlay)
 }
 
-#endif  // BOARD_HAS_Z80_CORES
+#endif  // BOARD_HAS_MSX_CORE

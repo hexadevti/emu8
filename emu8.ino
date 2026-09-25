@@ -61,10 +61,10 @@ void setup() {
     currentPlatform = PLATFORM_APPLE2;
   }
 #endif
-#if !BOARD_HAS_Z80_CORES
-  // Same story for the Z80 cores: this board does not link MSX/SMS (board.h), but EEPROM can
-  // still name one from a build that did, and loop() would dispatch into a core that is gone.
-  if (currentPlatform == PLATFORM_MSX || currentPlatform == PLATFORM_SMS) {
+#if !BOARD_HAS_SMS_CORE
+  // Same story for the SMS: this board does not link it (board.h), but EEPROM can still name it
+  // from a build that did, and loop() would dispatch into a core that is gone.
+  if (currentPlatform == PLATFORM_SMS) {
     printLog("Platform has no RAM budget on this board -> falling back to Apple II");
     currentPlatform = PLATFORM_APPLE2;
   }
@@ -137,7 +137,7 @@ void setup() {
     joystickSetup();
     speakerSetup();     // Apple II-compatible 1-bit speaker ($C030) -> I2S amp, LAST (I2S DMA after SD)
 #endif
-#if BOARD_HAS_Z80_CORES
+#if BOARD_HAS_MSX_CORE
   } else if (currentPlatform == PLATFORM_MSX) {
     FSSetup();          // SD first: msxSetup loads the BIOS / first cart off the card
     msxSetup();         // 64K RAM + 16K VRAM + BIOS (SD or C-BIOS) + reset Z80/VDP/PPI/PSG
@@ -146,6 +146,8 @@ void setup() {
     oskSetup();
     joystickSetup();    // analog stick + buttons -> MSX joystick (PSG port A)
     msxPsgSetup();      // AY-3-8910 -> I2S (M3.5), LAST so its I2S DMA comes after SD
+#endif
+#if BOARD_HAS_SMS_CORE
   } else if (currentPlatform == PLATFORM_SMS) {
     FSSetup();          // SD first: smsSetup loads the first .sms/.bin off the card
     smsSetup();         // 8K RAM + 16K VRAM + reset Z80/VDP/PSG; auto-load saved ROM (no BIOS)
@@ -213,8 +215,10 @@ void loop() {
 #if BOARD_HAS_BIGRAM_CORES
     case PLATFORM_IIGS:   iigsLoop(); break;
 #endif
-#if BOARD_HAS_Z80_CORES
+#if BOARD_HAS_MSX_CORE
     case PLATFORM_MSX:    msxLoop(); break;
+#endif
+#if BOARD_HAS_SMS_CORE
     case PLATFORM_SMS:    smsLoop(); break;
 #endif
 #if BOARD_HAS_BIGRAM_CORES

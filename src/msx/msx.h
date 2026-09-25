@@ -19,7 +19,7 @@ static const int FB_SIZE = VDP_W * VDP_H;        // 256*192 = 49152 bytes (8-bit
 // ---- shared state (defined in msx_globals.cpp) ----
 extern Z80      cpu;
 extern uint8_t* ram;            // 64 KB work RAM (slot 3)
-extern uint8_t* bios;           // BIOS ROM (slot 0), 16 or 32 KB; SD image or embedded C-BIOS
+extern const uint8_t* bios;         // BIOS ROM (slot 0), 16 or 32 KB; SD image or embedded C-BIOS
 extern int      biosLen;
 extern uint8_t* vram;           // 16 KB VDP RAM
 extern uint8_t* framebuffer;    // 256*192 indexed; points at sharedBigBuf on the device

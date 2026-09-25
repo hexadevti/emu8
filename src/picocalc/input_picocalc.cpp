@@ -48,7 +48,8 @@
 // Bare keys pass through:
 //   F1, F2 -> HID_KEY_F1, HID_KEY_F2
 //   F3     -> HID_KEY_F12    hard reset (SMS / PC-XT / tiny386) -- unchanged
-//   F4, F5 -> HID_KEY_F4, HID_KEY_F5   Apple II paddle buttons 0 and 1; MSX matrix keys
+//   F4, F5 -> HID_KEY_F4, HID_KEY_F5   Apple II paddle buttons 0 and 1; MSX matrix keys;
+//                                      SMS buttons 1 (start) and 2
 // F6..F10 are translated too in case a unit's firmware emits them; the stock PicoCalc keyboard
 // only sends F1..F5, which is why Ctrl-Shift-F3 exists as an alias for Ctrl-F6.
 // usbkeyboard.cpp is untouched; the remap happens here at translation time.

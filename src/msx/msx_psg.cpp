@@ -1,9 +1,9 @@
 // This MSX translation unit is compiled out entirely on boards that clear
-// BOARD_HAS_Z80_CORES (the PicoCalc's original RP2040 mainboard -- see board.h for why).
+// BOARD_HAS_MSX_CORE (currently none -- see board.h; it is on for every board).
 // emu.h must be included FIRST because it is what pulls in board.h and defines the macro;
-// the guard below then empties the file, handing this core's static RAM to the Apple II.
+// the guard below then empties the file, keeping the Z80 core's static RAM out of the image.
 #include "../../emu.h"
-#if BOARD_HAS_Z80_CORES
+#if BOARD_HAS_MSX_CORE
 
 // msx_psg.cpp - AY-3-8910 PSG for the MSX1 core (ports $A0 addr / $A1 data-write / $A2 data-read).
 // 3 square-tone channels + a shared 17-bit noise LFSR + a 16-step envelope generator. The synthesis
@@ -106,4 +106,4 @@ int psgGenSample(int masterVol, bool mute) {
 
 } // namespace msx
 
-#endif  // BOARD_HAS_Z80_CORES
+#endif  // BOARD_HAS_MSX_CORE

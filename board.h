@@ -385,19 +385,26 @@
 // they are compiled out of the platform switch entirely -- see emu8.ino and the boot splash.
 #define BOARD_HAS_BIGRAM_CORES BOARD_HAS_PSRAM
 
-// The two Z80 cores (MSX, SMS) carry ~34KB of static RAM of their own on top of the shared
-// framebuffer -- sms::cartRam alone is 32KB. That is affordable everywhere except the PicoCalc's
-// ORIGINAL RP2040 mainboard: its 264KB leaves ~102KB of heap once statics are placed, while the
-// Apple II's memoryAlloc() needs ~101KB before the ROMs and task stacks are counted, so the 6502
-// never starts and the panel shows the NOT ENOUGH RAM warning instead. Neither core could run
-// there anyway -- both load a whole cartridge image into RAM, and SMS ROMs alone reach 512KB.
-// So on that one board they are compiled out and the 34KB goes back to the Apple II. The RP2350
-// mainboard has 520KB and keeps all nine cores; PICO_RP2040/PICO_RP2350 come from the arduino-pico
-// core on the command line, so this resolves before any header is read.
-#if defined(BOARD_PICOCALC) && defined(PICO_RP2040)
-#define BOARD_HAS_Z80_CORES 0
+// The two Z80 cores (MSX, SMS) keep separate gates, but both are on for every board today. Neither
+// carries meaningful statics: RAM, VRAM and (on the SMS) the 32KB of on-cart battery RAM are heap,
+// allocated only when that core is the booted system -- the SMS cart RAM only once a game actually
+// maps it -- and the framebuffer is sharedBigBuf. So linking them costs the Apple II nothing on the
+// PicoCalc's ORIGINAL RP2040 mainboard, whose 264KB leaves ~102KB of heap once statics are placed
+// while the Apple II's memoryAlloc() needs ~101KB. (The SMS used to hold cartRam as a 32KB static,
+// which is what kept it off that board.) What makes both fit the RP2040's heap once booted is
+// keeping the BIOS and cartridge images in flash instead -- see BOARD_ROM_IN_FLASH below.
+#define BOARD_HAS_MSX_CORE 1
+#define BOARD_HAS_SMS_CORE 1
+
+// MSX BIOS + MSX/SMS cartridge images live in spare on-board flash (src/picocalc/romflash_picocalc.cpp)
+// instead of ps_malloc'd RAM. Only the PicoCalc: it has no PSRAM, and its flash is XIP-mapped, so
+// a const pointer into it reads like ROM. On the RP2040 this is what makes the Z80 cores fit at all
+// (the heap cannot hold a 32K BIOS next to 64K RAM + 16K VRAM, nor a 256K SMS game); on the RP2350
+// it lets images of any size up to 1MB load without eating the heap.
+#if defined(BOARD_PICOCALC)
+#define BOARD_ROM_IN_FLASH 1
 #else
-#define BOARD_HAS_Z80_CORES 1
+#define BOARD_ROM_IN_FLASH 0
 #endif
 
 // (The Apple II used to need a third gate here -- BOARD_APPLE2_LEAN -- because memoryAlloc()

@@ -1,9 +1,9 @@
 // This SMS translation unit is compiled out entirely on boards that clear
-// BOARD_HAS_Z80_CORES (the PicoCalc's original RP2040 mainboard -- see board.h for why).
+// BOARD_HAS_SMS_CORE (currently none -- see board.h; it is on for every board).
 // emu.h must be included FIRST because it is what pulls in board.h and defines the macro;
-// the guard below then empties the file, handing this core's static RAM to the Apple II.
+// the guard below then empties the file, keeping the Z80 core's static RAM out of the image.
 #include "../../emu.h"
-#if BOARD_HAS_Z80_CORES
+#if BOARD_HAS_SMS_CORE
 
 // sms_vdp.cpp - Sega 315-5124 VDP (Master System) for the SMS core. Ports $BE (data) / $BF (control +
 // status). It is a superset of the TMS9918: the control-port command carries a 2-bit CODE field
@@ -134,29 +134,42 @@ static void renderBgLine(uint8_t* fb, int y) {
   bool hideLeft8 = (vreg[0] & 0x20) != 0;
   uint8_t hs = lockTop ? 0 : lineHS[y];
   uint8_t* row = fb + y * VDP_W;
+  const bool lockRightOn = (vreg[0] & 0x80) != 0;         // right 8 columns ignore vscroll
+  const int  tmYScroll   = (y + vsLatch) % 224;           // vertical wrap is modulo 224 (28 rows)
 
+  // Each tile row is decoded once into 8 pixels and reused for every screen pixel it covers, instead
+  // of re-reading the name table and four bitplanes per pixel: on the PicoCalc's Cortex-M0+ the
+  // per-pixel version alone ate most of the frame budget on the Z80's core.
+  uint8_t tpx[8], tpr[8];
+  int  curCol = -1;
+  bool curLock = false;
   for (int x = 0; x < VDP_W; x++) {
-    bool lockRight = (vreg[0] & 0x80) && (x >= 192);       // right 8 columns ignore vscroll
-    uint8_t vs = lockRight ? 0 : vsLatch;
-    int tmY = (y + vs) % 224;                              // vertical wrap is modulo 224 (28 rows)
+    bool lockRight = lockRightOn && (x >= 192);
     int tmX = (x - hs) & 0xFF;                             // horizontal wrap is modulo 256
-    int tileCol = tmX >> 3, tileRow = tmY >> 3;
-    uint16_t e = (uint16_t)(nameBase + (tileRow * 32 + tileCol) * 2);
-    uint8_t lo = vram[e & 0x3FFF], hi = vram[(e + 1) & 0x3FFF];
-    int tile = lo | ((hi & 1) << 8);
-    bool hflip = hi & 0x02, vflip = hi & 0x04;
-    int  pal   = (hi & 0x08) ? 16 : 0;
-    bool prio  = hi & 0x10;
-    int fy = tmY & 7; if (vflip) fy = 7 - fy;
-    int fx = tmX & 7; if (hflip) fx = 7 - fx;
-    uint16_t base = (uint16_t)(tile * 32 + fy * 4);
-    int sh = 7 - fx;
-    int color = ((vram[base & 0x3FFF] >> sh) & 1)
-              | (((vram[(base + 1) & 0x3FFF] >> sh) & 1) << 1)
-              | (((vram[(base + 2) & 0x3FFF] >> sh) & 1) << 2)
-              | (((vram[(base + 3) & 0x3FFF] >> sh) & 1) << 3);
-    row[x]   = (uint8_t)(pal + color);
-    bgPrio[x] = (prio && color != 0) ? 1 : 0;
+    int tileCol = tmX >> 3;
+    if (tileCol != curCol || lockRight != curLock) {
+      curCol = tileCol; curLock = lockRight;
+      int tmY = lockRight ? y : tmYScroll;                 // y < 192 < 224: no wrap when locked
+      uint16_t e = (uint16_t)(nameBase + ((tmY >> 3) * 32 + tileCol) * 2);
+      uint8_t lo = vram[e & 0x3FFF], hi = vram[(e + 1) & 0x3FFF];
+      int tile = lo | ((hi & 1) << 8);
+      bool hflip = hi & 0x02;
+      int  pal   = (hi & 0x08) ? 16 : 0;
+      bool prio  = hi & 0x10;
+      int fy = tmY & 7; if (hi & 0x04) fy = 7 - fy;        // vflip
+      uint16_t base = (uint16_t)(tile * 32 + fy * 4);
+      uint8_t p0 = vram[base & 0x3FFF],       p1 = vram[(base + 1) & 0x3FFF];
+      uint8_t p2 = vram[(base + 2) & 0x3FFF], p3 = vram[(base + 3) & 0x3FFF];
+      for (int fx = 0; fx < 8; fx++) {
+        int sh = hflip ? fx : 7 - fx;
+        int color = ((p0 >> sh) & 1) | (((p1 >> sh) & 1) << 1)
+                  | (((p2 >> sh) & 1) << 2) | (((p3 >> sh) & 1) << 3);
+        tpx[fx] = (uint8_t)(pal + color);
+        tpr[fx] = (prio && color != 0) ? 1 : 0;
+      }
+    }
+    row[x]    = tpx[tmX & 7];
+    bgPrio[x] = tpr[tmX & 7];
   }
   if (hideLeft8) for (int x = 0; x < 8; x++) row[x] = backdrop;
 }
@@ -225,4 +238,4 @@ void vdpRender() {
 
 } // namespace sms
 
-#endif  // BOARD_HAS_Z80_CORES
+#endif  // BOARD_HAS_SMS_CORE

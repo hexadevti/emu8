@@ -1,9 +1,9 @@
 // This SMS translation unit is compiled out entirely on boards that clear
-// BOARD_HAS_Z80_CORES (the PicoCalc's original RP2040 mainboard -- see board.h for why).
+// BOARD_HAS_SMS_CORE (currently none -- see board.h; it is on for every board).
 // emu.h must be included FIRST because it is what pulls in board.h and defines the macro;
-// the guard below then empties the file, handing this core's static RAM to the Apple II.
+// the guard below then empties the file, keeping the Z80 core's static RAM out of the image.
 #include "../../emu.h"
-#if BOARD_HAS_Z80_CORES
+#if BOARD_HAS_SMS_CORE
 
 // sms_audio.cpp - SN76489 PSG -> I2S output for the SMS platform. Mirrors msx_audio.cpp: a core-0 task
 // pulls 22050 Hz samples from sms::psgGenSample() and feeds the internal DAC (CYD) or the external I2S
@@ -62,4 +62,4 @@ void smsPsgSetup() {
 #endif
 }
 
-#endif  // BOARD_HAS_Z80_CORES
+#endif  // BOARD_HAS_SMS_CORE

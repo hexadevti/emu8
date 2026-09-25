@@ -376,6 +376,12 @@ static void smsApplyJoystick(const uint8_t *keys)   // b0 up b1 down b2 left b3 
   if (kbContains(keys, HID_KEY_ARROW_RIGHT)) m &= ~0x08;
   if (kbContains(keys, HID_KEY_SPACE) || kbContains(keys, HID_KEY_Z)) m &= ~0x10;   // button 1
   if (kbContains(keys, HID_KEY_X))           m &= ~0x20;                            // button 2
+#if defined(BOARD_PICOCALC)
+  // PicoCalc: the F4/F5 keys sit right above the arrows, so they make the natural fire buttons
+  // (input_picocalc.cpp passes them through as bare HID F4/F5).
+  if (kbContains(keys, HID_KEY_F4))          m &= ~0x10;                            // button 1 / start
+  if (kbContains(keys, HID_KEY_F5))          m &= ~0x20;                            // button 2
+#endif
   smsSetInput(m);
 }
 

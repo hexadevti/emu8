@@ -324,7 +324,7 @@ static int splashHitTest(int16_t x, int16_t y)
 // ps_malloc'd guest RAM, so they only exist where BOARD_HAS_BIGRAM_CORES is set (see the
 // matching #if gates in emu8.ino, which also keep their cores out of the link); tiny386
 // additionally only builds on the P4 / desktop. MSX / SMS go the same way wherever
-// BOARD_HAS_Z80_CORES is clear. Disabled buttons draw greyed with "SOON" and ignore taps.
+// BOARD_HAS_MSX_CORE / BOARD_HAS_SMS_CORE is clear. Disabled buttons draw greyed with "SOON" and ignore taps.
 static bool splashEnabled(int i)
 {
   // The Apple IIe is the one entry whose availability is not a property of the build: its map plus
@@ -335,8 +335,8 @@ static bool splashEnabled(int i)
   switch (splashSystems[i].platform) {
     case PLATFORM_IIGS:
     case PLATFORM_PCXT:     return BOARD_HAS_BIGRAM_CORES;
-    case PLATFORM_MSX:
-    case PLATFORM_SMS:      return BOARD_HAS_Z80_CORES;   // 34K of static RAM the RP2040 needs back
+    case PLATFORM_MSX:      return BOARD_HAS_MSX_CORE;
+    case PLATFORM_SMS:      return BOARD_HAS_SMS_CORE;
     case PLATFORM_TINY386:
 #if defined(BOARD_JC1060P470) || defined(BOARD_DESKTOP)
       return BOARD_HAS_BIGRAM_CORES;   // i386 PC: P4 / desktop only
@@ -768,7 +768,11 @@ void renderLoop(void *pvParameters)
       displaySetVideoFill(32, 256, true);// 256-wide picture starting at x=32
       smsRenderFrame();
       Vertical_blankingOn_Off = true;
+#if defined(BOARD_PICOCALC)
+      vTaskDelay(1);                     // the ~16ms SPI push already paces us; a 10ms nap on top drops frames
+#else
       vTaskDelay(pdMS_TO_TICKS(10));
+#endif
       continue;
     }
 

@@ -1,9 +1,9 @@
 // This SMS translation unit is compiled out entirely on boards that clear
-// BOARD_HAS_Z80_CORES (the PicoCalc's original RP2040 mainboard -- see board.h for why).
+// BOARD_HAS_SMS_CORE (currently none -- see board.h; it is on for every board).
 // emu.h must be included FIRST because it is what pulls in board.h and defines the macro;
-// the guard below then empties the file, handing this core's static RAM to the Apple II.
+// the guard below then empties the file, keeping the Z80 core's static RAM out of the image.
 #include "../../emu.h"
-#if BOARD_HAS_Z80_CORES
+#if BOARD_HAS_SMS_CORE
 
 // sms_io.cpp - SMS I/O-port decode and the two controller ports. The SMS decodes I/O by address
 // RANGE (not a single port like the MSX):
@@ -50,4 +50,4 @@ void ioOut(uint16_t port, uint8_t v) {
 
 } // namespace sms
 
-#endif  // BOARD_HAS_Z80_CORES
+#endif  // BOARD_HAS_SMS_CORE

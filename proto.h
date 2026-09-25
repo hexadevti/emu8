@@ -142,6 +142,13 @@ bool sdManagerBootRequested();        // this boot is the SD Manager one the spl
 #define SPLASH_KEY_DOWN   (4)
 extern volatile int8_t splashKeyEvent;
 #endif
+#if BOARD_ROM_IN_FLASH
+// romflash_picocalc.cpp: copy a ROM image (MSX BIOS, MSX or SMS cartridge) from an open SD file into a fixed window of spare flash
+// and return its XIP address (nullptr on failure). Unchanged sectors are not rewritten.
+enum RomFlashWindow { ROMFLASH_BIOS, ROMFLASH_CART };
+uint32_t romFlashCapacity(RomFlashWindow w);
+const uint8_t *romFlashLoad(RomFlashWindow w, File &f, uint32_t len);
+#endif
 int red(int color);
 int green(int color);
 int blue(int color);
