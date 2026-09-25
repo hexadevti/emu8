@@ -227,12 +227,16 @@ void msxRenderFrame() {
   // PicoCalc: SPI is the bottleneck (50MHz, ~16ms for the 256x192 picture alone), so the black
   // borders -- another ~28K pixels -- are painted only when something may have drawn over them
   // (a menu closed -> clearScr) or the raster moved, not every frame.
+  // SCREEN: FILL (Settings) scales the picture 5:4 on both axes to the whole 320x240 logical screen,
+  // so there are no borders to paint -- but leaving FILL must repaint them over the old picture.
+  extern bool screenFill;
   static int  lastTop = -1, lastH = -1;
-  static bool lastOsk = false;
-  const bool osk = oskActive();
-  const bool borders = clearScr || outTop != lastTop || outH != lastH || osk != lastOsk;
+  static bool lastOsk = false, lastFill = false;
+  const bool osk  = oskActive();
+  const bool fill = screenFill && !osk;
+  const bool borders = !fill && (clearScr || outTop != lastTop || outH != lastH || osk != lastOsk || lastFill);
   clearScr = false;
-  lastTop = outTop; lastH = outH; lastOsk = osk;
+  lastTop = outTop; lastH = outH; lastOsk = osk; lastFill = fill;
 #else
   const bool borders = true;
   const bool osk = oskActive();
@@ -249,6 +253,26 @@ void msxRenderFrame() {
   // One address window for the whole picture, pixels streamed through writeColor()'s ping-pong DMA
   // staging: the palette lookup of one line overlaps the SPI transfer of the previous one, instead
   // of convert-then-wait per 8-line band.
+  if (fill) {
+    // 256x192 -> 320x240, nearest neighbour: each 4 source lines become 5 (sy = oy*4/5) and each
+    // 4 source pixels become 5 (the first one doubled). ~57% more SPI time than 1:1.
+    tft.setAddrWindow(0, 0, 320, 240);
+    tft.startWrite();
+    for (int oy = 0; oy < 240; oy++) {
+      const uint8_t* src = msx::framebuffer + (oy * 4 / 5) * M_W;
+      for (int x = 0; x < M_W; x += 4) {
+        const uint16_t c0 = pal[src[x] & 0x0F];
+        tft.writeColor(c0, 1);
+        tft.writeColor(c0, 1);
+        tft.writeColor(pal[src[x + 1] & 0x0F], 1);
+        tft.writeColor(pal[src[x + 2] & 0x0F], 1);
+        tft.writeColor(pal[src[x + 3] & 0x0F], 1);
+      }
+    }
+    tft.endWrite();
+    msx::frameReady = false;
+    return;
+  }
   tft.setAddrWindow(M_OX, outTop, M_W, outH);
   tft.startWrite();
   for (int oy = 0; oy < outH; oy++) {

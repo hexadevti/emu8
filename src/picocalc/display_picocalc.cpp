@@ -600,7 +600,8 @@ void DisplayGFX::flush() {
 void displayFlush() { tft.flush(); }
 void displaySetUiMode(bool ui) { tft.setUiMode(ui); }
 // The cores report their active video rect each frame so a SCREEN FILL mode could zoom it. This
-// board letterboxes 1:1 (BOARD_HAS_SCREENFILL is 0 in board.h), so there is nothing to record.
+// board has no canvas to zoom: SCREEN: FILL is done by the MSX/SMS renderers (msx.cpp, sms.cpp)
+// scaling straight into the 320x240 window, so there is nothing to record.
 void displaySetVideoRect(int, int) {}
 void displaySetVideoFill(int, int, bool) {}
 

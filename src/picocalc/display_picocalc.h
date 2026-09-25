@@ -11,7 +11,7 @@
 // LETTERBOX: the panel is 320x320 but the emulator's logical screen is 320x240, so logical row 0
 // lands on panel row DISP_OFFSET_Y (40) and rows 0..39 / 280..319 stay black (fillPanelBlack()).
 // Every logical->panel mapping in the .cpp is that one constant; there is no scaling anywhere
-// (BOARD_HAS_SCREENFILL is 0 for this board).
+// (SCREEN: FILL is done by the MSX/SMS renderers themselves: they scale into the 320x240 window).
 #pragma once
 
 #include "../../board.h"
