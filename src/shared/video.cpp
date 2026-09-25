@@ -752,7 +752,11 @@ void renderLoop(void *pvParameters)
       msxRenderFrame();
       if (oskActive()) { displaySetUiMode(true); oskRender(); }   // on-screen keyboard overlays the bottom
       Vertical_blankingOn_Off = true;
+#if defined(BOARD_PICOCALC)
+      vTaskDelay(1);                     // the ~16ms SPI push already paces us; a 10ms nap on top drops frames
+#else
       vTaskDelay(pdMS_TO_TICKS(10));
+#endif
       continue;
     }
 

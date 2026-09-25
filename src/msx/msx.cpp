@@ -223,12 +223,42 @@ void msxRenderFrame() {
   const int outTop = oskRasterTop();      // 0 when the keyboard is open, else 24 (centered)
   const int outH   = oskRasterHeight();   // keyboard-top (112) when open, else 192 (1:1)
   const int belowY = outTop + outH;
-  tft.fillRect(0, 0, 320, outTop, TFT_BLACK);                       // top border (none when OSK open)
-  // Below the picture: when the keyboard is open it OWNS that region (and only repaints when dirty),
-  // so we must NOT clear it every frame or we'd erase the keyboard to black. Clear it only when closed.
-  if (!oskActive()) tft.fillRect(0, belowY, 320, 240 - belowY, TFT_BLACK);
-  tft.fillRect(0, outTop, M_OX, outH, TFT_BLACK);                   // left border
-  tft.fillRect(M_OX + M_W, outTop, 320 - (M_OX + M_W), outH, TFT_BLACK); // right border
+#if defined(BOARD_PICOCALC)
+  // PicoCalc: SPI is the bottleneck (50MHz, ~16ms for the 256x192 picture alone), so the black
+  // borders -- another ~28K pixels -- are painted only when something may have drawn over them
+  // (a menu closed -> clearScr) or the raster moved, not every frame.
+  static int  lastTop = -1, lastH = -1;
+  static bool lastOsk = false;
+  const bool osk = oskActive();
+  const bool borders = clearScr || outTop != lastTop || outH != lastH || osk != lastOsk;
+  clearScr = false;
+  lastTop = outTop; lastH = outH; lastOsk = osk;
+#else
+  const bool borders = true;
+  const bool osk = oskActive();
+#endif
+  if (borders) {
+    tft.fillRect(0, 0, 320, outTop, TFT_BLACK);                       // top border (none when OSK open)
+    // Below the picture: when the keyboard is open it OWNS that region (and only repaints when dirty),
+    // so we must NOT clear it every frame or we'd erase the keyboard to black. Clear it only when closed.
+    if (!osk) tft.fillRect(0, belowY, 320, 240 - belowY, TFT_BLACK);
+    tft.fillRect(0, outTop, M_OX, outH, TFT_BLACK);                   // left border
+    tft.fillRect(M_OX + M_W, outTop, 320 - (M_OX + M_W), outH, TFT_BLACK); // right border
+  }
+#if defined(BOARD_PICOCALC)
+  // One address window for the whole picture, pixels streamed through writeColor()'s ping-pong DMA
+  // staging: the palette lookup of one line overlaps the SPI transfer of the previous one, instead
+  // of convert-then-wait per 8-line band.
+  tft.setAddrWindow(M_OX, outTop, M_W, outH);
+  tft.startWrite();
+  for (int oy = 0; oy < outH; oy++) {
+    int sy = oy * M_H / outH;                          // nearest-neighbor vertical scale (1:1 when outH==192)
+    if (sy > M_H - 1) sy = M_H - 1;
+    const uint8_t* src = msx::framebuffer + sy * M_W;
+    for (int x = 0; x < M_W; x++) tft.writeColor(pal[src[x] & 0x0F], 1);
+  }
+  tft.endWrite();
+#else
   tft.setSwapBytes(true);
   for (int oy = 0; oy < outH; ) {
     int n = 0;
@@ -244,6 +274,7 @@ void msxRenderFrame() {
     oy += n;
   }
   tft.setSwapBytes(false);
+#endif
   msx::frameReady = false;     // done reading the framebuffer; core 1 may render the next frame
 }
 
