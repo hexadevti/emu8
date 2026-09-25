@@ -110,6 +110,46 @@ static void nesPushFrame(const uint16_t *pal) {
   bool forceAll = (pal != lastPal) || (nowMs - lastPushMs > 100) || ((pushCount++ & 63) == 0);
   lastPal = pal; lastPushMs = nowMs;
 
+#if defined(BOARD_PICOCALC)
+  // SCREEN: FILL (Settings): 256x240 scaled 5:4 on both axes to 320x300 on the RAW 320x320 panel
+  // (rows 10..309), so it reaches into the letterbox bars. Held off while the boot hint owns rows
+  // 280..319. Each 8-line band becomes exactly 10 output rows, so the band digests carry over;
+  // a mode change repaints everything, including the bars/borders the other mode left behind.
+  extern bool screenFill;
+  static bool lastFill = false;
+  const bool fill = screenFill && !bootHintShowing();
+  if (fill != lastFill) { forceAll = true; lastFill = fill; if (!fill) tft.fillPanelBlack(); }
+  if (fill) {
+    static const int F_TOP = (PANEL_NATIVE_H - NES_H * 5 / 4) / 2;   // 10
+    if (forceAll) {
+      tft.fillPanelRect(0, 0, PANEL_NATIVE_W, F_TOP, TFT_BLACK);
+      tft.fillPanelRect(0, F_TOP + NES_H * 5 / 4, PANEL_NATIVE_W, F_TOP, TFT_BLACK);
+    }
+    for (int y = 0; y < NES_H; y += 8) {
+      const uint8_t *band = nes::framebuffer + (size_t)y * NES_W;
+      uint32_t dig = bandDigest(band, (8 * NES_W) / 4);
+      if (!forceAll && dig == bandDig[y >> 3]) { nes::fbReadLine = y + 8; continue; }
+      bandDig[y >> 3] = dig;
+      tft.setPanelAddrWindow(0, F_TOP + y * 5 / 4, 320, 10);
+      tft.startWrite();
+      for (int oy = 0; oy < 10; oy++) {
+        const uint8_t *src = band + (oy * 4 / 5) * NES_W;          // rows 0,0,1,2,3,4,4,5,6,7
+        for (int x = 0; x < NES_W; x += 4) {
+          const uint16_t c0 = pal[src[x] & 0x3F];
+          tft.writeColor(c0, 1);
+          tft.writeColor(c0, 1);
+          tft.writeColor(pal[src[x + 1] & 0x3F], 1);
+          tft.writeColor(pal[src[x + 2] & 0x3F], 1);
+          tft.writeColor(pal[src[x + 3] & 0x3F], 1);
+        }
+      }
+      nes::fbReadLine = y + 8;      // band fully read (only the SPI drain is left)
+      tft.endWrite();
+    }
+    return;
+  }
+#endif
+
   displaySetVideoFill(NES_OX, NES_W, true);
   if (forceAll) {
     tft.fillRect(0, 0, NES_OX, NES_H, TFT_BLACK);                 // left border

@@ -71,6 +71,32 @@ void atariRenderFrame() {
   int h = rows < A_MINH ? A_MINH : (rows > A_H ? A_H : rows);
   int oy = (240 - h) / 2;
   const uint16_t *pal = videoColor ? atari::atariPalette : atari::atariPaletteGray;
+#if defined(BOARD_PICOCALC)
+  // SCREEN: FILL (Settings): stretch the field vertically to all 240 lines (nearest neighbour), so
+  // the picture is 4:3 like on a TV instead of a 320x192 strip with 24px bars. ~25% more SPI time.
+  extern bool screenFill;
+  if (screenFill) {
+    tft.setSwapBytes(true);
+    for (int y = 0; y < 240; ) {
+      int n = 0;
+      while (y + n < 240 && n < 8) {
+        const uint8_t *src = fb + ((y + n) * h / 240) * A_W;
+        uint16_t *dst = atariScratch + n * 320;
+        for (int x = 0; x < A_W; x++) {
+          int sc = x + A_XSHIFT;
+          uint16_t c = ((unsigned)sc < A_W) ? pal[src[sc] & 0x7F] : 0;
+          dst[x * 2] = c; dst[x * 2 + 1] = c;
+        }
+        n++;
+      }
+      tft.pushImage(0, y, 320, n, atariScratch);
+      y += n;
+    }
+    tft.setSwapBytes(false);
+    if (atari::frontBuf) { __sync_synchronize(); atari::frontState = 0; }
+    return;
+  }
+#endif
   if (oy > 0) tft.fillRect(0, 0, 320, oy, TFT_BLACK);                    // top border
   if (oy + h < 240) tft.fillRect(0, oy + h, 320, 240 - (oy + h), TFT_BLACK); // bottom border
   tft.setSwapBytes(true);

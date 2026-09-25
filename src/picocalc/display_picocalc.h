@@ -105,6 +105,7 @@ public:
 
   // Apple II scanline window (the hot path -- see the namespace above)
   void setAddrWindow(int32_t x, int32_t y, int32_t w, int32_t h);
+  void setPanelAddrWindow(int32_t x, int32_t y, int32_t w, int32_t h);   // same, RAW panel rows (NES FILL)
   void startWrite();
   inline void writeColor(uint16_t color, uint32_t len) {
     if (len >= pcd::BULK_MIN) { pcd::bulkFill(color, len); return; }

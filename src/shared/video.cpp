@@ -169,6 +169,7 @@ static void hintText(const char **keys, const char **joy)
 }
 
 void bootHintDismiss() { s_hintKeyed = true; }   // no drawing: this runs on the keyboard's task
+bool bootHintShowing() { return s_hintState == 1; }
 
 void bootHintTick()
 {
@@ -197,6 +198,7 @@ void bootHintTick()
 #else
 void bootHintTick() {}
 void bootHintDismiss() {}
+bool bootHintShowing() { return false; }
 #endif
 
 void videoSetup()

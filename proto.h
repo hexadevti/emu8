@@ -19,6 +19,7 @@ void bootProgressEnd();                 // hand the panel to the render loop
 // owns all drawing); bootHintDismiss() is the keyboard's, and only sets a flag. No-op elsewhere.
 void bootHintTick();
 void bootHintDismiss();
+bool bootHintShowing();   // the hint owns panel rows 280..319 right now (full-panel video must stay clear)
 #if defined(BOARD_PICOCALC)
 bool picocalcWaitForMainboard();   // block until the PicoCalc's own power rail is up
 bool picocalcWaitAnyKey(uint32_t timeoutMs);   // hold the screen until a key is pressed

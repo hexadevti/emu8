@@ -435,6 +435,13 @@ void DisplayGFX::setAddrWindow(int32_t x, int32_t y, int32_t w, int32_t h) {
   pcd::stageDrain();
   panelWindow(x, y + _offY, x + w - 1, y + _offY + h - 1);
 }
+// RAW panel rows, no letterbox offset: the NES SCREEN: FILL picture (320x300) is taller than the
+// logical 320x240, so it streams into the bars too.
+void DisplayGFX::setPanelAddrWindow(int32_t x, int32_t y, int32_t w, int32_t h) {
+  pxFlush();
+  pcd::stageDrain();
+  panelWindow(x, y, x + w - 1, y + h - 1);
+}
 void DisplayGFX::startWrite() {
   pcd::stageFill = 0;                                // nothing carried over from a previous window
   pcd::stageHalf = 0;
