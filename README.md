@@ -26,19 +26,19 @@ plus the experimental **PC-XT** target that is still in development:
 
 ## Supported boards
 
-emu8 builds for **three boards** from the same source tree — the target is selected at *compile time*
-by a single macro (`-DBOARD_JC4827W543` / `-DBOARD_JC1060P470`), defined per build task. The hardware
-abstraction lives in [`board.h`](board.h) as capability macros (display backend, audio path, input
-path, touch bus) that the shared code switches on.
+emu8 builds for **four boards** from the same source tree — the target is selected at *compile time*
+by a single macro (`-DBOARD_JC4827W543` / `-DBOARD_JC1060P470` / `-DBOARD_PICOCALC`), defined per
+build task. The hardware abstraction lives in [`board.h`](board.h) as capability macros (display
+backend, audio path, input path, touch bus) that the shared code switches on.
 
-| | **ESP32 CYD** (default) | **Guition JC4827W543** | **Guition JC1060P470** |
-| --- | --- | --- | --- |
-| MCU | ESP32-WROOM-32 (no PSRAM) | ESP32-S3 (OPI PSRAM) | ESP32-P4 (32MB PSRAM) |
-| Display | ILI9341 320×240 SPI, via TFT_eSPI | NV3041A 480×272 QSPI, via Arduino_GFX | JD9165 1024×600 **MIPI-DSI**, via esp_lcd |
-| Input | PS/2 keyboard + analog joystick/paddles | **USB SNES gamepad + USB keyboard** (USB-HID host) | USB-HID host + touch |
-| On-screen keyboard | XPT2046 touch (display bus) | XPT2046 touch (dedicated SPI bus) | **GT911** capacitive (I2C) |
-| Audio | Internal DAC (GPIO26) → on-board amp | I2S → NS4168 Class-D amp | I2S → **ES8311 codec** → NS4150B amp |
-| Storage | microSD (VSPI) | microSD (shared HSPI w/ touch) | microSD (**SD_MMC** / SDIO) |
+| | **ESP32 CYD** (default) | **Guition JC4827W543** | **Guition JC1060P470** | **ClockworkPi PicoCalc** |
+| --- | --- | --- | --- | --- |
+| MCU | ESP32-WROOM-32 (no PSRAM) | ESP32-S3 (OPI PSRAM) | ESP32-P4 (32MB PSRAM) | Raspberry Pi Pico 2 (RP2350, 520KB SRAM) or Pico (RP2040, 264KB) |
+| Display | ILI9341 320×240 SPI, via TFT_eSPI | NV3041A 480×272 QSPI, via Arduino_GFX | JD9165 1024×600 **MIPI-DSI**, via esp_lcd | ST7365P (ILI9488-compatible) 320×320 SPI, own driver |
+| Input | PS/2 keyboard + analog joystick/paddles | **USB SNES gamepad + USB keyboard** (USB-HID host) | USB-HID host + touch | Built-in **QWERTY keyboard** (STM32 over I2C) |
+| On-screen keyboard | XPT2046 touch (display bus) | XPT2046 touch (dedicated SPI bus) | **GT911** capacitive (I2C) | — (no touch panel) |
+| Audio | Internal DAC (GPIO26) → on-board amp | I2S → NS4168 Class-D amp | I2S → **ES8311 codec** → NS4150B amp | **PWM** stereo speakers (GPIO26/27) |
+| Storage | microSD (VSPI) | microSD (shared HSPI w/ touch) | microSD (**SD_MMC** / SDIO) | microSD (SPI) |
 
 The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_ESP32-2432S024)
 (2.4″, ILI9341); the 2.8″ ESP32-2432S028 shares the same driver and pin map.
@@ -49,6 +49,13 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
 > `~/.emu6502-p4`, outside the repo), so the CYD/S3 builds stay on 2.0.17 and unchanged. It needs the
 > JD9165 `esp_lcd` vendor driver dropped in — see [`src/shared/p4/README.md`](src/shared/p4/README.md)
 > for the one-time setup, status notes, and fallback levers.
+
+> **ClockworkPi PicoCalc** — built with the earlephilhower **arduino-pico** core (not Arduino-ESP32);
+> the ESP-only APIs the shared code uses are shimmed in [`src/picocalc/pico_shim/`](src/picocalc/pico_shim/).
+> There are two build tasks, one per mainboard: **PicoCalc** (Pico 2 / RP2350) and **PicoCalc RP2040**
+> (original Pico). The board has no memory-mapped PSRAM, so ROM and cartridge images are kept in spare
+> on-board flash. On the RP2040 the PC-XT core is not available (not enough heap for DOS); the
+> RP2350 runs it from a paged guest address space.
 
 ---
 
