@@ -121,7 +121,7 @@ to some components).
 - **ProDOS hard disk** (block device) — large `.hdv` / `.po` / `.2mg` volumes.
 - Video: LoRes, HiRes, text 40/80-column, page 1/2, mixed/split, colour or mono.
 - Speaker, analog joystick/paddles, AppleMouse-style mouse plumbing.
-- Built-in **6502 debugger** (step / breakpoint / stack trace). ROMs embedded in [`rom.h`](rom.h).
+- Built-in **6502 debugger** (step / breakpoint / stack trace). System ROMs load from `/roms/apple2/` on the SD card (see [`roms/`](roms/)).
 
 ### Commodore 64
 
@@ -366,7 +366,9 @@ on the device). Full setup, toolchain and status notes live in
 ## microSD card preparation
 
 1. Format a microSD card as **FAT32**.
-2. Copy your images to the card root, mixing systems freely:
+2. Copy this repo's [`roms/`](roms/) folder to the card root. The Apple II, C64, ColecoVision, ZX Spectrum
+   and PC-XT cores load their system ROMs from `/roms/<system>/`.
+3. Copy your images to the card root, mixing systems freely:
    - Apple: `.dsk` / `.do` / `.po` / `.hdv` / `.2mg`
    - C64: `.prg` / `.d64` / `.crt`
    - NES: `.nes`
@@ -375,7 +377,7 @@ on the device). Full setup, toolchain and status notes live in
    - Sega Master System: `.sms` / `.bin`
    - ZX Spectrum 48K: `.sna` / `.z80` / `.tap` / `.tzx` (plus the ROM at `/roms/zxspectrum/spec48.rom`)
    - PC-XT: `.img` / `.ima` / `.dsk` / `.vhd` / `.hdd` (plus the BIOS at `/roms/pcxt/bios.bin`)
-3. Insert the card, power on, pick a platform on the splash, then choose an image from its on-screen
+4. Insert the card, power on, pick a platform on the splash, then choose an image from its on-screen
    file browser.
 
 Sample Apple II disks live in [`data/`](data/) (DOS 3.3, ProDOS 2.4.2, Lode Runner, Karateka,

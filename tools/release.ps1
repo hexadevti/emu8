@@ -77,7 +77,10 @@ function Invoke-Arduino([string]$Fqbn, [string]$Flags, [string]$BuildDir, [strin
 
 function New-Zip([string]$Dir, [string]$Zip) {
   if (Test-Path $Zip) { Remove-Item -Force $Zip }
-  Compress-Archive -Path "$Dir\*" -DestinationPath $Zip
+  # Windows' bsdtar, not Compress-Archive: PowerShell 5.1 stores entry names with backslashes, which
+  # unzip on macOS/Linux turns into literal "dir\file" names instead of folders.
+  & "$env:SystemRoot\System32\tar.exe" -a -cf $Zip -C $Dir *
+  if ($LASTEXITCODE) { throw "zip failed: $Zip" }
   Write-Host "  -> $Zip"
 }
 
@@ -111,7 +114,6 @@ function Build-Esp([string]$key) {
     if ($LASTEXITCODE) { throw "esptool merge_bin failed for $key" }
     $merged = Get-Item $mergedPath
   }
-  Copy-Item $merged.FullName (Join-Path $pkg "emu8-$key-v$Version-merged.bin")
   foreach ($part in 'bootloader', 'partitions') {
     $f = Get-ChildItem $bin -Filter "*.$part.bin" | Select-Object -First 1
     if ($f) { Copy-Item $f.FullName (Join-Path $pkg "$part.bin") }
@@ -120,15 +122,16 @@ function Build-Esp([string]$key) {
   @"
 emu8 v$Version for $($b.Name)
 
-Easiest: flash the merged image at offset 0x0.
+Easiest: flash emu8-$key-v$Version-merged.bin (a separate download on the release page) at 0x0.
   esptool.py --chip $($b.Chip) --baud 921600 write_flash 0x0 emu8-$key-v$Version-merged.bin
 or open https://espressif.github.io/esptool-js/ in Chrome/Edge, connect, add the merged .bin at
 address 0x0 and click Program.
 
-emu8.ino.bin is the application alone (for OTA or for flashing at the app offset of an existing
-huge_app layout). bootloader.bin / partitions.bin are included for reference.
+This zip holds the separate pieces: emu8.ino.bin is the application alone (for OTA, or for
+flashing at 0x10000 over an existing huge_app layout); bootloader.bin / partitions.bin are the
+matching bootloader and partition table.
 "@ | Set-Content -Encoding utf8 (Join-Path $pkg 'FLASHING.txt')
-  $zip = Join-Path $out "emu8-$key-v$Version.zip"
+  $zip = Join-Path $out "emu8-$key-v$Version-parts.zip"
   New-Zip $pkg $zip
   $mergedOut = Join-Path $out "emu8-$key-v$Version-merged.bin"
   Copy-Item $merged.FullName $mergedOut -Force
@@ -163,15 +166,16 @@ function Build-Desktop {
   $bwin = Join-Path $work 'desktop-build'
   Copy-Item (Join-Path $bwin 'emu8.exe') $pkg
   Get-ChildItem $bwin -Filter '*.dll' | Copy-Item -Destination $pkg
-  foreach ($d in 'roms\apple2', 'roms\c64', 'roms\msx', 'roms\zxspectrum', 'roms\pcxt') {
+  foreach ($d in 'roms\apple2', 'roms\c64', 'roms\coleco', 'roms\msx', 'roms\zxspectrum', 'roms\pcxt') {
     New-Item -ItemType Directory -Force (Join-Path $pkg "sdcard\$d") | Out-Null
   }
   @"
 emu8 v$Version -- Windows desktop build (SDL2)
 
 Run emu8.exe. The emulated SD card is the sdcard\ folder next to it: put disk/cartridge images
-there (any sub-folder) and BIOS/ROM files under sdcard\roms\<system>\ exactly as on a real card
-(see the README's "microSD card preparation"). Set EMU_SD_DIR to use a different folder, and
+there (any sub-folder), and copy the system ROMs from the source tree's roms/ folder
+(https://github.com/hexadevti/emu8/tree/main/roms) into sdcard\roms\ exactly as on a real card --
+the Apple II, C64, ColecoVision, ZX Spectrum and PC-XT cores need them. Set EMU_SD_DIR to use a different folder, and
 EMU_PLATFORM=<apple2|c64|nes|atari|msx|sms|coleco|zx|pcxt> to boot a system directly.
 
 Settings persist to eeprom.bin / imgui.ini next to the .exe.
@@ -222,6 +226,7 @@ Full docs: README.md; wire format: PROTOCOL.md.
 # ---------------------------------------------------------------------------------------------
 $commit = (git -C $repo rev-parse HEAD).Trim()
 $short  = $commit.Substring(0, 7)
+$SDCARD = "**SD card:** FAT32. Copy the [``roms/``](https://github.com/hexadevti/emu8/tree/main/roms) folder from the source tree to the card root (the Apple II, C64, ColecoVision, ZX Spectrum and PC-XT cores load their system ROMs from ``/roms/<system>/``), then add your disk/cartridge images — see [microSD card preparation](https://github.com/hexadevti/emu8#microsd-card-preparation)."
 $NOTES = @{
   cyd = @{ Title = "emu8 v$Version — ESP32 CYD"; Body = @"
 Firmware for the **ESP32 Cheap Yellow Display** (ESP32-2432S024 2.4″ / ESP32-2432S028 2.8″, ILI9341, no PSRAM).
@@ -229,7 +234,9 @@ Firmware for the **ESP32 Cheap Yellow Display** (ESP32-2432S024 2.4″ / ESP32-2
 **Flash:** ``esptool.py --chip esp32 --baud 921600 write_flash 0x0 emu8-cyd-v$Version-merged.bin``, or load the merged ``.bin`` at address ``0x0`` in [esptool-js](https://espressif.github.io/esptool-js/) (Chrome/Edge).
 The ``.zip`` also has the app-only ``emu8.ino.bin``, ``bootloader.bin`` and ``partitions.bin``.
 
-Input: PS/2 keyboard + analog joystick; touch on-screen keyboard. Prepare the microSD card as described in the [README](https://github.com/hexadevti/emu8#microsd-card-preparation).
+Input: PS/2 keyboard + analog joystick; touch on-screen keyboard.
+
+$SDCARD
 "@ }
   jc4827w543 = @{ Title = "emu8 v$Version — Guition JC4827W543 (ESP32-S3)"; Body = @"
 Firmware for the **Guition JC4827W543** (ESP32-S3, NV3041A 480×272 QSPI, OPI PSRAM).
@@ -237,6 +244,8 @@ Firmware for the **Guition JC4827W543** (ESP32-S3, NV3041A 480×272 QSPI, OPI PS
 **Flash:** hold **BOOT**, tap **RST**, release **BOOT**, then ``esptool.py --chip esp32s3 --baud 921600 write_flash 0x0 emu8-jc4827w543-v$Version-merged.bin`` (or use [esptool-js](https://espressif.github.io/esptool-js/) at address ``0x0``). Tap **RST** to run.
 
 Input: USB SNES gamepad / USB keyboard on the native USB port, plus the touch on-screen keyboard.
+
+$SDCARD
 "@ }
   jc1060p470 = @{ Title = "emu8 v$Version — Guition JC1060P470 (ESP32-P4)"; Body = @"
 Firmware for the **Guition JC1060P470** (ESP32-P4, JD9165 1024×600 MIPI-DSI, 32 MB PSRAM). Built on Arduino-ESP32 core 3.x.
@@ -244,6 +253,8 @@ Firmware for the **Guition JC1060P470** (ESP32-P4, JD9165 1024×600 MIPI-DSI, 32
 **Flash:** ``esptool.py --chip esp32p4 --baud 921600 write_flash 0x0 emu8-jc1060p470-v$Version-merged.bin`` (or [esptool-js](https://espressif.github.io/esptool-js/) at address ``0x0``).
 
 Input: GT911 touch + on-screen keyboard; USB keyboard/gamepad on the OTG USB-C port.
+
+$SDCARD
 "@ }
   picocalc = @{ Title = "emu8 v$Version — ClockworkPi PicoCalc"; Body = @"
 Firmware for the **ClockworkPi PicoCalc**. Pick the file that matches the Pico module on your mainboard:
@@ -256,11 +267,13 @@ Firmware for the **ClockworkPi PicoCalc**. Pick the file that matches the Pico m
 **Flash:** hold **BOOTSEL** while powering on / plugging USB in, then copy the ``.uf2`` onto the ``RPI-RP2`` / ``RP2350`` drive. The board reboots into emu8 by itself.
 
 Controls: ``Ctrl``+``F1`` settings, ``Ctrl``+``F6`` system menu, ``Ctrl``+``Shift``+``F1`` reboot — see the [README](https://github.com/hexadevti/emu8#controls).
+
+$SDCARD
 "@ }
   desktop = @{ Title = "emu8 v$Version — Windows desktop"; Body = @"
 Portable **Windows** build of emu8 (SDL2 + Dear ImGui). The same emulator cores as the firmware, with the hardware swapped for a desktop window — mainly a development/debug target.
 
-Unzip anywhere and run ``emu8\emu8.exe``. The emulated SD card is the ``sdcard\`` folder next to the exe (override with ``EMU_SD_DIR``); ROM/BIOS files go under ``sdcard\roms\<system>\`` as on a real card. ``F10`` opens the settings / file browser.
+Unzip anywhere and run ``emu8\emu8.exe``. The emulated SD card is the ``sdcard\`` folder next to the exe (override with ``EMU_SD_DIR``); copy the source tree's [``roms/``](https://github.com/hexadevti/emu8/tree/main/roms) folder into it as ``sdcard\roms\`` (the Apple II, C64, ColecoVision, ZX Spectrum and PC-XT cores load their system ROMs from there). ``F10`` opens the settings / file browser.
 "@ }
   sdmanager = @{ Title = "emu8 SD Manager v$Version"; Body = @"
 Manage the board's **microSD card over USB serial** without removing it — browse, upload (drag & drop, folders), download (zip), rename, delete, reboot.
