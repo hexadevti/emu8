@@ -1026,12 +1026,33 @@ static void ouiReboot()
   ESP.restart();
 }
 
+// Whether focus may land on control f for the running platform. The toggle grid is drawn per
+// platform (ouiDrawToggles) and leaves slots empty; the speed readouts (Z80 / 2A03 / 8086 MHz)
+// are drawn but do nothing (ouiToggle ignores them); and only the Apple and the PC-XT have a
+// middle action button. The focus ring skips all of those instead of vanishing onto them.
+// Keep in step with ouiDrawToggles / ouiToggle / ouiDrawActions.
+static bool ouiFocusable(int f)
+{
+  if (f >= 0 && f < OUI_TG_COUNT) {
+    if (ouiIsMsx() || ouiIsSms() || ouiIsColeco() || ouiIsZx()) return f <= 3;   // 4 = Z80 readout
+    if (ouiIsPcxt())  return f <= 1;                                              // 2 = 8086 readout
+    if (ouiIsAtari()) return f <= 2;
+    if (ouiIsNES())   return f <= 3 || (BOARD_DISPLAY_GFX && f == 5);             // 4 = 2A03 readout
+    return f <= 4;                                                                // C64, Apple II
+  }
+  if (f == OUI_FOC_MNTREBOOT) return ouiIsPcxt() || currentPlatform == PLATFORM_APPLE2;
+  return true;
+}
+
 // ---- Joystick navigation (called from joystick.ino, core 0) ----
 // Left/right move the focus; up/down act on the focused control; fire activates it.
 void optionsUiNav(int dir)            // dir: -1 = left, +1 = right
 {
   if (ouiHelpOpen) { ouiCloseHelp(); return; }   // any input dismisses the help overlay
-  optionsUiFocus = (optionsUiFocus + dir + OUI_FOC_COUNT) % OUI_FOC_COUNT;
+  for (int i = 0; i < OUI_FOC_COUNT; i++) {
+    optionsUiFocus = (optionsUiFocus + dir + OUI_FOC_COUNT) % OUI_FOC_COUNT;
+    if (ouiFocusable(optionsUiFocus)) break;
+  }
   optionsUiDirty = true;
 }
 
@@ -1120,6 +1141,18 @@ static void ouiFindCell(int &row, int &col)
   row = 0; col = 0;                       // focus is on something not in the map: start over
 }
 
+// The live cell in `row` closest to column `col` (the same column first, then the nearer side,
+// left before right), or -1 if nothing in that row can take the focus on this platform.
+static int ouiNearestLive(int row, int col)
+{
+  const int n = (int)ouiRowLen[row];
+  for (int d = 0; d < n; d++) {
+    if (col - d >= 0 && col - d < n && ouiFocusable(ouiRows[row][col - d])) return col - d;
+    if (col + d < n && ouiFocusable(ouiRows[row][col + d]))                  return col + d;
+  }
+  return -1;
+}
+
 // dx/dy: -1 = left/up, +1 = right/down (0 = no movement on that axis).
 void optionsUiKeyArrow(int dx, int dy)
 {
@@ -1144,13 +1177,18 @@ void optionsUiKeyArrow(int dx, int dy)
   int row = 0, col = 0;
   ouiFindCell(row, col);
   if (dx) {
-    col += dx;
-    if (col < 0) col = (int)ouiRowLen[row] - 1;           // wrap within the row
-    if (col >= (int)ouiRowLen[row]) col = 0;
+    const int n = (int)ouiRowLen[row];
+    for (int i = 0; i < n; i++) {                         // wrap within the row, over live cells
+      col = (col + dx + n) % n;
+      if (ouiFocusable(ouiRows[row][col])) break;
+    }
   }
   if (dy) {
-    row = (row + dy + OUI_ROW_COUNT) % OUI_ROW_COUNT;     // wrap between rows
-    if (col >= (int)ouiRowLen[row]) col = (int)ouiRowLen[row] - 1;   // keep the column if it exists
+    for (int i = 0; i < OUI_ROW_COUNT; i++) {             // wrap between rows, skipping dead ones
+      row = (row + dy + OUI_ROW_COUNT) % OUI_ROW_COUNT;
+      int c = ouiNearestLive(row, col);                   // keep the column where one is live
+      if (c >= 0) { col = c; break; }
+    }
   }
   optionsUiFocus = ouiRows[row][col];
   optionsUiDirty = true;

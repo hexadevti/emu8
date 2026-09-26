@@ -160,11 +160,17 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
 
 ## Boot & platform selection
 
-On power-up emu8 shows a boot splash with one button per system — **APPLE**, **C64**, **NES**,
-**ATARI**, **MSX**, **SMS** and **PCXT** (the PCXT still in
-development). Tap one to switch systems (this saves the choice and reboots into it); tap elsewhere or
+On power-up emu8 shows a boot splash with one button per system — **II+**, **IIe**, **C64**, **NES**,
+**ATARI**, **MSX**, **SMS**, **PCXT**, **COLECO** and **ZX48**, plus **SD MGR** (the PCXT is still in
+development; systems a board cannot run are greyed out). Tap one to switch systems (this saves the choice and reboots into it); tap elsewhere or
 wait for the timeout to boot the currently-selected platform. On the CYD a joystick button also
 dismisses the splash.
+
+On the **PicoCalc** the splash is driven from the keyboard: the arrows move over the enabled systems,
+`Enter` picks one, and `Esc` boots the current one. **Ctrl-F6** brings the same menu up at any time
+**without rebooting**. The running system is paused underneath it. Picking the system that is already
+running, pressing `Esc` or Ctrl-F6 again, or letting the menu time out resumes it where it left off.
+Only picking a *different* system saves the choice and reboots.
 
 ---
 
@@ -199,6 +205,22 @@ USB keyboard mapping (works on every platform):
 > Only keyboards that expose the standard HID **boot** protocol are decoded, and one USB device works at
 > a time (no hub). The native USB port has no VBUS switching, so **hot-swapping devices needs a tap of
 > RST** — a freshly plugged keyboard/gamepad enumerates cleanly on a cold boot.
+
+**PicoCalc** — the built-in QWERTY keyboard; there is no touch panel. The machine-level actions sit
+behind `Ctrl`, so bare function keys stay available to the emulated system:
+
+| Keys | Action |
+| --- | --- |
+| `Ctrl` + `F1` | Open / close the settings menu |
+| `Ctrl` + `F3` | Apple **Reset** (CPU reset); SMS **PAUSE** |
+| `Ctrl` + `F6` (or `Ctrl` + `Shift` + `F3`) | System menu over the running emulator, no reboot (see above) |
+| `Ctrl` + `Shift` + `F1` | Reboot the Pico |
+| `F3` | Hard reset (SMS, PC-XT, Coleco, ZX) |
+
+In the settings menu the arrows move between controls and skip empty grid slots and the read-only
+speed readouts, `Enter` toggles or opens the focused control, and `Esc` backs out (and closes the menu
+when nothing is open). On the file list, `Ctrl` + `Enter` mounts and reboots (Apple) or mounts `C:`
+(PC-XT).
 
 ---
 
@@ -339,8 +361,9 @@ The firmware includes a small file server on the USB serial port. You can browse
 rename and delete files on the card **without removing it**. The server is a separate mode, not a
 background task: pick **SD MGR** on the system menu (the splash) and the board reboots into it,
 with no emulator running and a status screen showing whether a host is connected. To leave it,
-press **Ctrl-F6** on the PicoCalc or tap the screen on the touch boards. The board then reboots to
-the system menu, and the system you were last running stays selected. Two clients speak its
+tap the screen on the touch boards (the board reboots to the system menu), or press **Ctrl-F6** on
+the PicoCalc and pick a system (the board reboots into it). The system you were last running stays
+selected. Two clients speak its
 protocol:
 
 - **Web app**, [`tools/sdmanager/web/`](tools/sdmanager/web/): runs in Chrome, Edge or Opera on
