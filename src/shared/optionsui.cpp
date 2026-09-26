@@ -121,7 +121,6 @@ static int optionsUiFocus = 0;
 static bool ouiIsC64() { return currentPlatform == PLATFORM_C64; }
 static bool ouiIsNES() { return currentPlatform == PLATFORM_NES; }
 static bool ouiIsAtari() { return currentPlatform == PLATFORM_ATARI; }
-static bool ouiIsIIgs() { return currentPlatform == PLATFORM_IIGS; }   // shares the Apple grid, minus MACHINE
 static bool ouiIsMsx() { return currentPlatform == PLATFORM_MSX; }     // ROM/disk browser like NES/Atari
 static bool ouiIsSms() { return currentPlatform == PLATFORM_SMS; }     // ROM browser like NES/Atari/MSX
 static bool ouiIsColeco() { return currentPlatform == PLATFORM_COLECO; } // cartridge browser like SMS
@@ -175,7 +174,7 @@ static std::string ouiDisplayName(const std::string &e)
 
 // Navigate the active browser into a directory entry (or up via "..") and refresh the list.
 // Every core keeps its own browse directory, so this mirrors the ouiFiles() dispatch above.
-// IIGS is absent on purpose: it shares the Apple II disk/HD lists, so it takes the last line.
+// The Apple II has no browser of its own: it walks the disk or HD list, whichever is the device.
 static void ouiBrowse(const std::string &entry)
 {
   const bool up = (entry == "..");
@@ -333,20 +332,10 @@ static void ouiDrawToggles()
     ouiDrawScreenToggle();   // slot 6 (S3); drawn after the clears
     return;
   }
-  if (ouiIsIIgs()) {                          // IIGS: DEVICE + SPEED + SOUND/JOYSTICK/VIDEO (no II+/IIe)
-    ouiDrawToggle(0, "DEVICE",   HdDisk ? "HD" : "DISK",          OUI_TXT);
-    ouiDrawToggle(1, "SPEED",    Fast1MhzSpeed ? "FAST" : "1MHz", OUI_TXT);
-    ouiDrawToggle(2, "SOUND",    sound ? "ON" : "MUTE",           OUI_TXT);
-    ouiDrawToggle(3, "JOYSTICK", joystick ? "ON" : "OFF",         OUI_TXT);
-    ouiDrawToggle(4, "VIDEO",    videoColor ? "COLOR" : "MONO",   OUI_TXT);
-    for (int i = 5; i < 8; i++) ouiClearToggle(i);
-    ouiDrawScreenToggle();
-    return;
-  }
   // No MACHINE card: II+ and IIe are two separate systems on the boot splash now, and the memory
   // map is built for the chosen one at startup (src/apple2/memory.cpp), so the model cannot be
   // flipped from here any more. Which one is running is in the title bar instead. The grid is
-  // therefore the IIGS one: DEVICE SPEED SOUND JOYSTICK VIDEO, slot 5 empty, 6 SCREEN, 7 HELP.
+  // therefore DEVICE SPEED SOUND JOYSTICK VIDEO, slot 5 empty, 6 SCREEN, 7 HELP.
   ouiDrawToggle(0, "DEVICE",   HdDisk ? "HD" : "DISK",          OUI_TXT);
   ouiDrawToggle(1, "SPEED",    Fast1MhzSpeed ? "FAST" : "1MHz", OUI_TXT);
   ouiDrawToggle(2, "SOUND",    sound ? "ON" : "MUTE",           OUI_TXT);
@@ -509,7 +498,6 @@ static void ouiDrawFileHints()
   // What Enter (inside the list) and Ctrl-Enter do -- mirrors optionsUiKeyEnter / ouiMount.
   const char *enterAct = dir               ? "open folder"
                        : ouiIsPcxt()       ? "mount A:"
-                       : ouiIsIIgs()       ? "mount + reboot"
                        : (ouiIsC64() || ouiIsNES() || ouiIsAtari() || ouiIsMsx() || ouiIsSms() || ouiIsColeco() || ouiIsZx())
                                            ? "load & run" : "mount";
   const char *ctrlAct  = dir               ? NULL
@@ -757,7 +745,7 @@ static void ouiDrawHelp()
     ouiHelpRow(y, "D-pad",  "Arrow keys");
     ouiHelpRow(y, "A / B",  "Enter / Esc");
 #endif
-  } else {   // Apple II / IIGS
+  } else {   // Apple II
     ouiHelpHdr(y, "APPLE  -  KEYBOARD");
     ouiHelpRow(y, "Keys",   "Type into Apple");
     ouiHelpRow(y, "Arrows", "Cursor / paddles");
@@ -896,23 +884,6 @@ static void ouiToggle(int idx)
     optionsUiDirty = true;
     return;
   }
-  if (ouiIsIIgs()) {                    // IIGS grid: 0=DEVICE 1=SPEED 2=SOUND 3=JOYSTICK 4=VIDEO
-    switch (idx) {
-      case 0:
-        HdDisk = !HdDisk;
-        if (HdDisk) { if (hdFiles.empty())   loadHdFilesSync();   }
-        else        { if (diskFiles.empty()) loadDiskFilesSync(); }
-        shownFile = 0xff; firstShowFile = 0; optionsUiSyncSelection();
-        break;
-      case 1: Fast1MhzSpeed = !Fast1MhzSpeed; break;   // SPEED: FAST (~2.8MHz) vs 1MHz regulator
-      case 2: sound = !sound; break;
-      case 3: joystick = !joystick; break;
-      case 4: videoColor = !videoColor; break;
-      default: return;
-    }
-    optionsUiDirty = true;
-    return;
-  }
   switch (idx) {
     case 0:
       HdDisk = !HdDisk;
@@ -1004,13 +975,6 @@ static void ouiMount()
     if (shownFile >= files.size()) return;
     if (pcxtMountA(files[shownFile].c_str()))
       showHideOptionsWindow();            // close only on success (failure keeps the old disk)
-    return;
-  }
-  if (ouiIsIIgs()) {                       // IIGS: persist the highlighted image + reboot -> auto-mounted on boot
-    if (shownFile >= files.size()) return;
-    if (HdDisk) setHdFile(); else setDiskFile();   // selectedHd/DiskFileName = highlighted image
-    saveConfig();         // persist so the boot auto-load (emu8.ino) mounts it
-    ESP.restart();        // reboot -> iigsSetup loads it -> firmware boots (slot 7 HD / slot 6 disk)
     return;
   }
   if (HdDisk) setHdFile(); else setDiskFile();
@@ -1205,7 +1169,7 @@ void optionsUiKeyEnter(bool ctrl)
   // into a folder is not a thing.
   if (f == OUI_FOC_FILES && ctrl) {
     if (ouiIsPcxt()) ouiPcMountC();
-    else if (currentPlatform == PLATFORM_APPLE2 || ouiIsIIgs()) ouiMountReboot();
+    else if (currentPlatform == PLATFORM_APPLE2) ouiMountReboot();
     else ouiMount();      // C64/NES/Atari/MSX/SMS: no reboot variant, Ctrl-Enter = LOAD & RUN
     return;
   }

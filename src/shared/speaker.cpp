@@ -377,7 +377,7 @@ void speakerSetup()
   xTaskCreatePinnedToCore(speakerTask, "speaker", 2048, NULL, 2, NULL, 0);
 #endif
 }
-// Called from the 6502 (and the IIGS) on every $C030 access, from the other core. Records WHEN
+// Called from the 6502 on every $C030 access, from the other core. Records WHEN
 // the flip happened so the sampler can reconstruct it; the timestamp is stored before the index is
 // published, so the ISR never reads a slot that is not written yet.
 //

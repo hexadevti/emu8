@@ -38,10 +38,10 @@ if(EMU_SANITIZE)
 endif()
 
 # --- Sources: the SAME core/shared code the device compiles, minus the hardware-only leaves
-#     (replaced by src/desktop/*), minus PC-XT/fabgl (Phase 3) and the IIGS bring-up harnesses. ---
+#     (replaced by src/desktop/*), minus PC-XT/fabgl (Phase 3). ---
 file(GLOB_RECURSE CORE_SRC CONFIGURE_DEPENDS
   ${REPO}/src/apple2/*.cpp ${REPO}/src/c64/*.cpp  ${REPO}/src/nes/*.cpp
-  ${REPO}/src/atari/*.cpp  ${REPO}/src/iigs/*.cpp ${REPO}/src/msx/*.cpp
+  ${REPO}/src/atari/*.cpp  ${REPO}/src/msx/*.cpp
   ${REPO}/src/sms/*.cpp    ${REPO}/src/z80/*.cpp  ${REPO}/src/coleco/*.cpp
   ${REPO}/src/zx/*.cpp
   ${REPO}/src/shared/*.cpp)
@@ -51,9 +51,7 @@ list(REMOVE_ITEM CORE_SRC
   ${REPO}/src/shared/display_gfx.cpp    # -> src/desktop/display_sdl.cpp
   ${REPO}/src/shared/sd.cpp             # -> src/desktop/sd_host.cpp
   ${REPO}/src/shared/usbgamepad.cpp     # ESP32-S3 USB host driver (input via SDL instead)
-  ${REPO}/src/shared/keyboardPs2.cpp    # CYD PS/2 path (input via SDL instead)
-  ${REPO}/src/iigs/m0_bench.cpp         # bring-up harness (compiled only with -DIIGS_M0_BENCH)
-  ${REPO}/src/iigs/cpu65816_test.cpp)   # bring-up harness
+  ${REPO}/src/shared/keyboardPs2.cpp)   # CYD PS/2 path (input via SDL instead)
 
 file(GLOB DESKTOP_SRC CONFIGURE_DEPENDS ${REPO}/src/desktop/*.cpp)
 # PC-XT is now built for real on desktop (see PCXT_SRC below), so drop the empty stub that used to

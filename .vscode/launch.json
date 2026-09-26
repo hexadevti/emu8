@@ -1,7 +1,7 @@
 {
   // F5 debug for the DESKTOP (SDL2) build — runs the same emulator code as the devices, under gdb.
   // Requires the Microsoft C/C++ extension (ms-vscode.cpptools) for the "cppdbg" type.
-  // Pick the platform via the EMU_PLATFORM env below (apple2|c64|nes|atari|iigs|msx|sms|pcxt).
+  // Pick the platform via the EMU_PLATFORM env below (apple2|c64|nes|atari|msx|sms|pcxt).
   // The MinGW bin dir is prepended to PATH so SDL2.dll + the libstdc++/libgcc/winpthread DLLs load.
   "version": "0.2.0",
   "configurations": [
@@ -53,7 +53,7 @@
       "id": "platform",
       "type": "pickString",
       "description": "Which platform to boot?",
-      "options": ["apple2", "c64", "nes", "atari", "iigs", "msx", "sms", "pcxt"],
+      "options": ["apple2", "c64", "nes", "atari", "msx", "sms", "pcxt"],
       "default": "msx"
     }
   ]

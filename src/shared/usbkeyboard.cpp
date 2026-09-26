@@ -5,7 +5,7 @@
 // and we translate the standard 8-byte HID boot report (modifier byte + up to 6 keycodes) into
 // whatever the currently-selected console expects:
 //
-//   * Apple II / IIGS : set the global keymem to an Apple keycode (high "key ready" bit set),
+//   * Apple II        : set the global keymem to an Apple keycode (high "key ready" bit set),
 //                       exactly like the PS/2 and on-screen-keyboard paths. Left/Right ALT drive
 //                       the open-/solid-apple paddle buttons (Pb0/Pb1).
 //   * C64             : press/release the CIA1 keyboard matrix via c64KeyMatrix(row,col,down),
@@ -16,7 +16,7 @@
 //
 // Settings menu (every platform): F12 opens/closes it; while it is open the arrow keys navigate
 // (Left/Right move the selection, Up/Down change the value) and Enter activates. F11 is a CPU
-// reset on the Apple II / IIGS.
+// reset on the Apple II.
 //
 // Build target only: BOARD_INPUT_USB (the JC4827W543). The CYD uses its PS/2 header instead.
 
@@ -58,7 +58,7 @@ static char kbToAscii(uint8_t kc, bool shift)
   return (char)conv[kc][shift ? 1 : 0];
 }
 
-// ============================ Apple II / IIGS =============================================
+// ============================ Apple II =====================================================
 // Only key-down matters: write an Apple keycode into keymem (bit7 = key available).
 static void appleKeyDown(uint8_t kc, bool shift, bool ctrl)
 {
@@ -527,7 +527,7 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
     }
     if (kc == HID_KEY_F10) { showHideOptionsWindow(); continue; }
     if (kc == HID_KEY_F11 &&
-        (currentPlatform == PLATFORM_APPLE2 || currentPlatform == PLATFORM_IIGS)) {
+        currentPlatform == PLATFORM_APPLE2) {
       cpuReset(); continue;
     }
     if (currentPlatform == PLATFORM_SMS) {
@@ -539,9 +539,8 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
     if (currentPlatform == PLATFORM_ZX && kc == HID_KEY_F12) { zxHardReset(); continue; }         // power-cycle
 
     switch (currentPlatform) {
-      case PLATFORM_APPLE2:
-      case PLATFORM_IIGS:  if (!appleIsButtonKey(kc)) appleKeyDown(kc, shift, ctrl);
-                           break;   // arrows/Space = paddles AND keys; F4/F5 = buttons only
+      case PLATFORM_APPLE2: if (!appleIsButtonKey(kc)) appleKeyDown(kc, shift, ctrl);
+                            break;   // arrows/Space = paddles AND keys; F4/F5 = buttons only
       case PLATFORM_C64:   c64KeyDown(kc); break;   // every key types; the stick reads the arrows too
       case PLATFORM_NES:   nesKbBits |= nesBit(kc); nesSetController(nesKbBits); break;
       case PLATFORM_ATARI: if (atariKey(kc, true)) atariApply(); break;
@@ -563,7 +562,7 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
       case PLATFORM_ATARI: if (atariKey(kc, false)) atariApply(); break;
       case PLATFORM_MSX:   if (!(joystick && msxIsJoyKey(kc))) msxKeyUp(kc); break;
       case PLATFORM_PCXT:  pcxtKeyUp(kc); break;   // USB key -> XT break scancode
-      default: break;   // Apple/IIGS keystrokes are edge-triggered (keymem); nothing to release
+      default: break;   // Apple keystrokes are edge-triggered (keymem); nothing to release
     }
   }
 
@@ -593,7 +592,7 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
       else if (!now && was) pcxtKeyUp(e.usage);
     }
     prevMod = modifier;
-  } else if (currentPlatform == PLATFORM_APPLE2 || currentPlatform == PLATFORM_IIGS) {
+  } else if (currentPlatform == PLATFORM_APPLE2) {
     // open-apple / solid-apple: Alt and right-Alt on a PC keyboard, F4 and F5 on the PicoCalc.
     Pb0 = (modifier & KEYBOARD_MODIFIER_LEFTALT)  != 0 || kbContains(keys, HID_KEY_F4);
     Pb1 = (modifier & KEYBOARD_MODIFIER_RIGHTALT) != 0 || kbContains(keys, HID_KEY_F5);

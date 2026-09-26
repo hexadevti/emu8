@@ -283,6 +283,30 @@
       "presentation": { "reveal": "always", "panel": "shared", "clear": true }
     },
     {
+      // Copy build-picocalc-rp2040/emu8.ino.uf2 onto the RP2040's BOOTSEL drive (RPI-RP2). Resets
+      // the board on COM5 into BOOTSEL first if the drive is not already mounted -- see
+      // tools/flash-rp2040.ps1. Does not build: run "Arduino: Build (PicoCalc RP2040)" first.
+      "label": "Flash RP2040",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", "${workspaceFolder}/tools/flash-rp2040.ps1",
+        "-Uf2", "${workspaceFolder}/build-picocalc-rp2040/emu8.ino.uf2",
+        "-Port", "COM5"
+      ],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      // Build the RP2040 firmware, then flash it through the BOOTSEL drive (the two tasks above).
+      "label": "Build & Flash RP2040",
+      "dependsOn": ["Arduino: Build (PicoCalc RP2040)", "Flash RP2040"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
       // DESKTOP (SDL2) debug build via MSYS2 MinGW32. Used as the preLaunchTask for F5
       // (.vscode/launch.json). Configures CMake on first run, then builds build/emu8.exe.
       "label": "desktop: build",

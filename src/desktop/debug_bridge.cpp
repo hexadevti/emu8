@@ -171,7 +171,7 @@ void dbgReset() {
     case PLATFORM_NES:    nes::nesResetReq   = true;  break;
     case PLATFORM_ATARI:  atari::atariResetReq = true; break;
     case PLATFORM_MSX:    msxResetReq        = true;  break;   // in-process machine reset (keeps the debug session)
-    default:              rebootInto(currentPlatform); break;   // SMS/PCXT/IIgs: re-exec
+    default:              rebootInto(currentPlatform); break;   // SMS/PCXT: re-exec
   }
 }
 
@@ -197,7 +197,7 @@ float dbgClockDefaultMhz() { return 1.0f; }                        // stock Appl
 float dbgGetMeasuredMhz()  { return appleMeasuredMhz; }
 
 // --- full host speed (uncapped), for EVERY platform. The cores honor a per-platform "Fast" flag in
-// their pacing loop (Apple II/C64/IIGS share Fast1MhzSpeed; NES/MSX/SMS have their own); Atari and
+// their pacing loop (Apple II/C64 share Fast1MhzSpeed; NES/MSX/SMS have their own); Atari and
 // PC-XT have no real-time throttle on the desktop, so they always run uncapped (Fixed = true). ---
 bool dbgFullSpeedSupported() { return true; }   // every desktop platform can run at full host speed
 bool dbgFullSpeedFixed() {
@@ -208,7 +208,7 @@ bool dbgFullSpeedFixed() {
 }
 bool dbgGetFullSpeed() {
   switch (currentPlatform) {
-    case PLATFORM_APPLE2: case PLATFORM_C64: case PLATFORM_IIGS: return Fast1MhzSpeed;
+    case PLATFORM_APPLE2: case PLATFORM_C64: return Fast1MhzSpeed;
     case PLATFORM_NES: return nesFast;
     case PLATFORM_MSX: return msxFast;
     case PLATFORM_SMS: return smsFast;
@@ -219,7 +219,7 @@ bool dbgGetFullSpeed() {
 }
 void dbgSetFullSpeed(bool on) {
   switch (currentPlatform) {
-    case PLATFORM_APPLE2: case PLATFORM_C64: case PLATFORM_IIGS: Fast1MhzSpeed = on; break;
+    case PLATFORM_APPLE2: case PLATFORM_C64: Fast1MhzSpeed = on; break;
     case PLATFORM_NES: nesFast = on; break;
     case PLATFORM_MSX: msxFast = on; break;
     case PLATFORM_SMS: smsFast = on; break;
@@ -305,7 +305,7 @@ static const char *platEnvName(int p) {
   switch (p) {
     case PLATFORM_APPLE2: return "apple2"; case PLATFORM_C64:  return "c64";
     case PLATFORM_NES:    return "nes";    case PLATFORM_ATARI: return "atari";
-    case PLATFORM_IIGS:   return "iigs";   case PLATFORM_MSX:   return "msx";
+    case PLATFORM_MSX:    return "msx";
     case PLATFORM_SMS:    return "sms";    case PLATFORM_PCXT:  return "pcxt";
     case PLATFORM_COLECO: return "coleco"; case PLATFORM_ZX: return "zx";
     default: return "apple2";
@@ -320,28 +320,27 @@ static void rebootInto(int p) {
 }
 
 int dbgPlatform()      { return currentPlatform; }
-int dbgPlatformCount() { return PLATFORM_ZX + 1; }   // PLATFORM_SDMANAGER inside is named "" (skipped)
+int dbgPlatformCount() { return PLATFORM_ZX + 1; }   // unnamed ids inside (SD manager, retired 4) are skipped
 const char *dbgPlatformName(int p) {
   switch (p) {
     case PLATFORM_APPLE2: return "Apple II"; case PLATFORM_C64:  return "Commodore 64";
     case PLATFORM_NES:    return "NES";      case PLATFORM_ATARI: return "Atari 2600";
-    case PLATFORM_IIGS:   return "Apple IIGS"; case PLATFORM_MSX: return "MSX";
+    case PLATFORM_MSX:    return "MSX";
     case PLATFORM_SMS:    return "Master System"; case PLATFORM_PCXT: return "PC-XT (8086)";
     case PLATFORM_COLECO: return "ColecoVision";
     case PLATFORM_ZX:     return "ZX Spectrum 48K";
-    case PLATFORM_SDMANAGER: return "";                 // not an emulator; the menu skips it
-    default: return "?";
+    default: return "";                                // SD manager / retired id: the menu skips it
   }
 }
 void dbgSwitchPlatform(int p) {
-  if (p < 0 || p > PLATFORM_ZX || p == PLATFORM_SDMANAGER || p == currentPlatform) return;
+  if (p < 0 || p > PLATFORM_ZX || !*dbgPlatformName(p) || p == currentPlatform) return;
   currentPlatform = p;
   saveConfig();            // persist so the re-exec'd setup() inits the chosen core
   rebootInto(p);
 }
 
-// Mount/load an SD file for the current platform. Most cores hot-load (no reboot); Apple II/IIGS
-// re-exec so their boot path mounts the image (their disk path can't safely hot-swap mid-run).
+// Mount/load an SD file for the current platform. Most cores hot-load (no reboot), the Apple II
+// included: it hot-swaps the disk and the running software reads it on next access.
 bool dbgLoadFile(const char *path) {
   bool ok = false;
   switch (currentPlatform) {
@@ -353,7 +352,6 @@ bool dbgLoadFile(const char *path) {
     case PLATFORM_COLECO:  ok = colecoLoadSelected(path); break;
     case PLATFORM_ZX:      ok = zxLoadSelected(path); break;
     case PLATFORM_PCXT:    ok = pcxtMountAuto(path); break;   // floppy -> A:, hard disk (e.g. DOSHDD.IMG) -> C:
-    case PLATFORM_IIGS:    iigsLoadDisk(path); return true;   // reboots internally (persists first)
     case PLATFORM_APPLE2:
     default:
       apple2InsertDisk(path);   // hot-swap, NO reboot — the running software reads it on next access
@@ -368,7 +366,6 @@ const char *dbgFileExts() {
     case PLATFORM_C64:     return "d64 prg t64 crt";
     case PLATFORM_NES:     return "nes";
     case PLATFORM_ATARI:   return "a26 bin";
-    case PLATFORM_IIGS:    return "dsk po 2mg hdv";
     case PLATFORM_MSX:     return "rom dsk mx1 mx2";
     case PLATFORM_SMS:     return "sms bin";
     case PLATFORM_COLECO:  return "col rom bin";
@@ -615,7 +612,6 @@ const char *dbgCpuName() {
     case PLATFORM_C64:    return "MOS 6510";
     case PLATFORM_NES:    return "Ricoh 2A03";
     case PLATFORM_ATARI:  return "MOS 6507";
-    case PLATFORM_IIGS:   return "WDC 65C816";
     case PLATFORM_MSX:    return "Zilog Z80";
     case PLATFORM_SMS:    return "Zilog Z80";
     case PLATFORM_COLECO: return "Zilog Z80";

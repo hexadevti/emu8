@@ -1,8 +1,7 @@
 // z80.h - Zilog Z80 CPU core for the MSX1 port (M1).
 //
-// Memory-agnostic, in the same spirit as src/iigs/cpu65816.h: the host supplies callbacks, so the
-// SAME core compiles into the desktop harness (host/msx_host.cpp, runs ZEXDOC/ZEXALL) and into the
-// MSX1 machine on the board (src/msx/msx_machine.cpp). Unlike the 6502/65816 cores, the Z80 has a
+// Memory-agnostic: the host supplies callbacks, so the SAME core compiles into the desktop harness
+// (host/msx_host.cpp, runs ZEXDOC/ZEXALL) and into the MSX1 machine on the board (src/msx/msx_machine.cpp). Unlike the 6502 cores, the Z80 has a
 // SEPARATE 256-port I/O space, so there are four hooks: rd/wr (memory) and in/out (I/O ports).
 //
 // Flag register (F) bit layout:  S Z Y H X P/V N C  (bit7..bit0)

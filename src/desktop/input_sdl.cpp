@@ -21,7 +21,7 @@ extern DisplayGFX tft;
 static SDL_GameController *g_pad = nullptr;
 
 // keyboardPs2.cpp is excluded on desktop; provide its 4 entry points with the SAME semantics (the
-// Apple II/IIGS read the keyboard latch keymem; the OSK/USB paths set it). No PS/2 hardware here.
+// Apple II reads the keyboard latch keymem; the OSK/USB paths set it). No PS/2 hardware here.
 unsigned char keyboard_read() { return (unsigned char)keymem; }
 void keyboardStrobe() { keymem &= 0x7F; }     // clear the "key ready" bit on $C010 strobe
 void keyboardSetup() {}

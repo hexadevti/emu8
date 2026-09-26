@@ -5,7 +5,7 @@
 //            -> spawn CPU thread running loop()
 //            -> renderLoop(NULL) on the main thread (infinite; its displayFlush() pumps SDL events).
 //
-// Pick the platform with EMU_PLATFORM (apple2|c64|nes|atari|iigs|msx|sms) to boot straight in
+// Pick the platform with EMU_PLATFORM (apple2|c64|nes|atari|msx|sms|coleco|pcxt|zx) to boot straight in
 // and skip the splash (see eprom.cpp + hal.cpp esp_reset_reason). SD card = ./sdcard (EMU_SD_DIR).
 #if defined(BOARD_DESKTOP)
 

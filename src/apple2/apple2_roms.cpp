@@ -9,7 +9,7 @@ const unsigned char* rom                  = nullptr;   // $D000-$FFFF native (II
 const unsigned char* appleiieenhancedc0ff = nullptr;   // $C000-$FFFF enhanced IIe ROM (16696)
 const unsigned char* diskiicardrom        = nullptr;   // $C600 Disk II boot ROM (560, only $C600-C6FF read)
 const unsigned char* mousecardrom         = nullptr;   // $C400 mouse card ROM (256)
-const unsigned char* hdrom                = nullptr;   // $C700 HD card ROM (256, also read by IIGS slot 7)
+const unsigned char* hdrom                = nullptr;   // $C700 HD card ROM (256)
 bool apple2RomLoadFailed = false;
 
 // Set by a2LoadFile when the file itself was fine and only the heap was not. The IIe fallback
@@ -58,8 +58,8 @@ static const unsigned char* a2LoadFile(const char* path, int len) {
   return b;
 }
 
-// Load just the HD card ROM ($C700). Shared with the IIGS, which reads it for slot 7 when a hard-disk
-// image is mounted; cached, so it is safe to call from both the Apple II boot and the IIGS.
+// Load just the HD card ROM ($C700), for slot 7 when a hard-disk image is mounted; cached, so it is
+// safe to call more than once.
 bool apple2EnsureHdRom() {
   if (hdrom) return true;
   hdrom = a2LoadFile("/roms/apple2/hd.bin", 256);

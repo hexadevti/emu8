@@ -2,7 +2,7 @@
 // behaviour (X/Y flags, IXH/IXL, SLL, MEMPTR/WZ for BIT n,(HL)/(IX+d)), all four prefix tables
 // (CB / ED / DD / FD / DDCB / FDCB), and IM 0/1/2 + NMI.
 //
-// Cycle counts are APPROXIMATE (like src/iigs/cpu65816.cpp): good enough for the MSX1 batch-paced
+// Cycle counts are APPROXIMATE: good enough for the MSX1 batch-paced
 // loop, not cycle-exact. The MEMPTR register and undocumented flags ARE exact so ZEXALL passes.
 //
 // The decoder uses the classic index-substitution trick for DD/FD: when a prefix is active, HL maps
@@ -12,23 +12,33 @@
 #include "z80.h"
 
 // ---- precomputed flag tables -------------------------------------------------------------------
-static uint8_t sz53[256];    // S, Z, Y(bit5), X(bit3) from a byte value
-static uint8_t sz53p[256];   // sz53 + parity
-static uint8_t parityT[256]; // PF set when the byte has even parity
-static bool    tablesReady = false;
+// Built at compile time so they sit in flash with the rest of the core rather than as 768 bytes of
+// .bss -- which every board pays on every boot, Z80 machine or not, and which on the PicoCalc's
+// RP2040 comes straight out of the heap the Apple IIe map needs. The interpreter itself executes
+// from flash there too, so reading its tables from flash costs nothing extra.
+struct Z80FlagTables {
+  uint8_t sz53[256];    // S, Z, Y(bit5), X(bit3) from a byte value
+  uint8_t sz53p[256];   // sz53 + parity
+  uint8_t parityT[256]; // PF set when the byte has even parity
+};
 
-static void initTables() {
+static constexpr Z80FlagTables makeTables() {
+  Z80FlagTables t{};
   for (int i = 0; i < 256; i++) {
     uint8_t p = (uint8_t)i;
     p ^= p >> 4; p ^= p >> 2; p ^= p >> 1;
-    parityT[i] = (p & 1) ? 0 : Z80_PF;
+    t.parityT[i] = (p & 1) ? 0 : Z80_PF;
     uint8_t sz = (uint8_t)i & (Z80_SF | Z80_YF | Z80_XF);
     if (i == 0) sz |= Z80_ZF;
-    sz53[i]  = sz;
-    sz53p[i] = sz | parityT[i];
+    t.sz53[i]  = sz;
+    t.sz53p[i] = sz | t.parityT[i];
   }
-  tablesReady = true;
+  return t;
 }
+static constexpr Z80FlagTables flagTables = makeTables();
+static constexpr const uint8_t* sz53    = flagTables.sz53;
+static constexpr const uint8_t* sz53p   = flagTables.sz53p;
+static constexpr const uint8_t* parityT = flagTables.parityT;
 
 // ---- low-level fetch / stack -------------------------------------------------------------------
 static inline void incR(Z80& c) { c.R = (c.R & 0x80) | ((c.R + 1) & 0x7F); }
@@ -510,7 +520,6 @@ static void execMain(Z80& c, uint8_t op, int idx, bool* wasEI) {
 
 // ============================ public interface ==================================================
 void Z80::reset() {
-  if (!tablesReady) initTables();
   A = F = B = C = D = E = H = L = 0;
   A_ = F_ = B_ = C_ = D_ = E_ = H_ = L_ = 0;
   IXH = IXL = IYH = IYL = 0;
@@ -523,7 +532,6 @@ void Z80::reset() {
 }
 
 int Z80::step() {
-  if (!tablesReady) initTables();
   if (halted) { incR(*this); cycles += 4; return 4; }
   uint64_t start = cycles;
   bool wasEI = false;

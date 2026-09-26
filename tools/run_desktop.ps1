@@ -5,7 +5,7 @@
 #   pwsh tools/run_desktop.ps1 -Platform apple2                      # just run (Ctrl-C to stop)
 #   pwsh tools/run_desktop.ps1 -Platform c64 -Capture cap.png -At 120 -Quit   # screenshot frame 120 then exit
 #   pwsh tools/run_desktop.ps1 -Platform pcxt    -Floppy dos-622-disk1.img    # boot PC-XT from a DOS floppy
-# Valid -Platform values: apple2 c64 nes atari iigs msx sms coleco pcxt zx
+# Valid -Platform values: apple2 c64 nes atari msx sms coleco pcxt zx
 param(
   [string]$Platform = 'apple2',
   [string]$Sd       = 'C:/Users/lucia/repos/emu8/build/sdcard',

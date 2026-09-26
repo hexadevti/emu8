@@ -1,8 +1,4 @@
 #include "emu.h"
-#include "src/iigs/m0_bench.h"   // IIGS feasibility gate; compiles to nothing unless -DIIGS_M0_BENCH
-#ifdef IIGS_M1_TEST
-void runIIgsM1Test();            // src/iigs/cpu65816_test.cpp - 65C816 core self-test
-#endif
 
 void setup() {
   if (LED_PIN >= 0) {
@@ -28,38 +24,9 @@ void setup() {
   // found". Stop the loop task from feeding the WDT (it isn't monitored, so this is safe).
   disableLoopWDT();
 #endif
-#if defined(IIGS_M0_BENCH) || defined(IIGS_M05_BENCH) || defined(IIGS_M1_TEST)
-  // Throwaway Apple IIGS bring-up harnesses (memory benchmarks M0/M0.5, CPU core test M1). Run at
-  // the very top of setup() so nothing perturbs them, looping forever (re-run every few seconds)
-  // so a plain serial read always catches a full run -- this board's auto-reset is flaky from a
-  // host script. Build with -DIIGS_M0_BENCH / -DIIGS_M05_BENCH / -DIIGS_M1_TEST (S3 only).
-  while (true) {
-  #ifdef IIGS_M0_BENCH
-    runIIgsM0Bench();
-  #endif
-  #ifdef IIGS_M05_BENCH
-    runIIgsM05Bench();
-  #endif
-  #ifdef IIGS_M1_TEST
-    runIIgsM1Test();
-  #endif
-    Serial.println("--- done; next run in 4s ---");
-    Serial.flush();
-    delay(4000);
-  }
-#endif
   bootProgressStep("Reading settings");
   epromSetup();   // loads currentPlatform (and all saved settings) from EEPROM
 
-#if !BOARD_HAS_BIGRAM_CORES
-  // EEPROM (or an /emu8.cfg copied from a PSRAM board) can name a platform this build does not
-  // link. Normalise it here, before anything reads it: otherwise setup() falls through to the
-  // Apple II while loop() and renderLoop still dispatch on the stale value.
-  if (currentPlatform == PLATFORM_IIGS) {
-    printLog("Platform needs PSRAM and this board has none -> falling back to Apple II");
-    currentPlatform = PLATFORM_APPLE2;
-  }
-#endif
 #if !BOARD_HAS_PCXT_CORE
   if (currentPlatform == PLATFORM_PCXT) {
     printLog("Platform needs PSRAM and this board has none -> falling back to Apple II");
@@ -134,26 +101,6 @@ void setup() {
     oskSetup();
     joystickSetup();   // analog stick + buttons -> 2600 joystick + console switches
     atariAudioSetup(); // TIA audio -> I2S DAC (GPIO26), LAST so its I2S DMA comes after SD
-  // IIGS / PC-XT need 1-4MB of ps_malloc guest RAM. On boards without PSRAM
-  // (BOARD_HAS_BIGRAM_CORES 0, e.g. the PicoCalc's 520KB RP2350) they are neither selectable
-  // on the splash nor linked, so their cores cost nothing in flash or RAM.
-#if BOARD_HAS_BIGRAM_CORES
-  } else if (currentPlatform == PLATFORM_IIGS) {
-    FSSetup();          // SD FIRST: ROM 01 loads from /roms/iigs, plus the 5.25" .dsk / HD images
-    iigsSetup();        // alloc banks + load ROM 01 from SD + reset 65C816
-    loadDiskFilesSync();// scan the SD root so the options DISK browser is populated
-    loadHdFilesSync();  // ...and the HD browser (.po/.2mg/.hdv)
-    if (HdDisk) {       // auto-mount the saved block image -> firmware scan-boots slot 7
-      if (selectedHdFileName.length() > 1 && selectedHdFileName != "/")
-        iigsLoadHD(selectedHdFileName.c_str());
-    } else if (selectedDiskFileName.length() > 1 && selectedDiskFileName != "/") {
-      iigsLoadDisk(selectedDiskFileName.c_str());   // or the saved .dsk -> slot 6
-    }
-    videoSetup();       // TFT + render loop (+ splash); the render task draws iigsRenderText()
-    oskSetup();
-    joystickSetup();
-    speakerSetup();     // Apple II-compatible 1-bit speaker ($C030) -> I2S amp, LAST (I2S DMA after SD)
-#endif
 #if BOARD_HAS_MSX_CORE
   } else if (currentPlatform == PLATFORM_MSX) {
     FSSetup();          // SD first: msxSetup loads the BIOS / first cart off the card
@@ -241,9 +188,6 @@ void loop() {
     case PLATFORM_NES:    nesLoop(); break;
     case PLATFORM_ATARI:  atariLoop(); break;
     case PLATFORM_SDMANAGER: delay(50); break;   // the server is its own task; nothing to run here
-#if BOARD_HAS_BIGRAM_CORES
-    case PLATFORM_IIGS:   iigsLoop(); break;
-#endif
 #if BOARD_HAS_MSX_CORE
     case PLATFORM_MSX:    msxLoop(); break;
 #endif

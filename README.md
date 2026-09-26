@@ -5,7 +5,7 @@ ESP32 boards with a built-in TFT and microSD. Pick a system on the boot splash a
 straight off a microSD card — no PC, no external ROM files.
 
 Eight systems share one firmware, dispatched at runtime from the boot splash — the classic 8-bit cores
-plus the experimental **Apple IIGS** and **PC-XT** targets that are still in development:
+plus the experimental **PC-XT** target that is still in development:
 
 | System | CPU | Status | Image formats |
 | --- | --- | --- | --- |
@@ -16,7 +16,6 @@ plus the experimental **Apple IIGS** and **PC-XT** targets that are still in dev
 | **MSX1** | Z80 | Playable (TMS9918 VDP + AY-3-8910 PSG); BIOS from SD or embedded C-BIOS | `.rom` `.mx1` `.dsk` |
 | **ZX Spectrum 48K** | Z80 | Playable (ULA screen + per-line border, beeper, Kempston); instant tape loading through a ROM trap (no turbo loaders); ROM from SD | `.sna` `.z80` `.tap` `.tzx` |
 | **Sega Master System** | Z80 | Playable (Mode 4 VDP + SN76489 PSG); Sega mapper + line interrupts; boots cartridges directly (no BIOS) | `.sms` `.bin` |
-| **Apple IIGS** | 65C816 | **In development** — boots ROM 01, 40-col text + HiRes/DHiRes, standard ProDOS 5.25″/800 KB disks, 1-bit speaker. SHR-heavy/protected titles and GS-native (Ensoniq) sound are not done. | `.dsk` `.po` `.2mg` `.hdv` |
 | **PC-XT** | Intel 8086 | **In development** — fabgl-based IBM PC-XT: BIOS POST, CGA text/graphics, PC speaker; mounts floppy (A:) and hard-disk (C:) images and boots DOS. BIOS from `/roms/pcxt/bios.bin` | `.img` `.ima` `.dsk` `.vhd` `.hdd` |
 
 > Derived from [hexadevti/Apple2Esp32](https://github.com/hexadevti/Apple2Esp32). The original was a
@@ -68,7 +67,6 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
 - [Pin assignments (CYD)](#pin-assignments-cyd)
 - [Board resources & schematics](#board-resources--schematics)
 - [Project structure](#project-structure)
-- [Experimental: Apple IIGS (in development)](#experimental-apple-iigs-in-development)
 - [Credits & license](#credits--license)
 
 ---
@@ -77,8 +75,8 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
 
 ### Shared core
 
-- **Boot-splash platform selector** — tap **APPLE / C64 / NES / ATARI / IIGS / MSX / SMS / PCXT**
-  to choose a system; the selection persists in EEPROM and auto-boots next time. (**IIGS** and **PCXT** are
+- **Boot-splash platform selector** — tap **APPLE / C64 / NES / ATARI / MSX / SMS / PCXT**
+  to choose a system; the selection persists in EEPROM and auto-boots next time. (**PCXT** is
   experimental / in development.)
 - **microSD storage** for every platform, with on-screen file browsers per system.
 - **On-screen touch keyboard** (OSK) on both boards, plus PS/2 on the CYD and a **USB keyboard** on the JC4827W543.
@@ -163,7 +161,7 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
 ## Boot & platform selection
 
 On power-up emu8 shows a boot splash with one button per system — **APPLE**, **C64**, **NES**,
-**ATARI**, **IIGS**, **MSX**, **SMS** and **PCXT** (the IIGS and PCXT still in
+**ATARI**, **MSX**, **SMS** and **PCXT** (the PCXT still in
 development). Tap one to switch systems (this saves the choice and reboots into it); tap elsewhere or
 wait for the timeout to boot the currently-selected platform. On the CYD a joystick button also
 dismisses the splash.
@@ -190,10 +188,10 @@ USB keyboard mapping (works on every platform):
 
 | Keys | Action |
 | --- | --- |
-| Letters / digits / symbols | Type into the active system (Apple/IIGS keycode, C64 keyboard matrix, …) |
+| Letters / digits / symbols | Type into the active system (Apple keycode, C64 keyboard matrix, …) |
 | Arrow keys | Cursor / d-pad |
 | `F10` | Open / close the options menu (arrows navigate, `Enter` activates) |
-| `F11` | Apple / IIGS **Reset** (CPU reset) |
+| `F11` | Apple **Reset** (CPU reset) |
 | NES: arrows + `X`=A · `Z`=B · `Enter`=Start · `Tab`=Select | NES controller 1 |
 | Atari: arrows + `Space`/`X`=Fire · `Enter`=Reset · `Tab`=Select | Atari stick + console switches |
 | C64 (when **JOYSTICK** is on): arrows + `Space`=Fire | C64 joystick (port per **JOY PORT**) |
@@ -442,34 +440,10 @@ emulated system. The top-level sketch wires them together:
 | [`src/zx/`](src/zx/) | ZX Spectrum 48K — ULA screen/border, keyboard, beeper, Kempston, SNA/Z80 loaders, TAP/TZX tape trap |
 | [`src/sms/`](src/sms/) | Sega Master System — 315-5124 VDP (Mode 4), SN76489 PSG, Sega mapper, cart loader |
 | [`src/pcxt/`](src/pcxt/) | PC-XT — fabgl i8086 machine, CGA, PC speaker, disk mount (in development) |
-| [`src/iigs/`](src/iigs/) | Apple IIGS core — 65C816, banked memory, ROM 01 boot, video, disk (in development) + the original feasibility benchmark |
 | [`src/desktop/`](src/desktop/) | SDL2 desktop debug build — Arduino/FreeRTOS shims, SDL display/audio/input backends (see its [README](src/desktop/README.md)) |
-| [`host/`](host/) | Off-device debug harnesses (MSX / SMS / IIGS cores on a PC, SD serial server) |
+| [`host/`](host/) | Off-device debug harnesses (MSX / SMS cores on a PC, SD serial server) |
 | [`tools/sdmanager/`](tools/sdmanager/) | SD card manager over USB serial: web app, Python CLI, protocol spec + tests |
 | [`data/`](data/) · [`resources/`](resources/) | Sample disk images / test files |
-
----
-
-## Experimental: Apple IIGS (in development)
-
-The Apple IIGS is a **work-in-progress fifth platform** (`PLATFORM_IIGS`), selectable from the boot
-splash on the ESP32-S3. It is **not finished** — treat its features as experimental and expect rough
-edges.
-
-What works today: 65C816 CPU core, banked memory, ROM 01 boots to its banner, 40-column text plus
-HiRes / Double-HiRes video, the Apple II 1-bit speaker, and booting standard ProDOS 5.25″ and 800 KB
-disks (`.dsk` / `.po` / `.2mg` / `.hdv`) from SD. A 1 MHz throttle makes Apple II software run at the
-original speed.
-
-Known gaps: GS-native super-hires-heavy or hardware-copy-protected titles don't run, GS-native Ensoniq
-5503 sound isn't implemented, full 65816 edge-case validation is pending, the clock/Battery-RAM
-self-test is stubbed, and boot is slow (~30 s). The core lives in
-[`src/iigs/iigs_boot.cpp`](src/iigs/); a desktop debug harness ([`host/iigs_host.cpp`](host/)) runs the
-same CPU core on a PC for fast iteration.
-
-The original PSRAM-timing feasibility benchmark ([`src/iigs/m0_bench.*`](src/iigs/)) is still present:
-it compiles to nothing unless built with `-DIIGS_M0_BENCH` (S3 only), then runs at the top of
-`setup()`, prints results over serial, and halts.
 
 ---
 

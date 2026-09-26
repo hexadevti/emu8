@@ -6,7 +6,7 @@ extern const unsigned char* rom;                  // $D000-$FFFF native (II+) RO
 extern const unsigned char* appleiieenhancedc0ff; // $C000-$FFFF enhanced IIe ROM
 extern const unsigned char* diskiicardrom;        // $C600 Disk II boot ROM
 extern const unsigned char* mousecardrom;         // $C400 mouse card ROM
-extern const unsigned char* hdrom;                // $C700 HD card ROM (also read by the IIGS slot 7)
+extern const unsigned char* hdrom;                // $C700 HD card ROM
 
 const uint16_t convertVideo[]  = {
 0x000, 0x001, 0x002, 0x003, 0x004, 0x005, 0x006, 0x007, 0x008, 0x009, 0x00a, 0x00b, 0x00c, 0x00d, 0x00e, 0x00f, 0x010, 0x011, 0x012, 0x013, 0x014, 0x015, 0x016, 0x017, 0x018, 0x019, 0x01a, 0x01b, 0x01c, 0x01d, 0x01e, 0x01f, 0x020, 0x021, 0x022, 0x023, 0x024, 0x025, 0x026, 0x027,

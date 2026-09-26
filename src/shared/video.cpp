@@ -154,12 +154,11 @@ static void hintClearBar() { tft.fillPanelRect(0, kHintTop, kHintW, kHintH, TFT_
 // appleIsButtonKey, nesBit, atariKey, msxApplyJoystick are the authorities for these strings).
 static void hintText(const char **keys, const char **joy)
 {
-  const bool apple = (currentPlatform == PLATFORM_APPLE2 || currentPlatform == PLATFORM_IIGS);
+  const bool apple = (currentPlatform == PLATFORM_APPLE2);
   *keys = apple ? "Ctrl-F1 options   Ctrl-F3 reset   Ctrl-F6 systems"
                 : "Ctrl-F1 options   Ctrl-F6 systems";
   switch (currentPlatform) {
-    case PLATFORM_APPLE2:
-    case PLATFORM_IIGS:  *joy = "Arrows joystick   Space/F4 btn0   F5 btn1";   break;
+    case PLATFORM_APPLE2: *joy = "Arrows joystick   Space/F4 btn0   F5 btn1";   break;
     case PLATFORM_C64:   *joy = "Arrows joystick   Space fire";                break;
     case PLATFORM_NES:   *joy = "Arrows dpad   X=A  Z=B  Tab select  Enter start"; break;
     case PLATFORM_ATARI: *joy = "Arrows stick   Space fire   F4 select   F3 reset"; break;
@@ -293,7 +292,6 @@ static const SplashSystem splashSystems[] = {
   { "C64",   PLATFORM_C64,     -1, "SOON"   },
   { "NES",   PLATFORM_NES,     -1, "SOON"   },
   { "ATARI", PLATFORM_ATARI,   -1, "SOON"   },
-  { "IIGS",  PLATFORM_IIGS,    -1, "SOON"   },
   { "MSX",   PLATFORM_MSX,     -1, "SOON"   },
   { "SMS",   PLATFORM_SMS,     -1, "SOON"   },
   { "PCXT",  PLATFORM_PCXT,    -1, "SOON"   },
@@ -325,10 +323,9 @@ static int splashHitTest(int16_t x, int16_t y)
   return -1;
 }
 
-// Which platforms this BOARD can actually run. IIGS / PC-XT each want 1-4MB of
-// ps_malloc'd guest RAM, so they only exist where BOARD_HAS_BIGRAM_CORES is set (see the
-// matching #if gates in emu8.ino, which also keep their cores out of the link). MSX / SMS go the same way wherever
-// BOARD_HAS_MSX_CORE / BOARD_HAS_SMS_CORE is clear. Disabled buttons draw greyed with "SOON" and ignore taps.
+// Which platforms this BOARD can actually run. Each optional core only exists where its
+// BOARD_HAS_*_CORE is set (see the matching #if gates in emu8.ino, which also keep the cores out of
+// the link). Disabled buttons draw greyed with "SOON" and ignore taps.
 static bool splashEnabled(int i)
 {
   // The Apple IIe is the one entry whose availability is not a property of the build: its map plus
@@ -337,7 +334,6 @@ static bool splashEnabled(int i)
   // a II+ and sets this; from then on the button is greyed "NO RAM" instead of lying.
   if (splashSystems[i].iie > 0 && apple2IIeUnavailable) return false;
   switch (splashSystems[i].platform) {
-    case PLATFORM_IIGS:     return BOARD_HAS_BIGRAM_CORES;
     case PLATFORM_PCXT:     return BOARD_HAS_PCXT_CORE;
     case PLATFORM_MSX:      return BOARD_HAS_MSX_CORE;
     case PLATFORM_SMS:      return BOARD_HAS_SMS_CORE;
@@ -390,11 +386,34 @@ static void splashDrawBtn(int i, bool enabled)
   }
 }
 
+static bool splashDrawn = false;     // splashService() paints the whole menu once per showing
+static bool splashResumeCpu = false; // opened over a running core (splashOpen), which it paused
+
 static void splashFinish()           // boot the current platform
 {
   splashActive = false;
   clearScr = true;                   // wipe the whole panel before the emulator video starts
+  if (splashResumeCpu) { splashResumeCpu = false; paused = false; }
 }
+
+#if defined(BOARD_PICOCALC)
+// Ctrl-F6: show the system menu over the running emulator instead of rebooting into it. The core
+// is paused the way the settings window pauses it, so backing out (Esc, the timeout, or picking
+// the system already running) resumes it exactly where it was; only picking a DIFFERENT system
+// reboots, through the same path the boot splash takes. Called from the keyboard pump, which runs
+// on this render task (see splashKeyEvent above), so no locking against splashService().
+void splashOpen()
+{
+  if (splashActive) { splashFinish(); return; }       // the same key closes it again
+  if (OptionsWindow) showHideOptionsWindow();         // one full-screen menu at a time
+  paused = true;
+  splashResumeCpu = true;
+  splashCursor = -1;                                  // start on the running system
+  splashKeyEvent = 0;
+  splashDrawn = false;
+  splashActive = true;
+}
+#endif
 
 static void splashSelect(int idx)
 {
@@ -416,8 +435,8 @@ static void splashSelect(int idx)
   displayFlush();
   delay(1000);
 
-  if (currentPlatform == PLATFORM_SDMANAGER) {
-    // Always a reboot, and never a saved platform: saveConfig() keeps the emulator's byte in
+  if (currentPlatform == PLATFORM_SDMANAGER && prevPlat != PLATFORM_SDMANAGER) {
+    // Always a reboot (unless it is already the running mode, opened with Ctrl-F6), and never a saved platform: saveConfig() keeps the emulator's byte in
     // EEPROM (eprom.cpp) and the one-boot flag carries the choice across the restart instead.
     saveConfig();
     requestSdManagerOnNextBoot();
@@ -434,9 +453,8 @@ static void splashSelect(int idx)
 
 static void splashService()
 {
-  static bool drawn = false;
   static unsigned long startMs = 0;
-  if (!drawn) {
+  if (!splashDrawn) {
     startMs = millis();
     tft.fillScreen(TFT_BLACK);
     tft.setSwapBytes(true);
@@ -446,7 +464,7 @@ static void splashService()
     tft.setTextColor(tft.color565(150, 160, 175), TFT_BLACK);
     tft.drawString("SELECT SYSTEM", 160, SPLASH_SUB_Y, 2);
     for (int i = 0; i < SPLASH_N; i++) splashDrawBtn(i, splashEnabled(i));
-    drawn = true;
+    splashDrawn = true;
   }
 
   int16_t tx, ty;
@@ -467,6 +485,7 @@ static void splashService()
   if (ev) {
     int cur = splashHighlight();
     if (ev == SPLASH_KEY_SELECT) { if (splashEnabled(cur)) splashSelect(cur); return; }
+    if (ev == SPLASH_KEY_BACK)   { splashFinish(); return; }
     int n = cur;
     if (ev == SPLASH_KEY_UP || ev == SPLASH_KEY_DOWN) {
       int t = cur + (ev == SPLASH_KEY_DOWN ? SPLASH_COLS : -SPLASH_COLS);
@@ -835,21 +854,6 @@ void renderLoop(void *pvParameters)
 #endif
       continue;
     }
-
-#if BOARD_HAS_BIGRAM_CORES
-    // Apple IIGS: the 65C816 (core 1) runs the firmware; draw its 40-col text page here.
-    if (currentPlatform == PLATFORM_IIGS)
-    {
-#if BOARD_DISPLAY_GFX
-      if (clearScr) { tft.fillScreen(TFT_BLACK); clearScr = false; }
-#endif
-      iigsRenderText();                  // UI-mode text (sets fillScreen + drawString); flush at loop top
-      if (oskActive()) { displaySetUiMode(true); oskRender(); }   // on-screen keyboard overlays the bottom
-      Vertical_blankingOn_Off = true;
-      vTaskDelay(pdMS_TO_TICKS(33));      // ~30 fps text refresh
-      continue;
-    }
-#endif // BOARD_HAS_BIGRAM_CORES
 
 #if BOARD_HAS_PCXT_CORE
     // PC-XT: the 8086 (core 1) runs the BIOS/DOS; render the CGA buffer here. pcxtRenderFrame() returns

@@ -216,7 +216,7 @@ extern uint8_t volume;
 // which is not an emulator: the SD card file manager as a boot mode of its own (sdserial.cpp), so it
 // has the whole heap to itself. It is entered for one boot only (sdManagerBootRequested) and never
 // saved, so leaving it lands back on the system the user was running.
-enum Platform : uint8_t { PLATFORM_APPLE2 = 0, PLATFORM_C64 = 1, PLATFORM_NES = 2, PLATFORM_ATARI = 3, PLATFORM_IIGS = 4, PLATFORM_MSX = 5, PLATFORM_SMS = 6, PLATFORM_PCXT = 7, PLATFORM_SDMANAGER = 8, PLATFORM_COLECO = 9, PLATFORM_ZX = 10 };
+enum Platform : uint8_t { PLATFORM_APPLE2 = 0, PLATFORM_C64 = 1, PLATFORM_NES = 2, PLATFORM_ATARI = 3, /* 4: retired */ PLATFORM_MSX = 5, PLATFORM_SMS = 6, PLATFORM_PCXT = 7, PLATFORM_SDMANAGER = 8, PLATFORM_COLECO = 9, PLATFORM_ZX = 10 };
 extern uint8_t currentPlatform;
 
 // Log Config
@@ -244,7 +244,7 @@ extern int logLineCount;
 #define NesSpeedEEPROMaddress 17       // NES: 1 = FAST (uncapped) / 0 = NORMAL (paced ~60fps/1.79MHz)
 #define ZxSpeedEEPROMaddress 21        // ZX Spectrum: 1 = FAST (uncapped) / 0 = NORMAL (paced to 3.5 MHz)
 // The Apple IIe keeps its own copy of the Apple-only settings (DEVICE, SPEED, the disk and HD
-// images); the addresses above without "IIe" are the II+'s (and the IIGS's). See eprom.cpp.
+// images); the addresses above without "IIe" are the II+'s. See eprom.cpp.
 #define IIeHdDiskEEPROMaddress 18
 #define IIeFast1MhzSpeedEEPROMaddress 19
 #define IIeConfigMarkerEEPROMaddress 20  // IIE_CONFIG_MARKER once the IIe set has been seeded
@@ -348,6 +348,25 @@ extern unsigned char* menuColor;
 extern unsigned char sharedBigBuf[2 * (320 * 100 + 16)];   // C64 framebuffer / Apple main RAM
                                        // (shared static 64K). Sized here, not just declared, so
                                        // memoryAlloc() can static_assert against its tail.
+
+// The MSX / SMS / ColecoVision per-line and FDC buffers, in sharedBigBuf past the 256x192
+// framebuffer, the 4K scratch band and the two menu buffers those cores put there. As .bss they
+// cost ~2.5K of heap on EVERY boot -- and on the PicoCalc's RP2040 that is heap the Apple IIe map
+// is short of (src/apple2/memory.cpp). A platform switch reboots, so nothing else is using the
+// tail while one of these cores runs. Laid out one after another rather than overlapped, so no
+// two of them can collide whichever core is up.
+#define Z80_TAIL_OFF        (256 * 192 + 256 * 8 * 2 + 2 * 0x546)
+#define MSX_LINEMARK_OFF    (Z80_TAIL_OFF)                  // 256  msx_vdp.cpp (MSX, Coleco)
+#define MSX_FDCBUF_OFF      (MSX_LINEMARK_OFF + 256)        // 512  msx_disk.cpp
+#define MSX_DIRTY_OFF       (MSX_FDCBUF_OFF + 512)          // 1024 msx_disk.cpp
+#define SMS_LINEHS_OFF      (MSX_DIRTY_OFF + 1024)          // 192  sms_vdp.cpp
+#define SMS_BGPRIO_OFF      (SMS_LINEHS_OFF + 192)          // 256  sms_vdp.cpp
+#define SMS_MARK_OFF        (SMS_BGPRIO_OFF + 256)          // 256  sms_vdp.cpp
+#define Z80_TAIL_END        (SMS_MARK_OFF + 256)
+static_assert(Z80_TAIL_END <= (int)sizeof(sharedBigBuf),
+              "MSX/SMS line + FDC buffers must fit in sharedBigBuf's tail");
+// A fixed-size array view of sharedBigBuf at `off`, so sizeof() at the use sites keeps working.
+#define SHARED_TAIL_ARRAY(off, n) (*reinterpret_cast<uint8_t(*)[n]>(sharedBigBuf + (off)))
 
 // Speaker Config
 extern boolean speaker_state;

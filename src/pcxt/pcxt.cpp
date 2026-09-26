@@ -160,7 +160,7 @@ static bool pcIsDiskImage(const std::string& s) {
 }
 
 // A real PC disk image has the 0x55AA boot signature at offset 510 (FAT boot sector / MBR). The
-// user's IIgs/Apple .img/.dsk images lack it, so this keeps them OUT of the PC browser -> they can't
+// user's Apple .img/.dsk images lack it, so this keeps them OUT of the PC browser -> they can't
 // be mounted by accident and corrupted by write-back. busTake() guards the HSPI (touch shares it).
 static bool pcLooksLikePcDisk(const char* path) {
   bool ok = false;
@@ -539,7 +539,7 @@ void pcxtLoop() {
 
 // ---- CGA text render (M1: 80x25 / 40x25 text only; graphics modes come in M3) ----
 // Reads the CGA text buffer at videoMemory()+0x8000 (char at even byte, attribute
-// odd) and blits with the built-in 6x8 font, like iigsRenderText. 80 cols * 6px =
+// odd) and blits with the built-in 6x8 font. 80 cols * 6px =
 // 480px = full native panel width.
 static const uint16_t kCgaRgb565[16] = {
   0x0000, 0x0015, 0x0540, 0x0555, 0xA800, 0xA815, 0xAAA0, 0xAD55,
@@ -715,7 +715,7 @@ static bool pcxtRenderTextGlyph(int PW, int PH) {
 }
 #endif
 
-// ---- CGA text render: 80x25 / 40x25 with the built-in 6x8 font (like iigsRenderText) ----
+// ---- CGA text render: 80x25 / 40x25 with the built-in 6x8 font ----
 static void pcxtRenderText() {
 #if BOARD_PANEL_DSI
   if (pcxtRenderTextGlyph(PANEL_NATIVE_W, PANEL_NATIVE_H)) return;   // P4: original IBM 8x8 font, full-screen

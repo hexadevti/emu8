@@ -34,7 +34,7 @@ static int gVideoTop = 0, gVideoHeight = DISP_LOGICAL_H;
 static int gVideoLeft = 0, gVideoWidth = DISP_LOGICAL_W;
 static bool gVideoStretch = false;
 // Set when a core declares a video content rect this frame (the small/centered emulator video that the
-// P4 flush should FILL-scale). Cores that draw the whole canvas themselves in UI mode (PC-XT/IIGS text)
+// P4 flush should FILL-scale). Cores that draw the whole canvas themselves in UI mode (PC-XT text)
 // never call displaySetVideoRect, so this stays false and flushDSI pushes their canvas 1:1.
 static bool gFrameUsesFill = false;
 void displaySetVideoRect(int topLogical, int hLogical) {
@@ -388,7 +388,7 @@ void DisplayGFX::flushDSI() {
   if (!_fb) return;
   bool osk = (oskActive() || osgActive()) && _oskFb;
   // Fill-scale only when a core declared a video rect this frame (the small/centered emulator video).
-  // PC-XT/IIGS draw the whole canvas themselves -> push 1:1. (_uiMode is unreliable: the keyboard
+  // PC-XT draws the whole canvas themselves -> push 1:1. (_uiMode is unreliable: the keyboard
   // overlay leaves it true regardless of the underlying video.)
   bool fill = screenFill && gFrameUsesFill;
   gFrameUsesFill = false;

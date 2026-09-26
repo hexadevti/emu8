@@ -32,7 +32,8 @@ static bool     lineIntPending;   // line interrupt latched (cleared by status r
 static int      lineCounter;      // R10 down-counter
 static int      curLine;          // current scanline (for V counter)
 static uint8_t  vsLatch;          // vertical scroll latched at the start of the active display
-static uint8_t  lineHS[VDP_H];    // per-scanline horizontal scroll snapshot (split-screen)
+// per-scanline horizontal scroll snapshot (split-screen); sharedBigBuf tail, see emu.h
+static uint8_t (&lineHS)[VDP_H] = SHARED_TAIL_ARRAY(SMS_LINEHS_OFF, VDP_H);
 
 void vdpReset() {
   memset(vreg, 0, sizeof(vreg));
@@ -125,7 +126,8 @@ void vdpBuildPalette(uint16_t* lut32) { for (int i = 0; i < 32; i++) lut32[i] = 
 // scroll (R8) and vertical scroll (R9, latched) with the top-rows / right-cols scroll locks (R0
 // bits 6/7) and the hide-left-8 column (R0 bit5). Background pixels carry a priority bit that, when
 // set on a non-zero pixel, keeps the tile in front of sprites.
-static uint8_t  bgPrio[VDP_W];     // per-pixel: background-over-sprite flag for the current scanline
+// per-pixel: background-over-sprite flag for the current scanline; sharedBigBuf tail, see emu.h
+static uint8_t (&bgPrio)[VDP_W] = SHARED_TAIL_ARRAY(SMS_BGPRIO_OFF, VDP_W);
 
 static void renderBgLine(uint8_t* fb, int y) {
   uint16_t nameBase = (uint16_t)((vreg[2] & 0x0E) << 10);
@@ -185,7 +187,7 @@ static void renderSpriteLine(uint8_t* fb, int y) {
   int dh = h * mag;
   int shiftX = (vreg[0] & 0x08) ? 8 : 0;                  // R0 bit3: shift sprites left by 8
   uint8_t* row = fb + y * VDP_W;
-  static uint8_t mark[VDP_W];
+  uint8_t (&mark)[VDP_W] = SHARED_TAIL_ARRAY(SMS_MARK_OFF, VDP_W);           // sharedBigBuf tail, see emu.h
   memset(mark, 0, sizeof(mark));
 
   int drawn = 0;

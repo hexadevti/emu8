@@ -358,27 +358,71 @@ void DisplayGFX::fillRect(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t c
   panelFillRaw(x, y + _offY, w, h, color);
 }
 
-void DisplayGFX::fillRoundRect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint16_t color) {
-  // good-enough rounded rect: a full rect minus the four corner pixels (matches the other backends).
-  fillRect(x, y, w, h, color);
-  if (r <= 0) return;
-  for (int i = 0; i < r; i++) {
-    for (int j = 0; j < r; j++) {
-      if (i * i + j * j <= r * r) continue;
-      pxRun(x + (r - 1 - i), y + (r - 1 - j), TFT_BLACK);
-      pxRun(x + w - r + i,   y + (r - 1 - j), TFT_BLACK);
-      pxRun(x + (r - 1 - i), y + h - r + j,   TFT_BLACK);
-      pxRun(x + w - r + i,   y + h - r + j,   TFT_BLACK);
-    }
+// Rounded corners. Both calls below walk the same midpoint circle (the one Adafruit_GFX and
+// TFT_eSPI draw), so an outline laid over a fill of the same box lands exactly on its edge.
+// dx[d] = how far the arc reaches sideways from the corner's centre, d rows above/below it:
+// dx[0] = r (the straight side), dx[r] = the start of the straight top/bottom edge.
+static const int32_t kMaxCornerR = 31;
+
+static int32_t roundRectRadius(int32_t w, int32_t h, int32_t r) {
+  int32_t m = (w < h ? w : h) / 2;
+  if (r > m) r = m;
+  if (r > kMaxCornerR) r = kMaxCornerR;
+  return r < 0 ? 0 : r;
+}
+
+static void cornerReach(int32_t r, int8_t *dx) {
+  for (int32_t i = 0; i <= r; i++) dx[i] = 0;
+  dx[0] = (int8_t)r;
+  int32_t f = 1 - r, ddx = 1, ddy = -2 * r, px = 0, py = r;
+  while (px < py) {
+    if (f >= 0) { py--; ddy += 2; f += ddy; }
+    px++; ddx += 2; f += ddx;
+    if (px > dx[py]) dx[py] = (int8_t)px;      // octant point (px, py)...
+    if (py > dx[px]) dx[px] = (int8_t)py;      // ...and its mirror (py, px)
   }
-  pxFlush();
+}
+
+void DisplayGFX::fillRoundRect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint16_t color) {
+  if (w <= 0 || h <= 0) return;
+  r = roundRectRadius(w, h, r);
+  if (r == 0) { fillRect(x, y, w, h, color); return; }
+  int8_t dx[kMaxCornerR + 1];
+  cornerReach(r, dx);
+  const int32_t cl = x + r, cr = x + w - 1 - r;      // corner centres, left/right
+  const int32_t ct = y + r, cb = y + h - 1 - r;      //                 top/bottom
+  // The corner pixels outside the arc are left alone: they belong to whatever is behind the box.
+  for (int32_t d = r; d >= 1; d--)
+    fillRect(cl - dx[d], ct - d, (cr + dx[d]) - (cl - dx[d]) + 1, 1, color);
+  if (cb >= ct) fillRect(x, ct, w, cb - ct + 1, color);
+  for (int32_t d = 1; d <= r; d++)
+    fillRect(cl - dx[d], cb + d, (cr + dx[d]) - (cl - dx[d]) + 1, 1, color);
 }
 
 void DisplayGFX::drawRoundRect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint16_t color) {
-  fillRect(x + r,     y,         w - 2 * r, 1, color);
-  fillRect(x + r,     y + h - 1, w - 2 * r, 1, color);
-  fillRect(x,         y + r,     1, h - 2 * r, color);
-  fillRect(x + w - 1, y + r,     1, h - 2 * r, color);
+  if (w <= 0 || h <= 0) return;
+  r = roundRectRadius(w, h, r);
+  const int32_t cl = x + r, cr = x + w - 1 - r;
+  const int32_t ct = y + r, cb = y + h - 1 - r;
+  fillRect(cl,        y,         cr - cl + 1, 1, color);   // straight edges
+  fillRect(cl,        y + h - 1, cr - cl + 1, 1, color);
+  fillRect(x,         ct,        1, cb - ct + 1, color);
+  fillRect(x + w - 1, ct,        1, cb - ct + 1, color);
+  if (r == 0) return;
+  int8_t dx[kMaxCornerR + 1];
+  cornerReach(r, dx);
+  // Row d of a corner runs from just past where the next row out stops (dx[d+1] + 1) to dx[d],
+  // so the curve is gap-free even where it runs flat.
+  for (int32_t d = 1; d <= r; d++) {
+    int32_t hi = dx[d];
+    int32_t lo = (d < r) ? dx[d + 1] + 1 : 0;
+    if (lo > hi) lo = hi;
+    int32_t n = hi - lo + 1;
+    fillRect(cl - hi, ct - d, n, 1, color);
+    fillRect(cr + lo, ct - d, n, 1, color);
+    fillRect(cl - hi, cb + d, n, 1, color);
+    fillRect(cr + lo, cb + d, n, 1, color);
+  }
 }
 
 // 8x8 glyph nearest-scaled into a pw x ph cell (the PC-XT/CGA text renderer entry point).

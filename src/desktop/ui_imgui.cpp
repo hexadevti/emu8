@@ -973,7 +973,7 @@ static void buildLoadBrowser()
           if (dbgHasDriveSlots()) {
             dbgLoadFileToSlot(sd.c_str(), g_mountSlot);      // PC: mount into A:/C:/auto, keep browser open
           } else if (dbgLoadFile(sd.c_str())) {
-            g_showLoad = false;                              // single-slot: close on success (Apple II/IIGS re-exec)
+            g_showLoad = false;                              // single-slot: close on success
           }
         }
       }

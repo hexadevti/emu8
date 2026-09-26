@@ -77,8 +77,8 @@
 // Handheld: 320x320 ST7365P (ILI9488-compatible) SPI panel, STM32F103 QWERTY keyboard over I2C,
 // microSD on its own SPI bus, PWM stereo audio, 18650 battery. The mainboard carries 8MB of PSRAM
 // but on PLAIN GPIOs (bit-bang/PIO SPI), NOT the RP2350 memory-mapped QSPI PSRAM bus -- it cannot
-// back a raw pointer, so BOARD_HAS_PSRAM is 0 and the cores that need MBs of guest RAM (IIGS,
-// PC-XT) are compiled out. Everything else fits the 520KB SRAM.
+// back a raw pointer, so BOARD_HAS_PSRAM is 0 and the PC-XT runs from a paged guest address
+// space instead (see BOARD_HAS_PCXT_CORE). Everything else fits the 520KB SRAM.
 //
 // Toolchain: earlephilhower arduino-pico, FQBN rp2040:rp2040:rpipico2 with arch=arm + os=freertos
 // (FreeRTOS SMP is ARM-only) + freq=200 (see the SPI note below). Pin numbers below are taken from
@@ -382,14 +382,9 @@
 #endif
 #endif
 
-// Cores that need megabytes of contiguous, pointer-addressable guest RAM (Apple IIGS banks, the
-// PC-XT's 1MB) only exist on boards with real PSRAM. On the others
-// they are compiled out of the platform switch entirely -- see emu8.ino and the boot splash.
-#define BOARD_HAS_BIGRAM_CORES BOARD_HAS_PSRAM
-
-// The PC-XT is the exception: on the PicoCalc's RP2350 it runs from a PAGED guest address space
-// (src/pcxt/fabgl/pcmem.h) built out of whatever SRAM is left -- a few hundred KB of
-// conventional memory instead of the full 640KB, which is plenty for DOS and most XT software.
+// The PC-XT wants a flat 1MB of guest RAM, which PSRAM boards give it. On the PicoCalc's RP2350
+// it runs from a PAGED guest address space (src/pcxt/fabgl/pcmem.h) built out of whatever SRAM
+// is left -- a few hundred KB of conventional memory instead of the full 640KB, which is plenty for DOS and most XT software.
 // Not on the RP2040 (Cortex-M0+, __ARM_ARCH_6M__): its heap leaves ~75KB, and DOS 3.3 stops with
 // "Configuration too large for memory". There it is stubbed (src/picocalc/bigram_stubs.cpp).
 #if BOARD_HAS_PSRAM || (defined(BOARD_PICOCALC) && !defined(__ARM_ARCH_6M__))

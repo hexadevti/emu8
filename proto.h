@@ -140,7 +140,9 @@ bool sdManagerBootRequested();        // this boot is the SD Manager one the spl
 #define SPLASH_KEY_SELECT (2)
 #define SPLASH_KEY_UP     (3)          // the buttons are two rows: up/down move between them
 #define SPLASH_KEY_DOWN   (4)
+#define SPLASH_KEY_BACK   (5)          // Esc: leave the menu, keep the running system
 extern volatile int8_t splashKeyEvent;
+void splashOpen();                     // Ctrl-F6: the system menu over the running emulator, no reboot
 #endif
 #if BOARD_ROM_IN_FLASH
 // romflash_picocalc.cpp: copy a ROM image (MSX BIOS, MSX or SMS cartridge) from an open SD file into a fixed window of spare flash
@@ -170,7 +172,7 @@ void setflags();
 
 // apple2_roms.cpp - system ROMs loaded from /roms/apple2 on the SD card (no longer embedded)
 bool apple2LoadRoms();            // load all 5 ROMs; false if any is missing or the wrong size
-bool apple2EnsureHdRom();         // load just /roms/apple2/hd.bin (shared with the IIGS slot 7); cached
+bool apple2EnsureHdRom();         // load just /roms/apple2/hd.bin; cached
 bool apple2RenderLoadWarning();   // renderLoop hook: draw the "ROMs not found" screen while halted
 extern bool apple2RomLoadFailed;  // set when apple2LoadRoms() failed -> the 6502 stays halted
 extern bool apple2MemAllocFailed; // set when memoryAlloc() ran out of heap -> same halt, other message
@@ -280,12 +282,6 @@ void atariSetInput(uint8_t dirBits, bool fire, bool select, bool reset);  // sti
 bool atariRenderLoadWarning();            // startup ROM-skip warning overlay (true while showing)
 void atariAudioSetup();                   // TIA audio (I2S DAC GPIO26), called from setup()
 
-// Apple IIGS core entry points (src/iigs/iigs_boot.cpp), called by the platform dispatch
-void iigsSetup();                         // alloc banks + embedded ROM 01 + reset 65C816
-void iigsLoop();                          // run the CPU (from loop())
-void iigsRenderText();                    // draw the 40-col text page to the LCD (from renderLoop)
-void iigsLoadDisk(const char *path);      // settings: load a .dsk from SD into PSRAM + reboot to boot it
-void iigsLoadHD(const char *path);        // settings: load a .po/.2mg/.hdv block image (slot 7) + reboot
 bool atariLoadSelected(const char *path); // settings: load a .a26/.bin ROM + reset the 2600
 void atariScanFiles();                    // settings: rescan SD root for *.a26 / *.bin
 

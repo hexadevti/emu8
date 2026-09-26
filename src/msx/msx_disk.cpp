@@ -30,13 +30,13 @@ static int            g_sides = 2, g_spt = 9;     // geometry derived from the i
 // ---- WD2793 state -------------------------------------------------------------------------------
 static uint8_t  fdcStatus = 0, fdcTrack = 0, fdcSector = 0, fdcData = 0, fdcCmd = 0;
 static uint8_t  fdcSide = 0, fdcCtrl = 0;
-static uint8_t  fdcBuf[512];
+static uint8_t (&fdcBuf)[512] = SHARED_TAIL_ARRAY(MSX_FDCBUF_OFF, 512);    // sharedBigBuf tail, see emu.h
 static int      fdcIdx = 0, fdcLen = 0, fdcDir = 0;   // dir: 0 idle, 1 reading, 2 writing
 static int      fdcSeekTicks = 0;                     // brief "busy" after a Type I (seek) command
 static uint32_t fdcWriteOff = 0;
 
 // Write-back: track which sectors changed so the device layer can flush them to the SD .dsk file.
-static uint8_t  g_dirty[1024];                        // 1 bit/sector -> up to 8192 sectors (4 MB)
+static uint8_t (&g_dirty)[1024] = SHARED_TAIL_ARRAY(MSX_DIRTY_OFF, 1024); // 1 bit/sector -> up to 8192 sectors (4 MB)
 static bool     g_anyDirty = false;
 static int      g_totalSec = 0;
 static void markDirty(int sec) {

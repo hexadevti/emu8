@@ -1,5 +1,4 @@
-// msx_host.cpp - desktop harness for the MSX Z80 core (fast off-device iteration), like
-// host/iigs_host.cpp. Three modes:
+// msx_host.cpp - desktop harness for the MSX Z80 core (fast off-device iteration). Three modes:
 //
 //   ./msx_host                      -> built-in self-test (deterministic instruction/flag vectors)
 //   ./msx_host selftest             -> same
@@ -139,7 +138,7 @@ static int runZex(const char* path) {
 
 // ===================== MSX boot mode (M2 - wired up once msx_machine.cpp lands) ===================
 // Forward decls of the host-side machine entry points (to be implemented in src/msx/msx_machine.cpp
-// behind a MSX_HOST guard, mirroring how iigs_host.cpp drives the IIGS map).
+// behind a MSX_HOST guard).
 #ifdef MSX_HOST_BOOT
 extern void   msxHostInit(const uint8_t* bios, int biosLen, const uint8_t* cart, int cartLen);
 extern void   msxHostRunFrames(int frames);

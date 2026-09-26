@@ -185,7 +185,7 @@ static void renderSprites(uint8_t* fb) {
   int order[32], nsp = 0;
   for (int i = 0; i < 32; i++) { if (vram[(attr + i * 4) & 0x3FFF] == 0xD0) break; order[nsp++] = i; }
 
-  static uint8_t lineMark[VDP_W];
+  uint8_t (&lineMark)[VDP_W] = SHARED_TAIL_ARRAY(MSX_LINEMARK_OFF, VDP_W);   // sharedBigBuf tail, see emu.h
   for (int py = 0; py < VDP_H; py++) {
     // Pass 1: pick the (up to 4) lowest-numbered sprites that cover this scanline; the 5th sets the
     // 5th-sprite status. The 4-per-line limit keeps the LOWEST indices (highest priority).

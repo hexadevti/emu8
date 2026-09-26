@@ -39,8 +39,8 @@ static void a2SeedIIeConfig()
   printLog("EEPROM: Apple IIe settings split from the II+ (seeded from the shared ones)");
 }
 
-// Load the Apple-only settings of the machine AppleIIe / currentPlatform name now. The IIGS shares
-// the II+'s. Called from epromSetup(), and by the IIe->II+ fallback before it saves.
+// Load the Apple-only settings of the machine AppleIIe / currentPlatform name now.
+// Called from epromSetup(), and by the IIe->II+ fallback before it saves.
 void apple2LoadMachineConfig()
 {
   a2CfgIsIIe = (currentPlatform == PLATFORM_APPLE2) && AppleIIe;
@@ -87,7 +87,8 @@ void epromSetup() {
   dacSound = EEPROM.readBool(dacSoundEEPROMaddress);
   volume = EEPROM.readChar(VolumeEEPROMaddress);
   currentPlatform = EEPROM.readChar(PlatformEEPROMaddress);
-  if (currentPlatform > PLATFORM_ZX || currentPlatform == PLATFORM_SDMANAGER)  // SD Manager is never saved
+  if (currentPlatform > PLATFORM_ZX || currentPlatform == PLATFORM_SDMANAGER   // SD Manager is never saved
+      || currentPlatform == 4)                                                    // 4 = retired platform id
     currentPlatform = PLATFORM_APPLE2;                                               // unset/garbage -> default
 
 #if defined(BOARD_DESKTOP)
@@ -98,7 +99,6 @@ void epromSetup() {
     else if (s == "c64")                     currentPlatform = PLATFORM_C64;
     else if (s == "nes")                     currentPlatform = PLATFORM_NES;
     else if (s == "atari")                   currentPlatform = PLATFORM_ATARI;
-    else if (s == "iigs")                    currentPlatform = PLATFORM_IIGS;
     else if (s == "msx")                     currentPlatform = PLATFORM_MSX;
     else if (s == "sms")                     currentPlatform = PLATFORM_SMS;
     else if (s == "pcxt" || s == "pc")       currentPlatform = PLATFORM_PCXT;
