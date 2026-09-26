@@ -20,9 +20,17 @@ SPIClass          hspi { HSPI };
 SemaphoreHandle_t gBusLock = NULL;
 SDClass           SD;                     // the emulated card (FSTYPE == SD via emu.h)
 
-// SD-card root on the host + relative-path mapper (declared in FS.h). Absolute path to the repo's
-// sdcard/ so /roms/<platform>/*.bin resolve regardless of the working directory; EMU_SD_DIR overrides.
-std::string g_sdRoot = "C:/Users/lucia/repos/emu8/sdcard";
+const char *desktopBaseDir();             // hal.cpp — directory of the .exe (trailing slash)
+
+// SD-card root on the host + relative-path mapper (declared in FS.h). Dev builds use the repo's
+// sdcard/ (absolute, passed in by CMake as EMU_DEFAULT_SD_DIR) so /roms/<platform>/*.bin resolve
+// regardless of the working directory. Portable/release builds (EMU_PORTABLE) leave it undefined and
+// use sdcard/ next to the .exe instead -- resolved in FSSetup(), after SDL is up. EMU_SD_DIR overrides.
+#if defined(EMU_DEFAULT_SD_DIR)
+std::string g_sdRoot = EMU_DEFAULT_SD_DIR;
+#else
+std::string g_sdRoot;
+#endif
 
 // The host directory backing the emulated SD card (for the native UI's file browser).
 const char *desktopSdRoot() { return g_sdRoot.c_str(); }
@@ -61,6 +69,7 @@ void FSSetup() {
   diskAttached = !HdDisk;
 
   if (const char *env = getenv("EMU_SD_DIR")) g_sdRoot = env;
+  else if (g_sdRoot.empty()) g_sdRoot = std::string(desktopBaseDir()) + "sdcard";
   ensureDir(g_sdRoot);
 
   sprintf(buf, "SD (host dir): %s", g_sdRoot.c_str());

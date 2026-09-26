@@ -83,7 +83,12 @@
 // Toolchain: earlephilhower arduino-pico, FQBN rp2040:rp2040:rpipico2 with arch=arm + os=freertos
 // (FreeRTOS SMP is ARM-only) + freq=200 (see the SPI note below). Pin numbers below are taken from
 // clockworkpi/PicoCalc's own sources (Code/picocalc_helloworld/), not from third-party writeups.
+#undef  BOARD_NAME                // arduino-pico passes its own -DBOARD_NAME on the command line
+#if defined(PICO_RP2350)
 #define BOARD_NAME            "ClockworkPi PicoCalc (RP2350)"
+#else
+#define BOARD_NAME            "ClockworkPi PicoCalc (RP2040)"
+#endif
 
 // --- capabilities (1 = present / use this path) ---
 #define BOARD_HAS_TFT_ESPI    0   // display: own DisplayGFX backend (src/picocalc/display_picocalc)

@@ -22,20 +22,25 @@ struct Z80FlagTables {
   uint8_t parityT[256]; // PF set when the byte has even parity
 };
 
-static constexpr Z80FlagTables makeTables() {
-  Z80FlagTables t{};
-  for (int i = 0; i < 256; i++) {
-    uint8_t p = (uint8_t)i;
-    p ^= p >> 4; p ^= p >> 2; p ^= p >> 1;
-    t.parityT[i] = (p & 1) ? 0 : Z80_PF;
-    uint8_t sz = (uint8_t)i & (Z80_SF | Z80_YF | Z80_XF);
-    if (i == 0) sz |= Z80_ZF;
-    t.sz53[i]  = sz;
-    t.sz53p[i] = sz | t.parityT[i];
-  }
-  return t;
+// C++11-compatible on purpose: Arduino-ESP32 2.0.x (CYD / JC4827W543) compiles with -std=gnu++11,
+// where a constexpr function cannot contain a loop. So each entry is a single-expression constexpr
+// and the 256-entry arrays are expanded from a hand-rolled index pack (std::index_sequence is C++14).
+static constexpr uint8_t z80Parity(int i) {
+  return ((i ^ (i >> 1) ^ (i >> 2) ^ (i >> 3) ^ (i >> 4) ^ (i >> 5) ^ (i >> 6) ^ (i >> 7)) & 1) ? 0 : Z80_PF;
 }
-static constexpr Z80FlagTables flagTables = makeTables();
+static constexpr uint8_t z80Sz53(int i) {
+  return (uint8_t)((i & (Z80_SF | Z80_YF | Z80_XF)) | (i == 0 ? Z80_ZF : 0));
+}
+template <int... I> struct Z80Seq {};
+template <int N, int... I> struct Z80MakeSeq : Z80MakeSeq<N - 1, N - 1, I...> {};
+template <int... I> struct Z80MakeSeq<0, I...> { typedef Z80Seq<I...> type; };
+
+template <int... I> static constexpr Z80FlagTables makeTables(Z80Seq<I...>) {
+  return Z80FlagTables{ { z80Sz53(I)... },
+                        { (uint8_t)(z80Sz53(I) | z80Parity(I))... },
+                        { z80Parity(I)... } };
+}
+static constexpr Z80FlagTables flagTables = makeTables(Z80MakeSeq<256>::type());
 static constexpr const uint8_t* sz53    = flagTables.sz53;
 static constexpr const uint8_t* sz53p   = flagTables.sz53p;
 static constexpr const uint8_t* parityT = flagTables.parityT;

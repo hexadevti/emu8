@@ -43,3 +43,6 @@ software/
 build-*/
 .picocalc-rp2350-build/
 .picocalc-rp2040-build/
+
+# Release builds (tools/release.ps1)
+dist/

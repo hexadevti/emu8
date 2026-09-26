@@ -61,6 +61,7 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
 
 ## Table of contents
 
+- [Download a release](#download-a-release)
 - [Features](#features)
 - [Boot & platform selection](#boot--platform-selection)
 - [Controls](#controls)
@@ -75,6 +76,26 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
 - [Board resources & schematics](#board-resources--schematics)
 - [Project structure](#project-structure)
 - [Credits & license](#credits--license)
+
+---
+
+## Download a release
+
+Prebuilt binaries are on the [Releases](https://github.com/hexadevti/emu8/releases) page. Each board and tool
+has its own release (tagged `<component>-v<version>`), so you only download what you need:
+
+| Release | What you get | How to install |
+| --- | --- | --- |
+| `cyd-v*` | ESP32 CYD firmware — *not published yet: the current tree overflows the plain ESP32's static RAM (DRAM) by ~7 KB* | Flash `emu8-cyd-*-merged.bin` at `0x0` (esptool or [esptool-js](https://espressif.github.io/esptool-js/)) |
+| `jc4827w543-v*` | Guition JC4827W543 (ESP32-S3) firmware | Same, merged `.bin` at `0x0` (hold BOOT, tap RST to enter download mode) |
+| `jc1060p470-v*` | Guition JC1060P470 (ESP32-P4) firmware | Same, merged `.bin` at `0x0` |
+| `picocalc-v*` | PicoCalc `.uf2` for **RP2350** (Pico 2) and **RP2040** (Pico) | Hold BOOTSEL, copy the `.uf2` onto the USB drive |
+| `desktop-v*` | Portable Windows build (SDL2) | Unzip and run `emu8.exe`; images go in `sdcard\` next to it |
+| `sdmanager-v*` | [SD Manager](#managing-the-sd-card-over-usb) web app + Python CLI | See `START-HERE.txt` in the zip |
+
+Maintainers: `tools/release.ps1 -Version X.Y.Z` builds all of these into `dist/vX.Y.Z/`, and with
+`-Publish` also creates the GitHub releases from the pushed `HEAD` (`-Targets picocalc,desktop` limits it
+to some components).
 
 ---
 

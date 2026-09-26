@@ -98,6 +98,13 @@ target_include_directories(emu8 BEFORE PRIVATE
   ${REPO})
 
 target_compile_definitions(emu8 PRIVATE BOARD_DESKTOP)
+
+# --- Emulated SD card location. Dev builds point at the repo's sdcard/ (absolute, so it is found from
+#     any working directory). -DEMU_PORTABLE=ON (release packages) uses sdcard/ next to emu8.exe. ---
+option(EMU_PORTABLE "Use sdcard/ next to the executable instead of the repo's sdcard/" OFF)
+if(NOT EMU_PORTABLE)
+  target_compile_definitions(emu8 PRIVATE EMU_DEFAULT_SD_DIR="${REPO}/sdcard")
+endif()
 # The codebase is full of Arduino-isms; keep it building (warnings on, not fatal).
 target_compile_options(emu8 PRIVATE -Wno-write-strings -Wno-narrowing)
 
