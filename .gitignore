@@ -39,7 +39,7 @@ build/*
 .m2build/
 .m3build/
 
-sdcard/
+software/
 build-*/
 .picocalc-rp2350-build/
 .picocalc-rp2040-build/
