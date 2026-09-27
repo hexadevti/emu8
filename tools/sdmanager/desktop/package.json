@@ -1,0 +1,39 @@
+{
+  "name": "emu8-sdmanager-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "emu8 SD Manager as a Windows desktop app (Electron wrapper around ../web).",
+  "author": "hexadevti",
+  "main": "main.cjs",
+  "scripts": {
+    "web": "npm --prefix ../web run build && node -e \"const fs=require('fs');fs.rmSync('web',{recursive:true,force:true});fs.cpSync('../web/dist','web',{recursive:true})\"",
+    "icon": "electron make-icon.cjs",
+    "start": "npm run web && electron .",
+    "dist": "npm run web && npm run icon && electron-builder --win portable"
+  },
+  "build": {
+    "appId": "com.hexadevti.emu8.sdmanager",
+    "productName": "emu8 SD Manager",
+    "files": [
+      "main.cjs",
+      "web/**/*",
+      "build/icon.png"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "icon": "build/icon.png"
+    },
+    "portable": {
+      "artifactName": "emu8-sdmanager-${version}-portable.exe"
+    }
+  },
+  "devDependencies": {
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}

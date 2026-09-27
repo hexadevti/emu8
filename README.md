@@ -91,7 +91,7 @@ has its own release (tagged `<component>-v<version>`), so you only download what
 | `jc1060p470-v*` | Guition JC1060P470 (ESP32-P4) firmware | Same, merged `.bin` at `0x0` |
 | `picocalc-v*` | PicoCalc `.uf2` for **RP2350** (Pico 2) and **RP2040** (Pico) | Hold BOOTSEL, copy the `.uf2` onto the USB drive |
 | `desktop-v*` | Portable Windows build (SDL2) | Unzip and run `emu8.exe`; images go in `sdcard\` next to it |
-| `sdmanager-v*` | [SD Manager](#managing-the-sd-card-over-usb) web app + Python CLI | See `START-HERE.txt` in the zip |
+| `sdmanager-v*` | [SD Manager](#managing-the-sd-card-over-usb): Windows `.exe`, plus a zip with the web app + Python CLI | Run `emu8-sdmanager-*-windows.exe` (portable); for the zip see `START-HERE.txt` |
 
 Maintainers: `tools/release.ps1 -Version X.Y.Z` builds all of these into `dist/vX.Y.Z/`, and with
 `-Publish` also creates the GitHub releases from the pushed `HEAD` (`-Targets picocalc,desktop` limits it
@@ -393,7 +393,7 @@ background task: pick **SD MGR** on the system menu (the splash) and the board r
 with no emulator running and a status screen showing whether a host is connected. To leave it,
 tap the screen on the touch boards (the board reboots to the system menu), or press **Ctrl-F6** on
 the PicoCalc and pick a system (the board reboots into it). The system you were last running stays
-selected. Two clients speak its
+selected. Three clients speak its
 protocol:
 
 - **Web app**, [`tools/sdmanager/web/`](tools/sdmanager/web/): runs in Chrome, Edge or Opera on
@@ -401,6 +401,8 @@ protocol:
   `npm run dev` in `tools/sdmanager/web` (Node.js 20.19+), open http://localhost:5180 and click
   **Connect**. It supports drag-and-drop uploads (folders too), zip downloads, reboot, a faster link
   speed on the CYD / JC4827W543, and it can be installed as an app.
+- **Windows app**, [`tools/sdmanager/desktop/`](tools/sdmanager/desktop/): the web app packaged with Electron as a
+  portable `.exe` (on the `sdmanager-v*` release, or `npm run dist` there).
 - **CLI**, [`tools/sdmanager/emu8sd.py`](tools/sdmanager/emu8sd.py) (Python + pyserial):
   `emu8sd.py --port COM5 --fast put -r ./roms/msx /roms/msx`.
 
@@ -495,7 +497,7 @@ emulated system. The top-level sketch wires them together:
 | [`src/pcxt/`](src/pcxt/) | PC-XT — fabgl i8086 machine, CGA, PC speaker, disk mount (in development) |
 | [`src/desktop/`](src/desktop/) | SDL2 desktop debug build — Arduino/FreeRTOS shims, SDL display/audio/input backends (see its [README](src/desktop/README.md)) |
 | [`host/`](host/) | Off-device debug harnesses (MSX / SMS cores on a PC, SD serial server) |
-| [`tools/sdmanager/`](tools/sdmanager/) | SD card manager over USB serial: web app, Python CLI, protocol spec + tests |
+| [`tools/sdmanager/`](tools/sdmanager/) | SD card manager over USB serial: web app, Windows app (Electron), Python CLI, protocol spec + tests |
 | [`data/`](data/) · [`resources/`](resources/) | Sample disk images / test files |
 
 ---

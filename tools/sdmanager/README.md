@@ -2,11 +2,12 @@
 
 Browse, upload, download, rename and delete files on an emu8 board's internal microSD card over USB, without taking the card out. Use it for ROMs, BIOS files and disk images.
 
-There are two clients. Both use the same [protocol](PROTOCOL.md) and talk to the server built into the firmware ([src/shared/sdserial.cpp](../../src/shared/sdserial.cpp)):
+There are three clients. All use the same [protocol](PROTOCOL.md) and talk to the server built into the firmware ([src/shared/sdserial.cpp](../../src/shared/sdserial.cpp)):
 
 | | Where it runs | Needs |
 |---|---|---|
 | **Web app** ([web/](web/)) | Chrome, Edge or Opera on Windows, macOS, Linux, ChromeOS and Android (USB OTG). Installable as an app. | Node.js to serve it (`npm run dev`), or any static HTTPS host for the built `dist/` |
+| **Windows app** ([desktop/](desktop/)) | Windows 10/11, as one portable `.exe` (the web app in Electron) | Nothing to run it; Node.js 20.19+ to build it |
 | **CLI** ([emu8sd.py](emu8sd.py)) | Windows, macOS, Linux; also for scripts | Python 3.8+ and `pip install pyserial` |
 
 Firefox and Safari have no Web Serial API. On those browsers, use the CLI.
@@ -49,6 +50,21 @@ To use it:
 The **Device log** tab shows what the board prints on the port between replies.
 
 Expected throughput, estimated from the wire speed and not yet measured on hardware: under 10 KB/s at 115200 and several tens of KB/s at 921600. Native-USB boards are limited mostly by the SD card.
+
+## Windows app
+
+[desktop/](desktop/) wraps the web app in [Electron](https://www.electronjs.org), so Windows users get a double-click `.exe` with no browser or local server. It is the same UI; Electron has no serial port chooser of its own, so **Connect** lists the ports in a dialog.
+
+```sh
+cd tools/sdmanager/desktop
+npm install        # first time only
+npm start          # builds ../web and runs it in Electron
+npm run dist       # release/emu8-sdmanager-<version>-portable.exe
+```
+
+`npm run dist` rebuilds `../web`, renders the icon from `web/public/icon.svg` and packages a portable x64 `.exe` (about 100 MB) with electron-builder. F12 opens DevTools. The exe is unsigned, so SmartScreen may warn the first time (*More info* → *Run anyway*).
+
+If `npm start` prints Node errors such as `Cannot read properties of undefined (reading 'whenReady')`, the shell has `ELECTRON_RUN_AS_NODE` set (VS Code's own terminals can); unset it first.
 
 ## CLI
 

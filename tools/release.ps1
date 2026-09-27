@@ -6,7 +6,7 @@
 #   jc1060p470-v<ver>   Guition JC1060P470 (ESP32-P4)             firmware .zip
 #   picocalc-v<ver>     ClockworkPi PicoCalc (Pico 2 RP2350 + Pico RP2040)  .uf2 files
 #   desktop-v<ver>      Windows desktop (SDL2) build              portable .zip
-#   sdmanager-v<ver>    USB-serial SD card manager (web app + CLI) .zip
+#   sdmanager-v<ver>    USB-serial SD card manager (Windows .exe + web app/CLI .zip)
 #
 #   pwsh tools/release.ps1 -Version 1.0.0                         # build everything into dist/v1.0.0
 #   pwsh tools/release.ps1 -Version 1.0.0 -Targets picocalc,desktop
@@ -196,6 +196,17 @@ function Build-SdManager {
     & npm run build;               if ($LASTEXITCODE) { throw 'vite build failed' }
   } finally { Pop-Location }
 
+  # Windows desktop app: the same web app in Electron, as one portable .exe.
+  $desk = Join-Path $repo 'tools\sdmanager\desktop'
+  $runAsNode = $env:ELECTRON_RUN_AS_NODE; Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue   # set in VS Code terminals
+  Push-Location $desk
+  try {
+    & npm ci --no-audit --no-fund; if ($LASTEXITCODE) { throw 'npm ci (desktop) failed' }
+    & npm run dist -- "-c.extraMetadata.version=$Version"; if ($LASTEXITCODE) { throw 'electron-builder failed' }
+  } finally { Pop-Location; if ($runAsNode) { $env:ELECTRON_RUN_AS_NODE = $runAsNode } }
+  $exe = Join-Path $out "emu8-sdmanager-v$Version-windows.exe"
+  Copy-Item (Join-Path $desk "release\emu8-sdmanager-$Version-portable.exe") $exe -Force
+
   $pkg = Join-Path $work 'sdmanager-pkg\emu8-sdmanager'
   if (Test-Path (Split-Path $pkg)) { Remove-Item -Recurse -Force (Split-Path $pkg) }
   New-Item -ItemType Directory -Force $pkg | Out-Null
@@ -218,7 +229,7 @@ Full docs: README.md; wire format: PROTOCOL.md.
 "@ | Set-Content -Encoding utf8 (Join-Path $pkg 'START-HERE.txt')
   $zip = Join-Path $out "emu8-sdmanager-v$Version.zip"
   New-Zip (Split-Path $pkg) $zip
-  return @($zip)
+  return @($zip, $exe)
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -279,9 +290,10 @@ Unzip anywhere and run ``emu8\emu8.exe``. The emulated SD card is the ``sdcard\`
 Manage the board's **microSD card over USB serial** without removing it — browse, upload (drag & drop, folders), download (zip), rename, delete, reboot.
 
 1. On the board pick **SD MGR** on the system menu; it reboots into the file server.
-2. Either client from ``emu8-sdmanager-v$Version.zip``:
-   - **Web app** (``web/``, Chrome / Edge / Opera): serve it on localhost, e.g. ``python -m http.server 5180 --directory web``, open http://localhost:5180 and click **Connect**. Installable as an app.
-   - **CLI** (``emu8sd.py``, Python 3.8+ with ``pyserial``): ``python emu8sd.py --port COM5 --fast put -r ./roms/msx /roms/msx``
+2. Pick a client:
+   - **Windows app** (``emu8-sdmanager-v$Version-windows.exe``): portable, no install — run it and click **Connect**. Windows SmartScreen may warn because the exe is unsigned (*More info* → *Run anyway*).
+   - From ``emu8-sdmanager-v$Version.zip``, the **Web app** (``web/``, Chrome / Edge / Opera): serve it on localhost, e.g. ``python -m http.server 5180 --directory web``, open http://localhost:5180 and click **Connect**. Installable as an app.
+   - Also in the zip, the **CLI** (``emu8sd.py``, Python 3.8+ with ``pyserial``): ``python emu8sd.py --port COM5 --fast put -r ./roms/msx /roms/msx``
 
 Works with every emu8 board (CYD, JC4827W543, JC1060P470, PicoCalc). Protocol: ``PROTOCOL.md``.
 "@ }
