@@ -68,7 +68,11 @@ function Invoke-Arduino([string]$Fqbn, [string]$Flags, [string]$BuildDir, [strin
     if ($Flags) {
       $cmd += @('--build-property', "compiler.cpp.extra_flags=$Flags", '--build-property', "compiler.c.extra_flags=$Flags")
     }
-    & arduino-cli @cmd $repo
+    # Compiler warnings go to stderr, which Windows PowerShell 5.1 turns into terminating errors under
+    # 'Stop' whenever the output is redirected; the exit code is what says whether it failed.
+    $ErrorActionPreference = 'Continue'
+    & arduino-cli @cmd $repo 2>&1 | ForEach-Object { "$_" }
+    $ErrorActionPreference = 'Stop'
     if ($LASTEXITCODE) { throw "arduino-cli compile failed for $Fqbn" }
   } finally {
     foreach ($k in $saved.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
