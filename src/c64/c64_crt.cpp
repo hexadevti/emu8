@@ -10,6 +10,12 @@
 // banking register at $DE00. Only the current bank lives in RAM (8K + 8K).
 //
 // EasyFlash and other flash/RAM carts are not supported (no $DE02 control / flash emulation).
+//
+// PicoCalc (BOARD_ROM_IN_FLASH): the RP2040 heap left beside the 64K guest RAM cannot be counted
+// on for the 16K of bank buffers, so the whole .crt is copied into the spare-flash cartridge window
+// (src/picocalc/romflash_picocalc.cpp) instead, and cartROML/cartROMH just POINT into it. A bank
+// switch is then two pointer stores -- no SD access from the CPU core mid-game either. The emulated
+// machine never writes cart ROM, so the const-cast onto XIP flash is safe.
 
 static uint16_t be16(const uint8_t *p) { return (p[0] << 8) | p[1]; }
 static uint32_t be32(const uint8_t *p) { return ((uint32_t)p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]; }
@@ -22,8 +28,13 @@ static int      cartChipCount = 0;
 static String   cartPath;
 static int      cartType = 0;       // .crt hardware type (0=generic, 5=Ocean, 19=Magic Desk...)
 static int      cartCurBank = -1;
+#if BOARD_ROM_IN_FLASH
+static const uint8_t *cartFlash = nullptr;         // the .crt image in XIP flash
+static const uint8_t  cartBlank[0x2000] = { 0 };   // a window the current bank leaves unmapped
+#else
 static File     cartFile;           // kept OPEN for fast bank streaming (re-opening per bank
                                     // took ~190ms each, stalling the CPU and crashing loaders)
+#endif
 
 #if defined(BOARD_DESKTOP)
 // Desktop debug: the currently-mapped 8K bank (-1 = no cart) and the cart's total bank count, for the
@@ -39,7 +50,11 @@ int c64CartBankCount() {
 void c64CartUnmount() {
   c64::cartActive = false;
   c64::cartExrom = c64::cartGame = true;   // both lines inactive (no cart)
+#if BOARD_ROM_IN_FLASH
+  cartFlash = nullptr;
+#else
   if (cartFile) cartFile.close();
+#endif
   cartChipCount = 0;
   cartCurBank = -1;
   cartPath = "";
@@ -49,6 +64,23 @@ void c64CartUnmount() {
 // windows. The file handle stays open across bank switches so this is a quick seek+read.
 static void loadCartBank(int bank) {
   if (bank == cartCurBank) return;          // already resident
+#if BOARD_ROM_IN_FLASH
+  // Same mapping as the streaming path below, as pointers into the flash image. A chip that does
+  // not start on its window's first byte (a 4K Ultimax chip at $F000) is pointed back by that
+  // offset; whatever flash sits in front of it reads as open bus would (XIP is read-only).
+  if (!cartFlash) return;
+  for (int i = 0; i < cartChipCount; i++) {
+    if (cartChips[i].bank != bank) continue;
+    uint16_t la = cartChips[i].loadAddr, sz = cartChips[i].size;
+    const uint8_t *p = cartFlash + cartChips[i].fileOff;
+    if (la >= 0x8000 && la <= 0x9fff) {
+      c64::cartROML = (uint8_t *)(p - (la - 0x8000));
+      if (sz > 0x2000) c64::cartROMH = (uint8_t *)(p + 0x2000);   // 16K chip spills into ROMH
+    } else if (la >= 0xa000) {
+      c64::cartROMH = (uint8_t *)(p - (la & 0x1fff));
+    }
+  }
+#else
   if (!cartFile) cartFile = FSTYPE.open(cartPath.c_str(), FILE_READ);
   if (!cartFile) { sprintf(buf, "cart: bank %d SD-OPEN FAILED", bank); printLog(buf); return; }
   for (int i = 0; i < cartChipCount; i++) {
@@ -64,6 +96,7 @@ static void loadCartBank(int bank) {
       cartFile.read(c64::cartROMH + (la & 0x1fff), n);
     }
   }
+#endif
   cartCurBank = bank;
 }
 
@@ -102,29 +135,91 @@ void c64CartBankWrite(uint16_t addr, uint8_t val) {
   }
 }
 
+// The hardware types c64CartBankWrite() actually emulates. Anything else has banking or I/O this
+// loader does not know, so the browser greys it out rather than letting it crash on start.
+static bool crtTypeSupported(uint16_t t) { return t == 0 || t == 5 || t == 15 || t == 19 || t == 32; }
+
+static uint16_t crtLastErr = C64F_OK;
+uint16_t c64CrtLastError() { return crtLastErr; }
+
+// Header check shared by the browser (c64ProbeFiles) and c64LoadCRT: everything that can be said
+// about a .crt without loading it. Leaves f positioned anywhere. Returns a C64F_* code, with the
+// hardware type in the high byte for C64F_CRT_TYPE.
+uint16_t c64CrtProbe(File &f)
+{
+  uint8_t hdr[64];
+  if (f.read(hdr, 64) != 64 || memcmp(hdr, "C64 CARTRIDGE   ", 16) != 0) return C64F_CRT_HDR;
+  uint16_t hwType = be16(hdr + 22);
+  if (!crtTypeSupported(hwType)) return C64F_CRT_TYPE | ((hwType > 255 ? 255 : hwType) << 8);
+  uint32_t hdrLen = be32(hdr + 16);
+  if (hdrLen < 64) hdrLen = 64;
+  uint8_t ch[4];
+  if (!f.seek(hdrLen) || f.read(ch, 4) != 4 || memcmp(ch, "CHIP", 4) != 0) return C64F_CRT_EMPTY;
+#if BOARD_ROM_IN_FLASH
+  if ((uint32_t)f.size() > romFlashCapacity(ROMFLASH_CART)) return C64F_CRT_BIG;
+#endif
+  return C64F_OK;
+}
+
+static bool c64LoadCRTLocked(const char *path);
+
+// Called from the settings UI (render task) and from the READY trap / boot autoload (CPU core), so
+// the whole load holds gBusLock, and a failed heap allocation (the File open) is an error instead
+// of an uncaught bad_alloc that stops the board.
 bool c64LoadCRT(const char *path)
 {
-  File f = FSTYPE.open(path, FILE_READ);
-  if (!f) { sprintf(buf, "crt: cannot open %s", path); printLog(buf); return false; }
-
-  uint8_t hdr[64];
-  if (f.read(hdr, 64) != 64 || memcmp(hdr, "C64 CARTRIDGE   ", 16) != 0) {
-    f.close(); printLog("crt: bad header"); return false;
+  const bool hadCart = c64::cartActive;
+  bool ok = false;
+  busTake();
+  try { ok = c64LoadCRTLocked(path); }
+  catch (const std::bad_alloc &) { crtLastErr = C64F_NOMEM; printLog("crt: out of heap"); }
+  busGive();
+  if (ok) {
+    c64AutoloadPending = false;   // a .prg/.d64 still queued for READY must not load over the cart
+  } else if (hadCart && !c64::cartActive) {
+    // The old cart was unmounted before the new one failed: the CPU would resume inside cart code
+    // that is gone. Reset into BASIC instead.
+    c64::c64ResetReq = true;
+    printLog("crt: previous cartridge removed -> reset to BASIC");
   }
+  return ok;
+}
+
+static bool c64LoadCRTLocked(const char *path)
+{
+  File f = FSTYPE.open(path, FILE_READ);
+  if (!f) { crtLastErr = C64F_OPEN; snprintf(buf, sizeof(buf), "crt: cannot open %.100s", path); printLog(buf); return false; }
+
+  crtLastErr = c64CrtProbe(f);
+  if (crtLastErr != C64F_OK) {
+    f.close();
+    snprintf(buf, sizeof(buf), "crt: %.80s: %s", path, c64FileProblemText(crtLastErr));
+    printLog(buf);
+    return false;
+  }
+  uint8_t hdr[64];
+  f.seek(0);
+  f.read(hdr, 64);
   uint32_t hdrLen = be32(hdr + 16);
   if (hdrLen < 64) hdrLen = 64;
   uint16_t hwType = be16(hdr + 22);
   uint8_t  exrom  = hdr[24];
   uint8_t  game   = hdr[25];
 
+#if BOARD_ROM_IN_FLASH
+  // Pull the old cart out first: its bytes in the flash window are about to be overwritten.
+  c64CartUnmount();
+  const uint32_t fileLen = f.size();
+#else
   if (!c64::cartROML) c64::cartROML = (uint8_t *)malloc(0x2000);
   if (!c64::cartROMH) c64::cartROMH = (uint8_t *)malloc(0x2000);
-  if (!c64::cartROML || !c64::cartROMH) { f.close(); printLog("crt: out of memory"); return false; }
+  if (!c64::cartROML || !c64::cartROMH) { f.close(); crtLastErr = C64F_NOMEM; printLog("crt: out of memory"); return false; }
   memset(c64::cartROML, 0, 0x2000);
   memset(c64::cartROMH, 0, 0x2000);
+  if (cartFile) cartFile.close();        // drop any previous cart's open handle
+#endif
 
   // Index the CHIP packets (record file offsets; don't load the data yet).
-  if (cartFile) cartFile.close();        // drop any previous cart's open handle
   cartPath = path;
   cartType = hwType;
   cartChipCount = 0;
@@ -140,10 +235,26 @@ bool c64LoadCRT(const char *path)
     cartChips[cartChipCount].bank     = be16(ch + 10);
     cartChips[cartChipCount].loadAddr = be16(ch + 12);
     cartChips[cartChipCount].size     = be16(ch + 14);
+#if BOARD_ROM_IN_FLASH
+    // Mapped by pointer, so a truncated last chip must not reach past the image into other flash.
+    if (chipStart + 16 + cartChips[cartChipCount].size > fileLen) break;
+#endif
     cartChipCount++;
     f.seek(chipStart + pktLen);               // advance to the next packet
   }
+#if BOARD_ROM_IN_FLASH
+  f.seek(0);
+  // Staging: the running C64 leaves under 1K of heap, so borrow 4K of its framebuffer. The
+  // settings window has the panel while this runs, and the cart's reset redraws every line anyway.
+  cartFlash = romFlashLoad(ROMFLASH_CART, f, fileLen, sharedBigBuf);   // only changed sectors are rewritten
   f.close();
+  if (!cartFlash) { cartChipCount = 0; crtLastErr = C64F_FLASH; printLog("crt: copy to flash failed"); return false; }
+  c64::cartROML = (uint8_t *)cartBlank;        // until bank 0 maps its chips over them
+  c64::cartROMH = (uint8_t *)cartBlank;
+#else
+  f.close();
+#endif
+  if (cartChipCount == 0) { c64CartUnmount(); crtLastErr = C64F_CRT_EMPTY; printLog("crt: no ROM chips"); return false; }
 
   if (hwType == 32) {                          // EasyFlash boots in ULTIMAX mode: that's the
     c64::cartExrom = true;                      // $DE02=0 reset state (EXROM high, GAME low), so

@@ -36,10 +36,11 @@ void logSetup() {
 // namespace scope, so a second translation unit including it would have cost another 49KB of
 // flash for a private copy.
 
-void printLog(String txt) {
+void printLog(const char *txt) {
     if (sdSerialActive) return;   // the SD file manager owns the port (sdserial.cpp)
-    Serial.println(txt.c_str());
+    Serial.println(txt);
 }
+void printLog(String txt) { printLog(txt.c_str()); }
 
 void printSequence(int seq) {
   for (int i = 0; i < seq; i++) {

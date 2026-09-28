@@ -46,7 +46,13 @@ static bool isBiosName(const std::string& n) {
 }
 
 static bool loadBiosFromSD() {
-  for (const char* nm : BIOS_NAMES) {
+  // A BIOS picked on the settings ROMS page goes first; the usual names are the fallback.
+  char picked[ROMSEL_SLOT_LEN] = "";
+  if (const char* o = romOverride(ROMSEL_COLECO_BIOS)) strcpy(picked, o);
+  const char* names[1 + sizeof(BIOS_NAMES) / sizeof(BIOS_NAMES[0])] = { picked };
+  for (size_t i = 0; i < sizeof(BIOS_NAMES) / sizeof(BIOS_NAMES[0]); i++) names[i + 1] = BIOS_NAMES[i];
+  for (const char* nm : names) {
+    if (!*nm) continue;
     File f = FSTYPE.open(nm, FILE_READ);
     if (!f) continue;
     int len = f.size();
@@ -305,7 +311,8 @@ bool colecoRenderLoadWarning() {
       tft.drawString("COLECO: NO BIOS FOUND", 8, 8, 2);
       tft.setTextColor(TFT_WHITE, TFT_BLACK);
       tft.drawString("Put the 8K ColecoVision BIOS on the SD card", 8, 40, 1);
-      tft.drawString("as /roms/coleco/coleco.rom and restart.", 8, 56, 1);
+      tft.drawString("as /roms/coleco/coleco.rom and restart,", 8, 56, 1);
+      tft.drawString("or pick one in SETTINGS (Ctrl-F1) > ROMS.", 8, 72, 1);
     } else {
       tft.drawString("COLECO: NO CARTRIDGE LOADED", 8, 8, 2);
       tft.setTextColor(TFT_WHITE, TFT_BLACK);

@@ -43,12 +43,14 @@ static inline uint8_t* pcAllocFast(size_t n) {                 // internal SRAM 
 // BIOS::init + pcBiosFont8x8 call this to fetch what used to be the embedded `biosrom` array.
 uint8_t* pcxtReadBiosRom(size_t* outLen) {
   *outLen = 0;
+  char path[ROMSEL_SLOT_LEN];
+  strcpy(path, romPath(ROMSEL_PCXT_BIOS));   // ROMS page pick, else /roms/pcxt/bios.bin
   busTake();
-  File f = FSTYPE.open("/roms/pcxt/bios.bin", FILE_READ);
+  File f = FSTYPE.open(path, FILE_READ);
   int len = f ? (int)f.size() : 0;
   if (!f || len <= 0 || len > 64 * 1024) {
     if (f) f.close(); busGive();
-    printLog("PC-XT: /roms/pcxt/bios.bin missing or bad size - cannot boot");
+    sprintf(buf, "PC-XT: %s missing or bad size - cannot boot", path); printLog(buf);
     return nullptr;
   }
   uint8_t* b = (uint8_t*)ps_malloc(len);
@@ -60,7 +62,7 @@ uint8_t* pcxtReadBiosRom(size_t* outLen) {
   busGive();
   if (rd != len) { free(b); return nullptr; }
   *outLen = (size_t)len;
-  sprintf(buf, "PC-XT: BIOS loaded from /roms/pcxt/bios.bin (%d bytes)", len); printLog(buf);
+  sprintf(buf, "PC-XT: BIOS loaded from %s (%d bytes)", path, len); printLog(buf);
   return b;
 }
 
@@ -68,13 +70,15 @@ uint8_t* pcxtReadBiosRom(size_t* outLen) {
 // Paged layout: read the BIOS straight into its (contiguous) guest ROM pages, no second copy.
 size_t pcxtReadBiosRomInto(uint8_t* dst, size_t maxLen) {
   if (!dst) return 0;
+  char path[ROMSEL_SLOT_LEN];
+  strcpy(path, romPath(ROMSEL_PCXT_BIOS));   // ROMS page pick, else /roms/pcxt/bios.bin
   busTake();
-  File f = FSTYPE.open("/roms/pcxt/bios.bin", FILE_READ);
+  File f = FSTYPE.open(path, FILE_READ);
   size_t len = f ? (size_t)f.size() : 0;
   if (!f || len == 0 || len > maxLen) {
     if (f) f.close(); busGive();
-    sprintf(buf, "PC-XT: /roms/pcxt/bios.bin missing or bad size (%u, max %u) - cannot boot",
-            (unsigned)len, (unsigned)maxLen);
+    sprintf(buf, "PC-XT: %s missing or bad size (%u, max %u) - cannot boot",
+            path, (unsigned)len, (unsigned)maxLen);
     printLog(buf);
     return 0;
   }
@@ -83,7 +87,7 @@ size_t pcxtReadBiosRomInto(uint8_t* dst, size_t maxLen) {
   f.close();
   busGive();
   if (rd != len) return 0;
-  sprintf(buf, "PC-XT: BIOS loaded from /roms/pcxt/bios.bin (%u bytes)", (unsigned)len); printLog(buf);
+  sprintf(buf, "PC-XT: BIOS loaded from %s (%u bytes)", path, (unsigned)len); printLog(buf);
   return len;
 }
 

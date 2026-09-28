@@ -234,14 +234,16 @@ int16_t DisplayGFX::drawString(const char *s, int32_t x, int32_t y, uint8_t font
   return (int16_t)bw;
 }
 
-// Headless capture: dump the 320x240 framebuffer to a PPM (EMU_DUMP_DIR + EMU_DUMP_EVERY) and exit
+// Headless capture: dump the 320x240 framebuffer to a PPM (EMU_DUMP_DIR + EMU_DUMP_EVERY, from
+// EMU_DUMP_FROM) and exit
 // after EMU_QUIT_AT frames, so the desktop build can be driven offline for diagnosis.
 static void desktopFrameHook(const uint16_t *fb) {
   static long frame = -1; frame++;
   static const char *dir   = getenv("EMU_DUMP_DIR");
   static int   every = []{ const char*s=getenv("EMU_DUMP_EVERY"); return s?atoi(s):0; }();
   static long  quitAt= []{ const char*s=getenv("EMU_QUIT_AT");   return s?atol(s):0L; }();
-  if (fb && dir && every > 0 && (frame % every) == 0) {
+  static long  from  = []{ const char*s=getenv("EMU_DUMP_FROM"); return s?atol(s):0L; }();
+  if (fb && dir && every > 0 && frame >= from && (frame % every) == 0) {
     char path[512]; snprintf(path, sizeof(path), "%s/f%06ld.ppm", dir, frame);
     FILE *f = fopen(path, "wb");
     if (f) {

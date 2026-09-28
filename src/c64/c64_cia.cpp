@@ -28,6 +28,16 @@ void ciaReset() {
 }
 
 unsigned char cia1Read(uint8_t reg) {
+#if defined(BOARD_DESKTOP)   // TEMP: EMU_CIALOG=1 logs each distinct joystick-port read site
+  static bool lg = getenv("EMU_CIALOG") != nullptr;
+  if (lg && reg <= 1) {
+    static uint32_t seen[512]; static int ns = 0;
+    uint32_t key = ((uint32_t)lastPC << 8) | (reg << 4) | (ddra1 == 0xff) << 1 | (ddrb1 == 0);
+    bool f = false; for (int i = 0; i < ns; i++) if (seen[i] == key) { f = true; break; }
+    if (!f && ns < 512) { seen[ns++] = key;
+      fprintf(stderr, "CIA1 rd $DC0%d pc=%04x pra=%02x prb=%02x ddra=%02x ddrb=%02x\n", reg, lastPC, pra1, prb1, ddra1, ddrb1); }
+  }
+#endif
   switch (reg) {
     case 0x00: return kbReadCols(prb1);   // PRA: reverse keyboard scan + joystick port 2
     case 0x01: return kbReadRows(pra1);   // PRB: keyboard rows for the selected columns
@@ -61,7 +71,7 @@ void cia1Write(uint8_t reg, uint8_t val) {
   }
 }
 
-void ciaTick(int cpuCycles) {
+C64_HOT void ciaTick(int cpuCycles) {
   if (cra1 & 0x01) {                     // CIA1 Timer A -> IRQ
     int32_t t = (int32_t)ta1 - cpuCycles;
     while (t < 0) {

@@ -12,7 +12,7 @@
 // II+ on every boot. A IIe never writes to it, so `const` puts it in flash where it costs no RAM
 // at all and the XIP cache carries the hot $D000-$FFFF reads.
 //
-// main.bin has no equivalent here on purpose: a IIe never reads it (read8 reaches it from the II+
+// iiplus.bin has no equivalent here on purpose: a IIe never reads it (read8 reaches it from the II+
 // side of `if (AppleIIe)` only), so it is simply not loaded rather than moved.
 const unsigned char apple2IIeRomFlash[16696] = {
   0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,

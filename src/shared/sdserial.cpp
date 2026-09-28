@@ -558,6 +558,9 @@ void sdSerialPoll() {
     int c = portRead();
     if (c < 0) break;
     lastByteMs = now;
+#if defined(BOARD_PICOCALC)
+    if (rxState == 0) picocalcLoaderCmdFeed((uint8_t)c);   // deploy-picocalc.ps1's reboot request
+#endif
     feed((uint8_t)c);
   }
   now = nowMs();

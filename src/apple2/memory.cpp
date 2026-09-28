@@ -38,7 +38,7 @@ static unsigned char* a2Alloc(size_t n, const char* what) {
 // What has to be left over AFTER the map for a IIe to actually reach a BASIC prompt: the system
 // ROMs it still loads from SD once FSSetup has run, plus FSSetup's own buffers (~5K measured), the
 // disk/HD image scan, the file-browser vectors and the FreeRTOS task stacks that setup() creates
-// below us. A IIe does NOT load main.bin -- read8 reaches it only from the II+ side of
+// below us. A IIe does NOT load iiplus.bin -- read8 reaches it only from the II+ side of
 // `if (AppleIIe)` -- so the ROM half of this is iie.bin plus 1072 bytes of card ROM, and where
 // BOARD_A2_ROM_IN_FLASH holds iie.bin in flash it is the 1072 bytes alone.
 //

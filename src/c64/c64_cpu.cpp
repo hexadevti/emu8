@@ -8,6 +8,9 @@
 #include "../desktop/debug_bridge.h"   // desktop debugger hooks (breakpoints/step/heat); no-op on device
 #endif
 #include "c64.h"
+#if defined(BOARD_PICOCALC)
+#include <hardware/timer.h>   // timer_hw (C64_NOW_US)
+#endif
 
 namespace c64 {
 
@@ -63,7 +66,7 @@ uint32_t lastCpuCycleCount = 0;
 uint32_t diffCpuCycleCount = 0;
 
 //high nibble SR flags, low nibble address mode
-const unsigned char flags65c02[] PROGMEM = {
+C64_HOT_DATA const unsigned char flags65c02[] = {
 	//X0               X1                X2                    X3    X4                    X5                X6                X7    X8              X9                 XA                  XB    XC                    XD                XE                XF   
 	  AD_IMP,          AD_INDX,          UNDF,                 UNDF, FL_Z | AD_ZPG,/*e*/   FL_ZN | AD_ZPG,   FL_ZNC | AD_ZPG,  UNDF, AD_IMP,         FL_ZN | AD_IMM,    FL_ZNC | AD_A,      UNDF, FL_Z | AD_ABS,/*e*/   FL_ZN | AD_ABS,   FL_ZNC | AD_ABS,  UNDF, // 0X
 	  AD_REL,          FL_ZN | AD_INDY,  FL_ZN | AD_IZPG/*e*/, UNDF, FL_Z | AD_ZPG,/*e*/   FL_ZN | AD_ZPGX,  FL_ZNC | AD_ZPGX, UNDF, AD_IMP,         FL_ZN | AD_ABSY,   FL_ZN | AD_A,/*e*/  UNDF, FL_Z | AD_ABS,/*e*/   FL_ZN | AD_ABSX,  FL_ZNC | AD_ABSX, UNDF, // 1X
@@ -83,7 +86,7 @@ const unsigned char flags65c02[] PROGMEM = {
 	  AD_REL,          FL_ALL | AD_INDY, FL_ALL | AD_IZPG/*e*/,UNDF, UNDF,                 FL_ALL | AD_ZPGX, FL_ZN | AD_ZPGX,  UNDF, AD_IMP,         FL_ALL | AD_ABSY,  FL_ZN | AD_IMP,/*e*/UNDF, UNDF,                 FL_ALL | AD_ABSX, FL_ZN | AD_ABSX,  UNDF  // FX
 };
 
-const unsigned char flags6502[] PROGMEM = {
+C64_HOT_DATA const unsigned char flags6502[] = {
   AD_IMP, AD_INDX, UNDF, UNDF, UNDF, FL_ZN | AD_ZPG, FL_ZNC | AD_ZPG, UNDF, AD_IMP, FL_ZN | AD_IMM, FL_ZNC | AD_A, UNDF, UNDF, FL_ZN | AD_ABS, FL_ZNC | AD_ABS, UNDF,
   AD_REL, FL_ZN | AD_INDY, UNDF, UNDF, UNDF, FL_ZN | AD_ZPGX, FL_ZNC | AD_ZPGX, UNDF, AD_IMP, FL_ZN | AD_ABSY, UNDF, UNDF, UNDF, FL_ZN | AD_ABSX, FL_ZNC | AD_ABSX, UNDF,
   AD_ABS, FL_ZN | AD_INDX, UNDF, UNDF, FL_Z | AD_ZPG, FL_ZN | AD_ZPG, FL_ZNC | AD_ZPG, UNDF, AD_IMP, FL_ZN | AD_IMM, FL_ZNC | AD_A, UNDF, FL_Z | AD_ABS, FL_ZN | AD_ABS, FL_ZNC | AD_ABS, UNDF,
@@ -102,7 +105,7 @@ const unsigned char flags6502[] PROGMEM = {
   AD_REL, FL_ALL | AD_INDY, UNDF, UNDF, UNDF, FL_ALL | AD_ZPGX, FL_ZN | AD_ZPGX, UNDF, AD_IMP, FL_ALL | AD_ABSY, UNDF, UNDF, UNDF, FL_ALL | AD_ABSX, FL_ZN | AD_ABSX, UNDF
 };
 
-const int cycles[] PROGMEM = { 7, 6, 1, 0, 0, 3, 5, 0, 3, 2, 2, 0, 0, 4, 6, 0, 
+C64_HOT_DATA const uint8_t cycles[] = {   // uint8_t: every entry is 0..7 7, 6, 1, 0, 0, 3, 5, 0, 3, 2, 2, 0, 0, 4, 6, 0, 
                        2, 5, 1, 0, 0, 4, 6, 0, 2, 4, 0, 0, 0, 4, 7, 0, 
                        6, 6, 1, 0, 3, 3, 5, 0, 4, 2, 2, 0, 4, 4, 6, 0, 
                        2, 5, 1, 0, 0, 4, 6, 0, 2, 4, 0, 0, 0, 4, 7, 0, 
@@ -141,21 +144,21 @@ void cpuReset()
 }
 
 // Hardware interrupt entry. Pushes PC + status (B clear) and vectors through $FFFE/$FFFA.
-void cpuIRQ() {
+C64_HOT void cpuIRQ() {
   push16(PC);
   push8((SR & ~SR_BRK) | SR_FIXED_BITS);
   SR |= SR_INT;
   PC = read16(0xFFFE);
 }
 
-void cpuNMI() {
+C64_HOT void cpuNMI() {
   push16(PC);
   push8((SR & ~SR_BRK) | SR_FIXED_BITS);
   SR |= SR_INT;
   PC = read16(0xFFFA);
 }
 
-void setflags() {
+C64_HOT void setflags() {
   // Mask out affected flags
   switch (opflags & 0xF0) {
     case  FL_ZN: SR &= 0x7D; break; // 1010 0000   0111 1101
@@ -178,16 +181,16 @@ void setflags() {
 }
 
 // Stack functions
-void push16(unsigned short pushval) {
+C64_HOT void push16(unsigned short pushval) {
   write8(STP_BASE + (STP--), (pushval >> 8) & 0xFF);
   write8(STP_BASE + (STP--), pushval & 0xFF);
 }
 
-void push8(unsigned char pushval) {
+C64_HOT void push8(unsigned char pushval) {
   write8(STP_BASE + (STP--), pushval);
 }
 
-unsigned short pull16() {
+C64_HOT unsigned short pull16() {
   STP++;
 	value16 = read8(STP_BASE + (STP));
   //printAddrVal("pull16", STP_BASE + (STP),value16);
@@ -196,7 +199,7 @@ unsigned short pull16() {
   //printAddrVal("pull16-2", STP_BASE + (STP),value16);
 	return value16;}
 
-unsigned char pull8() {
+C64_HOT unsigned char pull8() {
   return read8(STP_BASE + (++STP));
 }
 
@@ -210,9 +213,48 @@ unsigned char pull8() {
 // On a relocating load (SA=0, e.g. LOAD"name",8) BASIC supplies the address; on a
 // non-relocating load (SA<>0, e.g. LOAD"*",8,1) the file's own load address is used.
 // Returns true when handled (PC set to the RTS target).
+// Throughput meter: the live 6510 speed (c64MeasuredMhz, shown in the settings title) and the share
+// of the CPU core spent rendering VIC lines, logged about once a second. Restarted after a pause so
+// the time the settings window was open does not count against it.
+static uint32_t perfCyc = 0, perfVicUs = 0, perfLastMs = 0;
+
+// The 1 MHz pacer and the render timer read the clock on the hot path. micros() is out of line and
+// lives in flash; on the PicoCalc the free-running 1 MHz timer register is the same value as one
+// load (see CPU_NOW_US in src/apple2/cpu.cpp).
+#if defined(BOARD_PICOCALC)
+#define C64_NOW_US() (timer_hw->timerawl)
+#else
+#define C64_NOW_US() ((uint32_t)micros())
+#endif
+#define C64_US_PER_CYC_Q16 66517u
+static uint32_t vicStolenCyc = 0;   // VIC DMA cycles not yet charged to the pacer   // 65536 / 0.985248 MHz (PAL): real microseconds per 6510 cycle
+
+static void perfSample() {
+  uint32_t now = millis();
+  if (perfLastMs == 0) { perfLastMs = now; perfCyc = 0; perfVicUs = 0; return; }
+  uint32_t ms = now - perfLastMs;
+  if (ms < 1000) return;
+  c64MeasuredMhz = (float)perfCyc / ((float)ms * 1000.0f);
+  snprintf(buf, sizeof(buf), "C64: 6510 %.2f MHz (%d%% of PAL 0.985), VIC render %d%% of CPU core",
+           c64MeasuredMhz, (int)(c64MeasuredMhz * 100.0f / 0.985f + 0.5f),
+           (int)((uint64_t)perfVicUs / 10 / ms));
+  printLog(buf);
+  perfLastMs = now; perfCyc = 0; perfVicUs = 0;
+}
+
 static bool c64LoadTrap() {
   if (read8(0xBA) != 8) return false;        // not device 8 -> let the ROM handle it
   if (!::c64DiskMounted()) return false;     // nothing mounted -> ROM ("device not present")
+  // Only when $F49E really is the KERNAL: a game running with the KERNAL banked out ($01=$35) or
+  // an Ultimax cart has its own code there, and $BA keeps its 8 after any disk load.
+  if (bankERAM || (cartActive && cartExrom && !cartGame)) return false;
+
+  if (A != 0) {                              // VERIFY: report a match, never write RAM
+    write8(0x90, 0x00);
+    SR &= ~SR_CARRY;
+    PC = pull16() + 1;
+    return true;
+  }
 
   write8(0xC3, X);                           // replicate $F49E: STX $C3 / STY $C4 (MEMUSS)
   write8(0xC4, Y);
@@ -249,7 +291,7 @@ static bool c64LoadTrap() {
   return true;
 }
 
-void cpuLoop() {
+C64_HOT void cpuLoop() {
   write8(0, 0x2f);
   write8(1, 0x37);
   write8(0x8004, 0);
@@ -275,6 +317,7 @@ void cpuLoop() {
       if (dbgStepReq > 0) { dbgStepReq--; break; }   // debugger single-step: run exactly one instruction
 #endif
       delay(100);
+      perfLastMs = 0;                                // restart the speed meter after the pause
     }
 #if defined(BOARD_DESKTOP)
     g_dbgBreakArmed = true;                          // re-arm after passing the breakpoint check once
@@ -337,6 +380,25 @@ void cpuLoop() {
 
     if (!Fast1MhzSpeed)
     {
+#if defined(BOARD_PICOCALC) || defined(BOARD_DESKTOP)
+      // Pace against real time at the PAL clock, the way the Apple II core does (src/apple2/cpu.cpp).
+      // The ESP branch below charges each emulated cycle 300 host cycles, which is ~1 MHz only on a
+      // 240 MHz ESP32: on the 200 MHz RP2040 it capped the 6510 at 0.67 MHz, and since each
+      // instruction was measured on its own, the time spent rendering a VIC line was never won back
+      // -- about 0.5 MHz in practice. Here the target is a running total, so a slow instruction or a
+      // rendered line is caught up on by the ones after it (re-anchored if it falls 100 ms behind).
+      static uint32_t paceBaseUs = 0, paceTargetUs = 0, paceAccQ16 = 0;
+      paceAccQ16 += ((uint32_t)instrCycles + vicStolenCyc) * C64_US_PER_CYC_Q16;
+      vicStolenCyc = 0;
+      paceTargetUs += paceAccQ16 >> 16;
+      paceAccQ16 &= 0xFFFF;
+      int32_t paceLag = (int32_t)(C64_NOW_US() - paceBaseUs - paceTargetUs);
+      if (paceLag > 100000)
+        { paceBaseUs = C64_NOW_US(); paceTargetUs = 0; paceAccQ16 = 0; }
+      else
+        while (paceLag < 0)
+          paceLag = (int32_t)(C64_NOW_US() - paceBaseUs - paceTargetUs);
+#else
       int cycleCount = cycles[opcode];
       cpuCycleCount = ESP.getCycleCount();
       uint32_t expectedDiff = 300;
@@ -349,6 +411,7 @@ void cpuLoop() {
       }
 
       lastCpuCycleCount = cpuCycleCount;
+#endif
     }
     opflags = mos65c02 ? flags65c02[opcode] : flags6502[opcode];
 
@@ -1095,10 +1158,30 @@ void cpuLoop() {
     // A PAL scanline is ~63 cycles; render each line as the raster crosses it.
     ciaTick(instrCycles);
     rasterCycleAcc += instrCycles;
+    perfCyc += instrCycles;
     while (rasterCycleAcc >= 63) {
       rasterCycleAcc -= 63;
+#if defined(BOARD_PICOCALC) || defined(BOARD_DESKTOP)
+      // Cycles the VIC steals from the 6510 on this line (40 on a badline, 2 per sprite). The
+      // CPU is halted for them, but the raster, the CIA timers and real time all move on, so a
+      // frame holds ~19000 CPU cycles, not 19656 -- less host work, and timer-driven music keeps
+      // its tempo relative to the raster. The pacer is charged for them on the next instruction.
+      uint8_t st = nextRasterline();  // raster counter + raster IRQ (cheap)
+      if (st) {
+        ciaTick(st);
+        rasterCycleAcc += st;
+        perfCyc += st;
+        vicStolenCyc += st;
+      }
+#else
       nextRasterline();               // raster counter + raster IRQ (cheap)
-      if (bitmap) drawRasterline();   // full VIC render only when a framebuffer exists
+#endif
+      if (bitmap) {                   // full VIC render only when a framebuffer exists
+        uint32_t t0 = C64_NOW_US();
+        drawRasterline();
+        perfVicUs += C64_NOW_US() - t0;
+      }
+      if (rasterline == 0) perfSample();   // once a frame is plenty for a 1 s meter
     }
   }
 }

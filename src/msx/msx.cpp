@@ -24,13 +24,33 @@
 static uint16_t* msxScratch = nullptr;
 static uint8_t*  g_cartBuf  = nullptr;   // device cartridge image (PSRAM); freed on reload
 static uint8_t*  g_diskBuf  = nullptr;   // mounted .dsk image (PSRAM); freed on remount
-static uint8_t*  g_diskRomBuf = nullptr;  // /roms/msx/diskrom.rom (16K), loaded once on first mount
+static const uint8_t* g_diskRomBuf = nullptr;  // /roms/msx/diskrom.rom (16K; flash on the PicoCalc), loaded once
 static File      g_diskFile;             // persistent r+ handle for SD write-back of dirty sectors
 static bool      g_diskFileOpen = false;
+static bool      g_diskWritable = false; // g_diskFile opened r+ (else read-only: streamed writes fail = WP)
+static bool      g_diskNeedsFlush = false;   // streamed writes since the last g_diskFile.flush()
+static String    g_diskPath;             // the mounted .dsk (settings UNMOUNT button), "" = none
+static String    g_cartPath;             // the loaded .rom/.mx1 cartridge (settings UNMOUNT button), "" = none
+
+// Streamed .dsk (no RAM copy): the FDC reads/writes each 512-byte sector straight from the SD file.
+// Called on core 1 from inside the Z80 FDC access; the bus lock serializes it against core 0.
+static bool msxDiskStreamIO(uint32_t off, uint8_t* b, bool write) {
+  if (!g_diskFileOpen || (write && !g_diskWritable)) return false;
+  busTake();
+  bool ok = g_diskFile.seek(off);
+  if (ok) ok = write ? (g_diskFile.write(b, 512) == 512) : (g_diskFile.read(b, 512) == 512);
+  busGive();
+  if (ok && write) g_diskNeedsFlush = true;      // committed once per frame by msxDiskFlush
+  return ok;
+}
 
 // Drain up to maxSectors dirty sectors of the mounted .dsk back to the SD file (called from msxLoop,
 // core 1; the bus lock serializes the SD access against the touch reads on core 0).
 static void msxDiskFlush(int maxSectors) {
+  if (g_diskFileOpen && g_diskNeedsFlush) {        // streamed image: sectors are already in the file
+    g_diskNeedsFlush = false;
+    busTake(); g_diskFile.flush(); busGive();
+  }
   if (!g_diskFileOpen || !msx::diskHasDirty()) return;
   busTake();
   for (int i = 0; i < maxSectors; i++) {
@@ -46,8 +66,8 @@ static void msxDiskFlush(int maxSectors) {
 static void msxDiskClose() {              // flush everything left + close the write-back handle
   if (!g_diskFileOpen) return;
   while (msx::diskHasDirty()) msxDiskFlush(64);
-  g_diskFile.close();
-  g_diskFileOpen = false;
+  busTake(); g_diskFile.close(); busGive();
+  g_diskFileOpen = false; g_diskWritable = false; g_diskNeedsFlush = false;
 }
 volatile bool msxResetReq = false;   // set by the desktop debugger (debug_bridge.cpp) for an in-process reset
 static const int M_W = 256, M_H = 192, M_OX = (320 - 256) / 2;
@@ -72,9 +92,14 @@ static bool loadBiosFromSD() {
   // /roms/msx/ first (the C-BIOS dumped from the old embedded array now lives there), then the
   // legacy SD-root names for a user-supplied BIOS. There is no embedded fallback any more - the
   // ROMs live on the card (see msx_cbios.cpp / the roms-to-sd refactor).
-  const char* names[] = { "/roms/msx/cbios.rom", "/roms/msx/msxbios.rom",
+  // A BIOS picked on the settings ROMS page (romOverride) goes ahead of all of them; if it will
+  // not load, the usual names are still tried.
+  char picked[ROMSEL_SLOT_LEN] = "";
+  if (const char* o = romOverride(ROMSEL_MSX_BIOS)) strcpy(picked, o);
+  const char* names[] = { picked, "/roms/msx/cbios.rom", "/roms/msx/msxbios.rom",
                           "/MSXBIOS.ROM", "/msxbios.rom", "/MSX.ROM", "/msx.rom", "/CBIOS_MAIN_MSX1.ROM" };
   for (const char* nm : names) {
+    if (!*nm) continue;
     File f = FSTYPE.open(nm, FILE_READ);
     if (!f) continue;
     int len = f.size();
@@ -152,6 +177,7 @@ void msxSetup() {
   loadBiosFromSD();                              // SD BIOS, else embedded C-BIOS, else biosLen=0 (warning)
 
   msx::machineWire();
+  if (msxDiskRom) msxApplyDiskRom();             // DISK ROM: ON -> Disk BASIC in slot 2 even without a .dsk
   msx::machineReset();
 
   // auto-load the saved cartridge (.rom/.mx1) or mount the saved disk (.dsk) on boot
@@ -331,7 +357,9 @@ static bool msxLoadCart(const char* path) {
 #endif
   msxCartLoadImage(1, cb, len);
   msxDiskClose();                                  // flush + close any disk write-back handle
-  msx::diskSetRom(nullptr, 0); msx::diskEject();   // disk off when a cart is inserted
+  msx::diskEject(); g_diskPath = "";               // disk off when a cart is inserted
+  g_cartPath = path;
+  if (!msxDiskRom) msx::diskSetRom(nullptr, 0);    // ...and its ROM, unless DISK ROM is ON
   if (g_diskBuf) { free(g_diskBuf); g_diskBuf = nullptr; }
   sprintf(buf, "MSX: cart %s (%dK) loaded", path, len / 1024);
   printLog(buf);
@@ -343,9 +371,18 @@ static bool msxLoadCart(const char* path) {
 // if it is missing or the wrong size.
 static bool msxEnsureDiskRom() {
   if (g_diskRomBuf) return true;
-  File f = FSTYPE.open("/roms/msx/diskrom.rom", FILE_READ);
-  if (!f) { printLog("MSX: /roms/msx/diskrom.rom missing - cannot mount disk"); return false; }
+  const char* path = romPath(ROMSEL_MSX_DISK);     // settings ROMS page pick, else /roms/msx/diskrom.rom
+  File f = FSTYPE.open(path, FILE_READ);
+  if (!f) { sprintf(buf, "MSX: %.80s missing - cannot mount disk", path); printLog(buf); return false; }
   if ((int)f.size() != 0x4000) { f.close(); printLog("MSX: diskrom.rom wrong size (want 16K)"); return false; }
+#if BOARD_ROM_IN_FLASH
+  // PicoCalc: no PSRAM, so the disk ROM gets its own 16K flash window next to the BIOS (a cartridge
+  // can stay loaded beside it). Read through XIP like the BIOS.
+  const uint8_t* fb = romFlashLoad(ROMFLASH_DISKROM, f, 0x4000); f.close();
+  if (!fb) { printLog("MSX: disk ROM flash load failed"); return false; }
+  g_diskRomBuf = fb;
+  return true;
+#endif
   uint8_t* b = (uint8_t*)ps_malloc(0x4000);
   if (!b) { f.close(); printLog("MSX: diskrom alloc failed"); return false; }
   int got = f.read(b, 0x4000); f.close();
@@ -354,31 +391,102 @@ static bool msxEnsureDiskRom() {
   return true;
 }
 
-// Mount a .dsk image (read into PSRAM) and install the C-DISK ROM in slot 2 (and remove any cart).
-static bool msxMountDiskImage(const char* path) {
+// Mount a .dsk image and install the disk ROM in slot 2 (and remove any cart). The image is read into
+// PSRAM when there is room; otherwise (always on the PicoCalc: a 720K disk is ~6x its free heap) it
+// is streamed -- each sector the FDC touches is read from / written to the SD file directly.
+// keepCart: a live disk swap (settings MOUNT) leaves the running cartridge alone.
+static bool msxMountDiskImage(const char* path, bool keepCart = false) {
   if (!msxEnsureDiskRom()) return false;            // need the disk ROM (from SD) before mounting
   File f = FSTYPE.open(path, FILE_READ);
   if (!f) { sprintf(buf, "MSX: cannot open %s", path); printLog(buf); return false; }
   int len = f.size();
   if (len <= 0 || len > 2 * 1024 * 1024) { f.close(); printLog("MSX: disk size out of range"); return false; }
+  msx::diskEject();                                 // drop the old image before freeing / closing it
+  msxDiskClose();                                   // flush + close any previous write-back handle
   if (g_diskBuf) { free(g_diskBuf); g_diskBuf = nullptr; }
-  uint8_t* db = (uint8_t*)ps_malloc(len);
-  if (!db) { f.close(); printLog("MSX: disk malloc failed"); return false; }
-  int rd = 0;
-  while (rd < len) { int n = f.read(db + rd, (len - rd > 8192) ? 8192 : (len - rd)); if (n <= 0) break; rd += n; }
+  uint8_t* db = nullptr;
+#if !BOARD_ROM_IN_FLASH
+  db = (uint8_t*)ps_malloc(len);
+  if (db) {
+    int rd = 0;
+    while (rd < len) { int n = f.read(db + rd, (len - rd > 8192) ? 8192 : (len - rd)); if (n <= 0) break; rd += n; }
+    if (rd != len) { free(db); f.close(); printLog("MSX: disk read short"); return false; }
+  }
+#endif
   f.close();
-  if (rd != len) { free(db); printLog("MSX: disk read short"); return false; }
-  g_diskBuf = db;
-  msxCartEject(1);                                  // cart off when a disk is mounted
-  if (g_cartBuf) { free(g_cartBuf); g_cartBuf = nullptr; }
-  msx::diskSetRom(g_diskRomBuf, 0x4000);            // install the HB3600 disk ROM (from /roms/msx) in slot 2
-  msx::diskSetImage(db, len);
-  msxDiskClose();                                   // close any previous write-back handle
   g_diskFile = FSTYPE.open(path, "r+");             // random-access read/write (no truncate) for write-back
+  g_diskWritable = (bool)g_diskFile;
+  if (!g_diskWritable && !db) g_diskFile = FSTYPE.open(path, FILE_READ);   // streamed, read-only
   g_diskFileOpen = (bool)g_diskFile;
-  sprintf(buf, "MSX: disk %s (%dK) mounted%s", path, len / 1024, g_diskFileOpen ? "" : " (write-back off)");
+  if (!db && !g_diskFileOpen) { sprintf(buf, "MSX: cannot open %s", path); printLog(buf); return false; }
+  g_diskBuf = db;
+  if (!keepCart) {
+    msxCartEject(1);                                // cart off when a disk is booted
+    if (g_cartBuf) { free(g_cartBuf); g_cartBuf = nullptr; }
+    g_cartPath = "";
+  }
+  msx::diskSetRom(g_diskRomBuf, 0x4000);            // install the disk ROM (from /roms/msx) in slot 2
+  if (db) msx::diskSetImage(db, len);
+  else    msx::diskSetStream(len, msxDiskStreamIO);
+  g_diskPath = path;
+  sprintf(buf, "MSX: disk %s (%dK) mounted%s%s", path, len / 1024, db ? "" : ", streamed from SD",
+          g_diskWritable ? "" : " (read-only)");
   printLog(buf);
   return true;
+}
+
+// Settings MOUNT / MOUNT & RUN for a .dsk. MOUNT swaps the disk in the running machine (a multi-disk
+// game asking for disk 2; a cart keeps running) -- unless the disk ROM was not in slot 2 yet, in which
+// case the BIOS never initialised Disk BASIC and only a reset makes the drive usable. MOUNT & RUN
+// boots the disk (cart out, reset), same as LOAD & RUN.
+bool msxMountDisk(const char* path, bool run) {
+  if (run) return msxLoadSelected(path);
+  const bool romWasIn = msx::diskRomInstalled();
+  if (!msxMountDiskImage(path, true)) return false;
+  selectedMsxFileName = path;
+  if (!romWasIn) { printLog("MSX: disk ROM was not active - resetting"); msxResetReq = true; }
+  return true;
+}
+
+// Settings UNMOUNT: flush and eject the disk, no reset. The disk ROM stays in slot 2 until the next
+// reset (the running Disk BASIC has hooks into it); the drive just reports no disk.
+void msxUnmountDisk() {
+  msx::diskEject();
+  msxDiskClose();
+  if (g_diskBuf) { free(g_diskBuf); g_diskBuf = nullptr; }
+  sprintf(buf, "MSX: disk %s unmounted", g_diskPath.c_str()); printLog(buf);
+  if (selectedMsxFileName == g_diskPath) selectedMsxFileName = "";   // do not auto-mount it on boot
+  g_diskPath = "";
+}
+
+// Settings UNMOUNT for the loaded cartridge: pull it out of slot 1 and reset (the running program
+// lived in it), back to BASIC -- or Disk BASIC if the disk ROM is in.
+void msxUnloadCart() {
+  msxCartEject(1);
+  if (g_cartBuf) { free(g_cartBuf); g_cartBuf = nullptr; }
+  sprintf(buf, "MSX: cart %s unmounted", g_cartPath.c_str()); printLog(buf);
+  if (selectedMsxFileName == g_cartPath) selectedMsxFileName = "";   // do not auto-load it on boot
+  g_cartPath = "";
+  msxResetReq = true;
+}
+
+bool msxCartLoaded(const char* path) {
+  return g_cartPath.length() && path && g_cartPath == path;
+}
+
+bool msxDiskMounted(const char* path) {
+  return msx::diskPresent() && g_diskPath.length() && path && g_diskPath == path;
+}
+
+// Settings DISK ROM toggle: ON installs the disk ROM in slot 2 (Disk BASIC, alongside a cart or with
+// no disk); AUTO removes it again unless a .dsk is mounted. The machine resets so the BIOS rescans slots.
+void msxApplyDiskRom() {
+  if (msxDiskRom) {
+    if (msxEnsureDiskRom()) msx::diskSetRom(g_diskRomBuf, 0x4000);
+  } else if (!msx::diskPresent()) {
+    msx::diskSetRom(nullptr, 0);
+  }
+  msxResetReq = true;
 }
 
 bool msxLoadSelected(const char* path) {
@@ -397,16 +505,18 @@ void msxScanFiles() { loadMsxFilesSync(); }
 bool msxRenderLoadWarning() {
   if (msx::biosLen == 0) {                       // hard error: cannot boot
     static bool drawn = false;
+    if (OptionsWindow) { drawn = false; return false; }   // SETTINGS > ROMS can pick a BIOS; redraw on close
     if (!drawn) {
       tft.fillScreen(TFT_BLACK);
       tft.setTextDatum(TL_DATUM);
       tft.setTextColor(tft.color565(220, 40, 40), TFT_BLACK); tft.drawString("MSX: NO BIOS FOUND", 8, 8, 2);
       tft.setTextColor(TFT_WHITE, TFT_BLACK); tft.drawString("Put MSXBIOS.ROM (32K) on the SD card root,", 8, 40, 1);
-      tft.drawString("or embed C-BIOS (see src/msx/msx_cbios.cpp).", 8, 56, 1);
+      tft.drawString("or embed C-BIOS (see src/msx/msx_cbios.cpp),", 8, 56, 1);
+      tft.drawString("or pick one in SETTINGS (Ctrl-F1) > ROMS.", 8, 72, 1);
       tft.setTextDatum(MC_DATUM);
       drawn = true;
     }
-    return true;                                 // hold this screen forever (nothing to run)
+    return true;                                 // hold this screen (nothing to run) until SETTINGS opens
   }
   return false;   // embedded/SD BIOS present -> boot straight into it (no overlay)
 }

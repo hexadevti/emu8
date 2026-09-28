@@ -180,8 +180,10 @@ void fbScan(FileBrowser &b)
     fbScanBody(b);
   } catch (const std::bad_alloc &) {
     if (fbHoldsBus) { fbHoldsBus = false; busGive(); }   // died mid-walk: release the card
-    b.out->clear();
-    sprintf(buf, "%s: OUT OF HEAP during scan -- list left empty (free heap=%u)", b.tag,
+    std::vector<std::string>().swap(*b.out);             // give the partial list's heap back
+    // Keep the go-up entry, or a folder too big to list would strand the user inside it.
+    if (b.dir != "/") { try { b.out->push_back(".."); } catch (const std::bad_alloc &) {} }
+    sprintf(buf, "%s: OUT OF HEAP during scan -- only \"..\" kept (free heap=%u)", b.tag,
             (unsigned)ESP.getFreeHeap());
     printLog(buf);
   }

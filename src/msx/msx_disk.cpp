@@ -11,7 +11,8 @@
 //   $7FFC side select (bit0)     $7FFD drive/motor control
 // Sectors come from the mounted .dsk (a linear logical-sector image): a Read/Write Sector command
 // transfers 512 bytes through the data register with the DRQ status bit, like real hardware. Writes
-// update the in-memory image (persist for the session; not yet flushed back to SD). Arduino-free.
+// update the in-memory image and are queued for write-back to SD -- or, for a streamed image
+// (diskSetStream, no RAM copy), go straight through the device layer's sector callback. Arduino-free.
 
 #include "msx_disk.h"
 #include <string.h>
@@ -25,6 +26,7 @@ static const uint8_t* g_diskRom = nullptr;
 static int            g_diskRomLen = 0;
 static uint8_t*       g_diskImg = nullptr;
 static int            g_diskImgSize = 0;
+static DiskSectorIO   g_io = nullptr;             // streamed image: sectors via the device layer (no RAM copy)
 static int            g_sides = 2, g_spt = 9;     // geometry derived from the image size
 
 // ---- WD2793 state -------------------------------------------------------------------------------
@@ -78,14 +80,19 @@ static uint8_t ifaceStatus() {
 
 void diskSetRom(const uint8_t* rom, int len) { g_diskRom = rom; g_diskRomLen = len; fdcStatus = 0; fdcDir = 0; }
 void diskSetImage(uint8_t* img, int size) {
+  g_io = nullptr;
   g_diskImg = img; g_diskImgSize = size;
   g_totalSec = size / 512;
   g_spt = 9;
   g_sides = (g_totalSec > 80 * 9) ? 2 : 1;       // 720K = 2 sides, 360K = 1
   memset(g_dirty, 0, sizeof(g_dirty)); g_anyDirty = false;
 }
-void diskEject() { g_diskImg = nullptr; g_diskImgSize = 0; fdcDir = 0; memset(g_dirty, 0, sizeof(g_dirty)); g_anyDirty = false; }
-bool diskPresent() { return g_diskImg != nullptr; }
+void diskSetStream(int size, DiskSectorIO io) {
+  diskSetImage(nullptr, size);                    // same geometry; no in-memory image, nothing to write back
+  g_io = io;
+}
+void diskEject() { g_diskImg = nullptr; g_io = nullptr; g_diskImgSize = 0; fdcDir = 0; memset(g_dirty, 0, sizeof(g_dirty)); g_anyDirty = false; }
+bool diskPresent() { return g_diskImg != nullptr || g_io != nullptr; }
 bool diskRomInstalled() { return g_diskRom != nullptr; }
 
 static uint32_t sectorOffset(int track, int side, int sector) {
@@ -107,8 +114,9 @@ static void fdcCommand(uint8_t v) {
   }
   if (hi == 0x80 || hi == 0x90) {                                             // Read Sector
     uint32_t off = sectorOffset(fdcTrack, fdcSide, fdcSector);
-    if (!g_diskImg || off + 512 > (uint32_t)g_diskImgSize) { fdcStatus = 0x10; fdcDir = 0; return; }  // RNF
-    memcpy(fdcBuf, g_diskImg + off, 512);
+    if (!diskPresent() || off + 512 > (uint32_t)g_diskImgSize) { fdcStatus = 0x10; fdcDir = 0; return; }  // RNF
+    if (g_diskImg) memcpy(fdcBuf, g_diskImg + off, 512);
+    else if (!g_io(off, fdcBuf, false)) { fdcStatus = 0x10; fdcDir = 0; return; }       // SD read failed: RNF
     fdcIdx = 0; fdcLen = 512; fdcDir = 1; fdcStatus = 0x03;                    // BUSY | DRQ
 #if defined(BOARD_DESKTOP)
     dbgDiskRead(fdcTrack, fdcSide * g_spt + (fdcSector - 1));                  // heat map: ring=cylinder, wedge=side*spt+sector
@@ -117,7 +125,7 @@ static void fdcCommand(uint8_t v) {
   }
   if (hi == 0xA0 || hi == 0xB0) {                                             // Write Sector
     uint32_t off = sectorOffset(fdcTrack, fdcSide, fdcSector);
-    if (!g_diskImg || off + 512 > (uint32_t)g_diskImgSize) { fdcStatus = 0x10; fdcDir = 0; return; }
+    if (!diskPresent() || off + 512 > (uint32_t)g_diskImgSize) { fdcStatus = 0x10; fdcDir = 0; return; }
     fdcWriteOff = off; fdcIdx = 0; fdcLen = 512; fdcDir = 2; fdcStatus = 0x03; // BUSY | DRQ
 #if defined(BOARD_DESKTOP)
     dbgDiskWrite(fdcTrack, fdcSide * g_spt + (fdcSector - 1));                 // heat map (write channel = red)
@@ -168,11 +176,13 @@ void diskWrite(uint16_t addr, uint8_t v) {
       if (fdcDir == 2) {
         if (fdcIdx < fdcLen) fdcBuf[fdcIdx++] = v;
         if (fdcIdx >= fdcLen) {
+          fdcStatus = 0; fdcDir = 0;
           if (g_diskImg && fdcWriteOff + 512 <= (uint32_t)g_diskImgSize) {
             memcpy(g_diskImg + fdcWriteOff, fdcBuf, 512);                     // update the in-memory image
             markDirty((int)(fdcWriteOff / 512));                              // queue this sector for SD write-back
+          } else if (g_io && !g_io(fdcWriteOff, fdcBuf, true)) {
+            fdcStatus = 0x40;                                                 // streamed write failed: write-protect
           }
-          fdcStatus = 0; fdcDir = 0;
         }
       }
       break;
@@ -206,7 +216,7 @@ uint8_t diskPeek(uint16_t addr) {
 // wedges = side*spt + sector). 720K = 80, 360K = 40; 0 when nothing is mounted.
 int diskTrackCount() {
   int per = g_sides * g_spt;
-  return (g_diskImg && per > 0) ? (g_totalSec / per) : 0;
+  return (diskPresent() && per > 0) ? (g_totalSec / per) : 0;
 }
 #endif
 

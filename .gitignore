@@ -43,6 +43,10 @@ software/
 build-*/
 .picocalc-rp2350-build/
 .picocalc-rp2040-build/
+tools/.cache/
+
+# Local SD card test files (ROMs, cartridges)
+sdcard/
 
 # Release builds (tools/release.ps1)
 dist/

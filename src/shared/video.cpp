@@ -655,6 +655,7 @@ void renderLoop(void *pvParameters)
     // MSX startup overlay: hard error if no BIOS, or a brief "C-BIOS = no Disk BASIC" note.
     if (currentPlatform == PLATFORM_MSX && msxRenderLoadWarning())
     {
+      oskPoll();                       // a tap opens SETTINGS (ROMS) over the no-BIOS screen
       Vertical_blankingOn_Off = true;
       vTaskDelay(pdMS_TO_TICKS(20));
       continue;
@@ -689,9 +690,20 @@ void renderLoop(void *pvParameters)
       continue;
     }
 
+    // C64 startup overlay: no BASIC/KERNAL/CHARGEN. Yields to SETTINGS (ROMS) like the others.
+    if (currentPlatform == PLATFORM_C64 && c64RenderLoadWarning())
+    {
+      oskPoll();
+      Vertical_blankingOn_Off = true;
+      vTaskDelay(pdMS_TO_TICKS(20));
+      continue;
+    }
+
     // Apple II startup overlay: held when the system ROMs are missing from /roms/apple2 on the SD card.
+    // Touch is polled so a tap opens SETTINGS (ROMS), which the overlay yields to.
     if (currentPlatform == PLATFORM_APPLE2 && apple2RenderLoadWarning())
     {
+      oskPoll();
       Vertical_blankingOn_Off = true;
       vTaskDelay(pdMS_TO_TICKS(20));
       continue;

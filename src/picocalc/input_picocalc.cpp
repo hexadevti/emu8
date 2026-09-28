@@ -45,6 +45,7 @@
 //   Ctrl-F3                  -> HID_KEY_F11  CPU reset (Apple II); PAUSE/NMI on SMS
 //   Ctrl-F6 / Ctrl-Shift-F3  -> the system selection menu (reboots only if another system is picked)
 //   Ctrl-Shift-F1            -> reboot the Pico itself (see the note at the handler)
+//   Ctrl-Shift-Up            -> reboot into the UF2 Loader menu (loader_picocalc.cpp)
 // Bare keys pass through:
 //   F1, F2 -> HID_KEY_F1, HID_KEY_F2
 //   F3     -> HID_KEY_F12    hard reset (SMS / PC-XT) -- unchanged
@@ -282,6 +283,9 @@ static void handleEvent(uint8_t state, uint8_t code)
       delay(50);
       ESP.restart();
     }
+    // Ctrl-Shift-Up -> the UF2 Loader's SD menu, to pick another app (loader_picocalc.cpp). The
+    // keyboard sends Shift-Up as Page Up, the same way Shift-F1..F5 arrive as F6..F10.
+    if (code == PCK_PAGE_UP || (code == PCK_UP && g_shiftHeld)) picocalcRebootToLoaderMenu("Ctrl-Shift-Up: rebooting to the UF2 Loader menu");
     if (code == PCK_F1) { tapHid(HID_KEY_F10); return; }              // settings menu
 
     // Ctrl-F6 -> the system selection menu, drawn over the paused emulator (splashOpen in
@@ -537,6 +541,7 @@ bool picocalcWaitAnyKey(uint32_t timeoutMs)
 // Called once per frame from DisplayGFX::flush().
 void picocalcPumpInput()
 {
+  picocalcCheckLoaderCmd();
   if (!g_kbdReady) picocalcInputSetup();
 
   // We booted against a dead mainboard (the wait in setup() timed out), so the SD never

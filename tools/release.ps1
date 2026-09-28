@@ -275,9 +275,11 @@ Firmware for the **ClockworkPi PicoCalc**. Pick the file that matches the Pico m
 | ``emu8-picocalc-rp2350-v$Version.uf2`` | Raspberry Pi **Pico 2** (RP2350) — all systems, including the experimental PC-XT |
 | ``emu8-picocalc-rp2040-v$Version.uf2`` | Raspberry Pi **Pico** (RP2040) — no PC-XT (not enough RAM) |
 
-**Flash:** hold **BOOTSEL** while powering on / plugging USB in, then copy the ``.uf2`` onto the ``RPI-RP2`` / ``RP2350`` drive. The board reboots into emu8 by itself.
+**Install:**
+- With the [UF2 Loader](https://github.com/pelrun/uf2loader) (v2.4.1+): copy the ``.uf2`` into ``pico1-apps`` (Pico) or ``pico2-apps`` (Pico 2) on the SD card and pick it in the loader menu. From emu8, ``Ctrl``+``Shift``+``Up`` goes back to that menu.
+- Without it: hold **BOOTSEL** while powering on / plugging USB in, then copy the ``.uf2`` onto the ``RPI-RP2`` / ``RP2350`` drive. The board reboots into emu8 by itself. (This replaces the loader, if you had one.)
 
-Controls: ``Ctrl``+``F1`` settings, ``Ctrl``+``F6`` system menu, ``Ctrl``+``Shift``+``F1`` reboot — see the [README](https://github.com/hexadevti/emu8#controls).
+Controls: ``Ctrl``+``F1`` settings, ``Ctrl``+``F6`` system menu, ``Ctrl``+``Shift``+``Up`` UF2 Loader menu — see the [README](https://github.com/hexadevti/emu8#controls).
 
 $SDCARD
 "@ }

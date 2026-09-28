@@ -293,8 +293,7 @@
         "-NoProfile",
         "-ExecutionPolicy", "Bypass",
         "-File", "${workspaceFolder}/tools/flash-rp2040.ps1",
-        "-Uf2", "${workspaceFolder}/build-picocalc-rp2040/emu8.ino.uf2",
-        "-Port", "COM5"
+        "-Uf2", "${workspaceFolder}/build-picocalc-rp2040/emu8.ino.uf2"
       ],
       "problemMatcher": [],
       "presentation": { "reveal": "always", "panel": "shared", "clear": true }
@@ -303,6 +302,44 @@
       // Build the RP2040 firmware, then flash it through the BOOTSEL drive (the two tasks above).
       "label": "Build & Flash RP2040",
       "dependsOn": ["Arduino: Build (PicoCalc RP2040)", "Flash RP2040"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      // With the UF2 Loader installed, BOOTSEL flashing (above) would overwrite its boot hook. This
+      // copies the build into pico1-apps/emu8-dev.uf2 on the SD card instead: emu8 on COM5 is sent
+      // into the loader menu (1234-baud touch), whose USB drive mode mounts the card; the script
+      // copies and ejects, then pick the file in the menu. See tools/deploy-picocalc.ps1.
+      "label": "Deploy RP2040 (SD)",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", "${workspaceFolder}/tools/deploy-picocalc.ps1",
+        "-Uf2", "${workspaceFolder}/build-picocalc-rp2040/emu8.ino.uf2"
+      ],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      // The UF2 Loader goes into "USB is connected" (SD card as a PC drive) whenever the PC is on
+      // its micro-USB, and ignores the keys until the PC lets go. This lets go, without a deploy.
+      "label": "PicoCalc: Release SD card to loader menu",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", "${workspaceFolder}/tools/deploy-picocalc.ps1",
+        "-ReleaseOnly"
+      ],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Build & Deploy RP2040 (SD)",
+      "dependsOn": ["Arduino: Build (PicoCalc RP2040)", "Deploy RP2040 (SD)"],
       "dependsOrder": "sequence",
       "problemMatcher": []
     },

@@ -108,6 +108,7 @@ String selectedAtariFileName; // currently-loaded Atari 2600 ROM (for the settin
 String selectedMsxFileName;   // currently-loaded MSX1 .rom cartridge (for the settings file browser)
 bool msxFast = false;         // MSX: NORMAL (paced to 3.58 MHz) by default; true = FAST (uncapped)
 float msxMeasuredMhz = 0.0f;  // MSX: measured uncapped Z80 speed from the boot benchmark
+bool msxDiskRom = false;      // MSX: AUTO (disk ROM only with a .dsk) by default; true = always installed
 String selectedSmsFileName;   // currently-loaded SMS .sms/.bin ROM (for the settings file browser)
 bool smsFast = false;         // SMS: NORMAL (paced to 3.58 MHz) by default; true = FAST (uncapped)
 float smsMeasuredMhz = 0.0f;  // SMS: measured uncapped Z80 speed from the boot benchmark
@@ -121,6 +122,7 @@ String selectedPcFileName;    // PCXT A: floppy image (for the settings file bro
 String selectedPcHdFileName;  // PCXT C: hard-disk image (auto-mounted on boot)
 bool pcFast = false;          // PCXT: reserved speed flag
 float pcMeasuredMhz = 0.0f;   // PCXT: measured 8086 equivalent speed from the boot benchmark
+float c64MeasuredMhz = 0.0f;   // C64: live measured 6510 speed (updated in cpuLoop)
 float appleMeasuredMhz = 0.0f; // Apple II: live measured 6502 speed (updated in cpuLoop)
 float appleClockMhz = 1.0f;    // Apple II: target clock when throttled (1.0 = stock 1 MHz; UI-adjustable on desktop)
 volatile int  g_pcSpkFreq = 0;     // PCXT PC-speaker: PIT ch2 frequency (Hz)

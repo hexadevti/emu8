@@ -61,7 +61,13 @@ static const char* const ROM_NAMES[] = { "/roms/zxspectrum/spec48.rom", "/roms/z
                                          "/roms/zx/spec48.rom", "/roms/zx/48.rom", "/spec48.rom", "/48.rom" };
 
 static bool loadRomFromSD() {
-  for (const char* nm : ROM_NAMES) {
+  // A ROM picked on the settings ROMS page goes first; the usual names are the fallback.
+  char picked[ROMSEL_SLOT_LEN] = "";
+  if (const char* o = romOverride(ROMSEL_ZX_ROM)) strcpy(picked, o);
+  const char* names[1 + sizeof(ROM_NAMES) / sizeof(ROM_NAMES[0])] = { picked };
+  for (size_t i = 0; i < sizeof(ROM_NAMES) / sizeof(ROM_NAMES[0]); i++) names[i + 1] = ROM_NAMES[i];
+  for (const char* nm : names) {
+    if (!*nm) continue;
     File f = FSTYPE.open(nm, FILE_READ);
     if (!f) continue;
     int len = f.size();
@@ -465,7 +471,8 @@ bool zxRenderLoadWarning() {
     tft.drawString("ZX SPECTRUM: NO ROM FOUND", 8, 8, 2);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.drawString("Put the 16K Spectrum 48K ROM on the SD card", 8, 40, 1);
-    tft.drawString("as /roms/zxspectrum/spec48.rom and restart.", 8, 56, 1);
+    tft.drawString("as /roms/zxspectrum/spec48.rom and restart,", 8, 56, 1);
+    tft.drawString("or pick one in SETTINGS (Ctrl-F1) > ROMS.", 8, 72, 1);
     tft.setTextDatum(MC_DATUM);
     drawn = true;
   }

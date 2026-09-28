@@ -157,7 +157,14 @@ extern char keymem;
 #define JOY_MAX 1024
 #define JOY_MID 512
 #define JOY_MIN 0
-#define EEPROM_SIZE 1792   // ... + the ColecoVision cartridge name (1280) + the ZX Spectrum file name (1408) + the Apple IIe's own disk/HD names (1536, 1664)
+#if defined(BOARD_PICOCALC)
+// arduino-pico mirrors the whole EEPROM area in heap, and the RP2040 has none to spare (the C64 file
+// browser runs out with 832 bytes more), so here the picked system ROMs live in a flash sector of
+// their own, read in place (romsel.cpp) -- the EEPROM stops at the Apple IIe HD name.
+#define EEPROM_SIZE 1792
+#else
+#define EEPROM_SIZE 2624   // ... + the ColecoVision cartridge name (1280) + the ZX Spectrum file name (1408) + the Apple IIe's own disk/HD names (1536, 1664) + the picked system ROMs (1792, ROMSEL_COUNT x ROMSEL_SLOT_LEN)
+#endif
 extern int fnSelected;
 extern int joystickCycles0;
 extern int joystickCycles1;
@@ -243,6 +250,7 @@ extern int logLineCount;
 #define ColecoSpeedEEPROMaddress 16    // Coleco: 1 = FAST (uncapped) / 0 = NORMAL (paced to 3.58 MHz)
 #define NesSpeedEEPROMaddress 17       // NES: 1 = FAST (uncapped) / 0 = NORMAL (paced ~60fps/1.79MHz)
 #define ZxSpeedEEPROMaddress 21        // ZX Spectrum: 1 = FAST (uncapped) / 0 = NORMAL (paced to 3.5 MHz)
+#define MsxDiskRomEEPROMaddress 22     // MSX: 1 = disk ROM always in slot 2 / 0 = AUTO (only with a .dsk mounted)
 // The Apple IIe keeps its own copy of the Apple-only settings (DEVICE, SPEED, the disk and HD
 // images); the addresses above without "IIe" are the II+'s. See eprom.cpp.
 #define IIeHdDiskEEPROMaddress 18
@@ -262,6 +270,23 @@ extern int logLineCount;
 #define ZxFileNameEEPROMaddress 1408   // ZX Spectrum: last-loaded .sna/.z80/.tap/.tzx (auto-loaded on boot)
 #define IIeDiskFileNameEEPROMaddress 1536  // Apple IIe: last .dsk (the II+'s is DiskFileNameEEPROMaddress)
 #define IIeHdFileNameEEPROMaddress 1664    // Apple IIe: last HD image (the II+'s is HdFileNameEEPROMaddress)
+// User-picked system ROM files (settings menu -> ROMS; src/shared/romsel.cpp). One short slot per
+// ROM a platform needs; an empty slot means the default /roms/<platform>/ name.
+#define RomSelEEPROMaddress 1792
+#define ROMSEL_SLOT_LEN 64                // length byte + up to 63 chars of path
+enum RomSlot : uint8_t {
+  ROMSEL_A2_IIPLUS, ROMSEL_A2_IIE, ROMSEL_A2_DISKII, ROMSEL_A2_MOUSE, ROMSEL_A2_HD,
+  ROMSEL_C64_BASIC, ROMSEL_C64_KERNAL, ROMSEL_C64_CHARGEN,
+  ROMSEL_MSX_BIOS, ROMSEL_MSX_DISK, ROMSEL_COLECO_BIOS, ROMSEL_ZX_ROM, ROMSEL_PCXT_BIOS,
+  ROMSEL_COUNT                            // 13 x 64 = 832 bytes: 1792..2623
+};
+struct RomSlotInfo {
+  uint8_t platform;                       // Platform the ROM belongs to
+  int8_t  a2Model;                        // Apple II only: 0 = II+, 1 = IIe, -1 = both
+  const char *label;                      // shown on the ROMS page
+  const char *defPath;                    // loaded when the user has picked nothing
+  uint32_t minSize, maxSize;              // accepted file sizes, checked when picking
+};
 extern String selectedDiskFileName;
 extern String selectedHdFileName;
 extern String selectedC64FileName;
@@ -270,6 +295,7 @@ extern String selectedAtariFileName; // Atari: currently-loaded ROM (settings fi
 extern String selectedMsxFileName;   // MSX: currently-loaded .rom cartridge (settings file browser marker)
 extern bool msxFast;                 // MSX: true = run uncapped (FAST), false = pace to real 3.58 MHz
 extern float msxMeasuredMhz;         // MSX: measured uncapped Z80 speed (one-time boot benchmark)
+extern bool msxDiskRom;              // MSX: true = disk ROM always installed (Disk BASIC), false = only with a .dsk
 extern String selectedSmsFileName;   // SMS: currently-loaded .sms/.bin ROM (settings file browser marker)
 extern bool smsFast;                 // SMS: true = run uncapped (FAST), false = pace to real 3.58 MHz
 extern float smsMeasuredMhz;         // SMS: measured uncapped Z80 speed (one-time boot benchmark)
@@ -283,6 +309,7 @@ extern String selectedPcFileName;    // PCXT: A: floppy image (settings file bro
 extern String selectedPcHdFileName;  // PCXT: C: hard-disk image (auto-mounted on boot)
 extern bool pcFast;                  // PCXT: reserved (8086 always runs uncapped for now)
 extern float pcMeasuredMhz;          // PCXT: measured 8086 equivalent speed (one-time boot benchmark)
+extern float c64MeasuredMhz;         // C64: live measured 6510 speed (updated in cpuLoop)
 extern float appleMeasuredMhz;       // Apple II: live measured 6502 speed (updated in cpuLoop)
 extern float appleClockMhz;          // Apple II: target clock when throttled (1.0 = stock 1 MHz)
 extern volatile int  g_pcSpkFreq;    // PCXT PC-speaker: PIT ch2 frequency (Hz), read by the audio ISR

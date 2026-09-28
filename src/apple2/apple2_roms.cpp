@@ -62,15 +62,15 @@ static const unsigned char* a2LoadFile(const char* path, int len) {
 // safe to call more than once.
 bool apple2EnsureHdRom() {
   if (hdrom) return true;
-  hdrom = a2LoadFile("/roms/apple2/hd.bin", 256);
+  hdrom = a2LoadFile(romPath(ROMSEL_A2_HD), 256);
   return hdrom != nullptr;
 }
 
 // Load all five Apple II system ROMs from /roms/apple2. Returns false (and sets apple2RomLoadFailed)
 // if any is missing or the wrong size; the caller must then NOT run the 6502 - read8 indexes these
 // pointers directly and would dereference null.
-// One attempt at the set for whichever machine is selected. main.bin and iie.bin are the two
-// system ROMs and they are alternatives, not a pair: read8 reaches main.bin from exactly one place
+// One attempt at the set for whichever machine is selected. iiplus.bin and iie.bin are the two
+// system ROMs and they are alternatives, not a pair: read8 reaches iiplus.bin from exactly one place
 // (memory.cpp, `return rom[address - 0xd000]`) and that line is the else of `if (AppleIIe)`, while
 // a IIe takes $D000-$FFFF -- and $C100-$CFFF, and the $C800 space -- from iie.bin. So each machine
 // loads one of them and never the other: 13360 heap bytes for a II+, and for a IIe either 17768 or,
@@ -83,15 +83,16 @@ static bool a2LoadRomSet() {
   // iie.bin on the card cannot stop a IIe from booting.
   if (AppleIIe) appleiieenhancedc0ff = apple2IIeRomFlash;
 #else
-  if (AppleIIe) appleiieenhancedc0ff = a2LoadFile("/roms/apple2/iie.bin",  16696);
+  if (AppleIIe) appleiieenhancedc0ff = a2LoadFile(romPath(ROMSEL_A2_IIE), 16696);
 #endif
-  if (!AppleIIe) rom                 = a2LoadFile("/roms/apple2/main.bin", 0x3000);
-  diskiicardrom = a2LoadFile("/roms/apple2/diskii.bin", 560);
-  mousecardrom  = a2LoadFile("/roms/apple2/mouse.bin",  256);
+  // Paths come from romPath(): the file picked on the settings ROMS page, else /roms/apple2/<name>.
+  if (!AppleIIe) rom                 = a2LoadFile(romPath(ROMSEL_A2_IIPLUS), 0x3000);
+  diskiicardrom = a2LoadFile(romPath(ROMSEL_A2_DISKII), 560);
+  mousecardrom  = a2LoadFile(romPath(ROMSEL_A2_MOUSE),  256);
   apple2EnsureHdRom();                                     // hdrom ($C700)
   sprintf(buf, "Apple II: %s ROM set loaded, %u bytes free (%s not read by this machine)",
           AppleIIe ? "IIe" : "II+", (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
-          AppleIIe ? "main.bin" : "iie.bin");
+          AppleIIe ? "iiplus.bin" : "iie.bin");
   printLog(buf);
   return (AppleIIe ? appleiieenhancedc0ff != nullptr : rom != nullptr)
          && diskiicardrom && mousecardrom && hdrom;
@@ -135,6 +136,9 @@ bool apple2LoadRoms() {
 bool apple2RenderLoadWarning() {
   if (!apple2RomLoadFailed && !apple2MemAllocFailed) return false;
   static bool drawn = false;
+  // A missing ROM is fixed from SETTINGS -> ROMS, so yield to the settings window (Ctrl-F1 / F10 /
+  // tap) and redraw once it closes. Out of RAM has nothing there to fix: keep holding the screen.
+  if (OptionsWindow && !apple2MemAllocFailed) { drawn = false; return false; }
   if (!drawn) {
     tft.fillScreen(TFT_BLACK);
     tft.setTextDatum(TL_DATUM);
@@ -152,9 +156,10 @@ bool apple2RenderLoadWarning() {
       tft.setTextColor(tft.color565(220, 40, 40), TFT_BLACK);
       tft.drawString("Apple II: ROMs NOT FOUND", 8, 8, 2);
       tft.setTextColor(TFT_WHITE, TFT_BLACK);
-      tft.drawString("Put main.bin, iie.bin, diskii.bin,", 8, 40, 1);
+      tft.drawString("Put iiplus.bin, iie.bin, diskii.bin,", 8, 40, 1);
       tft.drawString("mouse.bin, hd.bin in /roms/apple2", 8, 54, 1);
-      tft.drawString("on the SD card.", 8, 68, 1);
+      tft.drawString("on the SD card, or pick other files", 8, 68, 1);
+      tft.drawString("in SETTINGS (Ctrl-F1) > ROMS.", 8, 82, 1);
     }
     tft.setTextDatum(MC_DATUM);
     drawn = true;

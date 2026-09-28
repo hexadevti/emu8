@@ -31,34 +31,63 @@ bool badlinecond;
 bool vertborder;
 uint8_t lineC64map;
 
+// True while the current line has a sprite on it. Only then does the background renderer record
+// its foreground pixels in spritedatacoll (drawSprites needs them for $D01F collisions and the
+// sprite-behind-background priority); on every other line that per-pixel bookkeeping is skipped.
+static bool vicColl = false;
 
+// Set by read8 the first time the program reads a collision register ($D01E/$D01F); cleared on
+// reset. Until then, and while the collision IRQs ($D01A bits 1-2) are off, nothing can observe a
+// collision, so a skipped frame does not have to render its sprite lines just to detect them.
+bool vicCollPolled = false;
+
+
+// The two pixel writers every background mode ends in. They work on local pointers and write the
+// indices back once: the framebuffer is uint8_t, and a store through a byte pointer may alias
+// anything, so writing bitmap[idx++] through the idx/xp references made the compiler reload and
+// re-store both around every single pixel.
+static inline __attribute__((always_inline))
 void drawByteStdData(uint8_t data, uint16_t &idx, uint16_t &xp,
-                          uint16_t col, uint16_t bgcol, uint8_t dx) {
-  uint8_t bitval = 128;
-  for (uint8_t i = 0; i < 8 - dx; i++) {
-    if (data & bitval) {
-      bitmap[idx++] = col;
-      spritedatacoll[xp++] = true;
-    } else {
-      bitmap[idx++] = bgcol;
-      xp++;
+                     uint16_t col, uint16_t bgcol, uint8_t dx) {
+  uint8_t *p = bitmap + idx;
+  const uint8_t c = (uint8_t)col, b = (uint8_t)bgcol;
+  const uint8_t n = 8 - dx;
+  if (n == 8 && !vicColl) {
+    p[0] = (data & 0x80) ? c : b; p[1] = (data & 0x40) ? c : b;
+    p[2] = (data & 0x20) ? c : b; p[3] = (data & 0x10) ? c : b;
+    p[4] = (data & 0x08) ? c : b; p[5] = (data & 0x04) ? c : b;
+    p[6] = (data & 0x02) ? c : b; p[7] = (data & 0x01) ? c : b;
+  } else {
+    bool *sc = spritedatacoll + xp;
+    uint8_t bitval = 128;
+    for (uint8_t i = 0; i < n; i++) {
+      bool on = data & bitval;
+      p[i] = on ? c : b;
+      if (on && vicColl) sc[i] = true;
+      bitval >>= 1;
     }
-    bitval >>= 1;
   }
+  idx += n;
+  xp += n;
 }
 
+static inline __attribute__((always_inline))
 void drawByteMCData(uint8_t data, uint16_t &idx, uint16_t &xp,
-                         uint16_t *tftColArr, bool *collArr, uint8_t dx) {
+                    uint16_t *tftColArr, bool *collArr, uint8_t dx) {
+  uint8_t *p = bitmap + idx;
+  bool *sc = spritedatacoll + xp;
+  const uint8_t n = (8 - dx) >> 1;
   uint8_t bitshift = 6;
-  for (uint8_t i = 0; i < (8 - dx) >> 1; i++) {
+  for (uint8_t i = 0; i < n; i++) {
     uint8_t bitpair = (data >> bitshift) & 0x03;
-    uint16_t tftcolor = tftColArr[bitpair];
-    bitmap[idx++] = tftcolor;
-    bitmap[idx++] = tftcolor;
-    spritedatacoll[xp++] = collArr[bitpair];
-    spritedatacoll[xp++] = collArr[bitpair];
+    uint8_t c = (uint8_t)tftColArr[bitpair];
+    p[2 * i] = c;
+    p[2 * i + 1] = c;
+    if (vicColl) { sc[2 * i] = collArr[bitpair]; sc[2 * i + 1] = collArr[bitpair]; }
     bitshift -= 2;
   }
+  idx += 2 * n;
+  xp += 2 * n;
 }
 
 void drawblankline(uint8_t line) {
@@ -200,7 +229,7 @@ void drawExtBGColCharModeInt(uint8_t *screenMap, uint8_t *bgColArr,
 
 void drawExtBGColCharMode(uint8_t *screenMap, uint8_t *bgColArr, int8_t dy,
                                uint8_t dx) {
-  uint8_t bgcol0 = tftColorFromC64ColorArr[bgColArr[0]];
+  uint8_t bgcol0 = tftColorFromC64ColorArr[bgColArr[0] & 15];   // $D021's high nibble is junk
   uint8_t dline = rasterline - 51;
   if (shiftDy(dline, dy, bgcol0)) {
     return;
@@ -304,6 +333,7 @@ void drawStdBitmapMode(uint8_t *hiresBitmap, uint8_t *colorMap, int8_t dy,
 
 void drawSpriteDataSC(uint8_t bitnr, int16_t xpos, uint8_t ypos,
                            uint8_t *data, uint8_t color) {
+  uint8_t *const bm = bitmap;   // a local: stores through uint8_t* would otherwise reload it
   uint16_t tftcolor = tftColorFromC64ColorArr[color];
   uint16_t idx = xpos;         // line-relative; (uint16_t) wraps for xpos<0, ==0 at xpos==0
   for (uint8_t x = 0; x < 3; x++) {
@@ -327,7 +357,7 @@ void drawSpriteDataSC(uint8_t bitnr, int16_t xpos, uint8_t ypos,
           // background prio
           idx++;
         } else {
-          bitmap[idx++] = tftcolor;
+          bm[idx++] = tftcolor;
         }
         uint8_t sprcoll = spritespritecoll[xpos];
         if (sprcoll != 0) {
@@ -346,6 +376,7 @@ void drawSpriteDataSC(uint8_t bitnr, int16_t xpos, uint8_t ypos,
 
 void drawSpriteDataSCDS(uint8_t bitnr, int16_t xpos, uint8_t ypos,
                              uint8_t *data, uint8_t color) {
+  uint8_t *const bm = bitmap;   // a local: stores through uint8_t* would otherwise reload it
   uint16_t tftcolor = tftColorFromC64ColorArr[color];
   uint16_t idx = xpos;         // line-relative; (uint16_t) wraps for xpos<0, ==0 at xpos==0
   for (uint8_t x = 0; x < 3; x++) {
@@ -369,13 +400,13 @@ void drawSpriteDataSCDS(uint8_t bitnr, int16_t xpos, uint8_t ypos,
           // background prio
           idx++;
         } else {
-          bitmap[idx++] = tftcolor;
+          bm[idx++] = tftcolor;
         }
         if (bgspriteprio && spritedatacoll[xpos + 1]) {
           // background prio
           idx++;
         } else {
-          bitmap[idx++] = tftcolor;
+          bm[idx++] = tftcolor;
         }
         uint8_t sprcoll = spritespritecoll[xpos];
         if (sprcoll != 0) {
@@ -392,8 +423,10 @@ void drawSpriteDataSCDS(uint8_t bitnr, int16_t xpos, uint8_t ypos,
   }
 }
 
+static inline __attribute__((always_inline))
 void drawSpriteDataMC2Bits(uint8_t idxc, uint16_t &idx, int16_t &xpos,
                                 uint8_t bitnr, uint16_t *tftcolor) {
+  uint8_t *const bm = bitmap;   // a local: stores through uint8_t* would otherwise reload it
   if (xpos < 0) {
     idx += 2;
     xpos += 2;
@@ -411,13 +444,13 @@ void drawSpriteDataMC2Bits(uint8_t idxc, uint16_t &idx, int16_t &xpos,
       // background prio
       idx++;
     } else {
-      bitmap[idx++] = tftcolor[idxc];
+      bm[idx++] = tftcolor[idxc];
     }
     if (bgspriteprio && spritedatacoll[xpos + 1]) {
       // background prio
       idx++;
     } else {
-      bitmap[idx++] = tftcolor[idxc];
+      bm[idx++] = tftcolor[idxc];
     }
     uint8_t bitnrcollxpos0 = spritespritecoll[xpos];
     uint8_t bitnrcollxpos1 = spritespritecoll[xpos + 1];
@@ -493,6 +526,7 @@ void drawSprites(uint8_t line) {
   uint8_t color01 = vicreg[0x25] & 0x0f;
   uint8_t color11 = vicreg[0x26] & 0x0f;
   memset(spritespritecoll, 0, sizeof(spritespritecoll));
+  const uint8_t coll1e = vicreg[0x1e], coll1f = vicreg[0x1f];   // IRQ only on the first hit
   uint8_t bitval = 128;
   for (int8_t nr = 7; nr >= 0; nr--) {
     if (spritesenabled & bitval) {
@@ -524,14 +558,14 @@ void drawSprites(uint8_t line) {
     }
     bitval >>= 1;
   }
-  if (vicreg[0x1f] != 0) {
+  if (vicreg[0x1f] != 0 && coll1f == 0) {   // a register already non-zero raises no new IRQ
     if (vicreg[0x1a] & 2) {
       vicreg[0x19] |= 0x82;
     } else {
       vicreg[0x19] |= 0x02;
     }
   }
-  if (vicreg[0x1e] != 0) {
+  if (vicreg[0x1e] != 0 && coll1e == 0) {   // a register already non-zero raises no new IRQ
     if (vicreg[0x1a] & 4) {
       vicreg[0x19] |= 0x84;
     } else {
@@ -557,6 +591,7 @@ void initVarsAndRegs() {
   screenmemstart = 1024;
   cntRefreshs = 0;
   rasterline = 0;
+  vicCollPolled = false;   // a new program has not polled the collision registers yet
   charset = chrom;
   vertborder = true;
 }
@@ -595,7 +630,7 @@ void checkFrameColor() {
 bool vicIRQPending() { return (vicreg[0x19] & 0x80) != 0; }
 
 
-uint8_t nextRasterline() {
+C64_HOT uint8_t nextRasterline() {
   bool rsel = vicreg[0x11] & 8;
   rasterline++;
   if (rasterline > 311) {
@@ -610,12 +645,15 @@ uint8_t nextRasterline() {
       badlinecond = false;
     }
     badlinecond |= badlinecond0;
-  } else if (rasterline == 51) { // && badlinecond
-    if (rsel) {
+  } else if (rasterline == 51) {
+    // The vertical border only opens if the display was enabled (DEN, latched as badlinecond at
+    // line 49). With DEN clear the whole screen stays border colour -- games blank it this way
+    // while they load or rebuild it, and it used to show whatever was in screen RAM.
+    if (rsel && badlinecond) {
       vertborder = false;
     }
     lineC64map = 0;
-  } else if ((rasterline == 55) && (!rsel)) { // && badlinecond
+  } else if ((rasterline == 55) && (!rsel) && badlinecond) {
     vertborder = false;
   } else if ((rasterline == 247) && (!rsel)) {
     vertborder = true;
@@ -667,19 +705,81 @@ uint8_t nextRasterline() {
   return viccycles;
 }
 
+// Frame pacing against the panel (PicoCalc). Pushing the 320x200 picture takes the render task on
+// the other core ~60 ms, three to four PAL frames. The VIC used to render one frame in three
+// regardless, so every image the panel took was stitched from two frames at a moving seam --
+// sprites and scrolling split and jumped. Now the two take turns: the VIC renders a frame only
+// once the panel has taken the previous one (vicFbState FREE -> WRITING -> DONE), and the render
+// task pushes each band as soon as the VIC has passed it (vicLinesDone), then hands the buffer
+// back. Every image is one whole frame, and the VIC renders no frame nobody sees.
+// A frame not drawn still renders any line a sprite is on, into a scratch line: the collision
+// registers ($D01E/$D01F) are set by the renderer, and a game polling them must not miss a hit.
+volatile uint8_t vicFbState = VIC_FB_FREE;
+volatile uint8_t vicLinesDone = 0;   // display lines (0..200) of the WRITING frame complete
+volatile uint32_t vicFrameNo = 0;    // TEMP debug: PAL frames since boot (serial fb dump)
+volatile uint32_t vicDrawnFrameNo = 0;
+uint8_t vicLineRegs[200][4];         // TEMP debug: d011 d016 d018 bank per drawn line
+static bool vicDrawFrame = true;     // this frame goes to the framebuffer
+// At most one frame in VIC_MIN_FRAMES is drawn, even when the panel is quick to take it (the render
+// task only sends the bands that changed, so a mostly-still screen goes out in a few ms): rendering
+// is time taken from the 6510. Three keeps the cadence steady (a scroller moves by the same step
+// every image) and odd, so a game that flickers sprites on alternate frames shows both sets.
+#define VIC_MIN_FRAMES 3
+static uint8_t vicSinceDraw = VIC_MIN_FRAMES;
+
+static bool vicSpriteOnLine(uint16_t line) {
+  uint8_t en = vicreg[0x15];
+  if (!en) return false;
+  for (uint8_t nr = 0; nr < 8; nr++) {
+    if (!(en & (1 << nr))) continue;
+    uint16_t y = vicreg[0x01 + nr * 2];
+    uint16_t h = (vicreg[0x17] & (1 << nr)) ? 42 : 21;
+    if (line >= y && line < y + h) return true;
+  }
+  return false;
+}
+
 void drawRasterline() {
+  if (rasterline == 51) {
+#if defined(BOARD_PICOCALC)
+    vicFrameNo++;
+    if (vicSinceDraw < VIC_MIN_FRAMES) vicSinceDraw++;
+    vicDrawFrame = (vicSinceDraw >= VIC_MIN_FRAMES) && (vicFbState == VIC_FB_FREE);
+    if (vicDrawFrame) { vicSinceDraw = 1; vicLinesDone = 0; vicDrawnFrameNo = vicFrameNo; vicFbState = VIC_FB_WRITING; }
+#else
+    vicDrawFrame = true;
+#endif
+  }
   if ((rasterline >= 51) && (rasterline < 251)) {
-    bitmap = vicLine(rasterline - 51);   // point at this scanline (in the right fb half)
+    vicColl = vicSpriteOnLine(rasterline - 1);
+    const bool collWatched = vicCollPolled || (vicreg[0x1a] & 0x06);
+    if (!vicDrawFrame && !(vicColl && collWatched)) {
+      lineC64map++;                      // keep the character-row counter in step
+      return;
+    }
+    // A frame not drawn renders into a scratch line: it only needs the collision bits, and the
+    // framebuffer may be on its way to the panel.
+    static uint8_t scratchLine[320 + 16];   // +16: double-width sprite spill, as in the fb halves
+    bitmap = vicDrawFrame ? vicLine(rasterline - 51) : scratchLine;
+    if (vicDrawFrame) {
+      uint8_t *lr = vicLineRegs[rasterline - 51];
+      lr[0] = vicreg[0x11] | (vertborder ? 0x80 : 0); lr[1] = vicreg[0x16]; lr[2] = vicreg[0x18]; lr[3] = vicmem >> 14;
+    }
     if (!vertborder) {
       uint8_t d011 = vicreg[0x11];
       uint8_t deltay = d011 & 7;
-      memset(spritedatacoll, false, sizeof(bool) * sizeof(spritedatacoll));
+      if (vicColl) memset(spritedatacoll, false, sizeof(spritedatacoll));
       uint8_t d016 = vicreg[0x16];
       uint8_t deltax = d016 & 7;
       bool bmm = d011 & 32;
       bool ecm = d011 & 64;
       bool mcm = d016 & 16;
-      if (bmm) {
+      if (ecm && (bmm || mcm)) {
+        // Invalid modes (ECM with BMM and/or MCM): the VIC outputs black, and sprites still show.
+        // Before this, ECM+MCM drew nothing (stale pixels) and ECM+BMM drew a normal bitmap.
+        // Games use them to blank the screen while they update it.
+        memset(bitmap, tftColorFromC64ColorArr[0], 320);
+      } else if (bmm) {
         if (mcm) {
           drawMCBitmapMode(ram + bitmapstart, ram + screenmemstart,
                            vicreg[0x21], deltay - 3, deltax);
@@ -701,11 +801,18 @@ void drawRasterline() {
                                deltax);
         }
       }
-      drawSprites(rasterline - 1);
+      if (vicColl) drawSprites(rasterline - 1);   // no sprite on this line: nothing to draw or collide
     } else {
       drawblankline(rasterline - 51);
     }
     lineC64map++;
+#if defined(BOARD_PICOCALC)
+    if (vicDrawFrame) {
+      __asm volatile("dmb" ::: "memory");   // the line's pixels land before the render task sees it
+      vicLinesDone = rasterline - 50;
+      if (rasterline == 250) vicFbState = VIC_FB_DONE;
+    }
+#endif
   }
 }
 

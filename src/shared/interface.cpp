@@ -317,6 +317,9 @@ void colorDemo() {
 
 void showHideOptionsWindow() {
   OptionsWindow = !OptionsWindow;
+  // Pause BEFORE optionsUiOpen(): its first-open file scan reads the SD card, and the C64's LOAD
+  // trap must not be starting a disk read on the other core meanwhile.
+  if (OptionsWindow) paused = true;
   clearScreen();
   if (OptionsWindow) {
     optionsUiOpen();   // modern touch UI (see optionsui.ino)

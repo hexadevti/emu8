@@ -17,7 +17,8 @@
 // size; the EEPROM sector sits above it at the very end of flash). Neither is touched:
 //
 //     _FS_start - 32K .. _FS_start                  BIOS window, fixed
-//     (BIOS base) - cart size .. BIOS base          cartridge window, sized to the image
+//     (BIOS base) - 16K .. BIOS base                MSX disk-ROM window, fixed
+//     (disk-ROM base) - cart size .. disk-ROM base  cartridge window, sized to the image
 //     __flash_binary_end (rounded up) ...           must stay below the cartridge
 //
 // Only sectors whose contents differ are erased and programmed, so booting the same BIOS and the
@@ -40,29 +41,37 @@ extern "C" uint8_t __flash_binary_end;
 
 static const uint32_t kSector     = FLASH_SECTOR_SIZE;   // 4096: the erase granule
 static const uint32_t kBiosWindow = 0x8000;              // 32K, the largest MSX1 main BIOS
+static const uint32_t kDiskWindow = 0x4000;              // 16K MSX disk-interface ROM (beside a cart)
 
 static uintptr_t alignUp(uintptr_t v) { return (v + kSector - 1) & ~(uintptr_t)(kSector - 1); }
 static uintptr_t biosBase()           { return (uintptr_t)&_FS_start - kBiosWindow; }
+static uintptr_t diskBase()           { return biosBase() - kDiskWindow; }
 static uintptr_t firmwareEnd()        { return alignUp((uintptr_t)&__flash_binary_end); }
 
 uint32_t romFlashCapacity(RomFlashWindow w)
 {
   if (w == ROMFLASH_BIOS) return kBiosWindow;
-  uintptr_t top = biosBase(), bottom = firmwareEnd();
+  if (w == ROMFLASH_DISKROM) return kDiskWindow;
+  uintptr_t top = diskBase(), bottom = firmwareEnd();
   return top > bottom ? (uint32_t)(top - bottom) : 0;
 }
 
-const uint8_t *romFlashLoad(RomFlashWindow w, File &f, uint32_t len)
+const uint8_t *romFlashLoad(RomFlashWindow w, File &f, uint32_t len, uint8_t *staging, uint32_t offset)
 {
-  if (len == 0 || len > romFlashCapacity(w)) {
+  if (w != ROMFLASH_BIOS || (offset & (kSector - 1))) offset = 0;
+  if (len == 0 || offset + len > romFlashCapacity(w)) {
     sprintf(buf, "ROMFLASH: %u bytes do not fit the %s window (%u)", (unsigned)len,
-            w == ROMFLASH_BIOS ? "BIOS" : "cartridge", (unsigned)romFlashCapacity(w));
+            w == ROMFLASH_BIOS ? "BIOS" : w == ROMFLASH_DISKROM ? "disk ROM" : "cartridge",
+            (unsigned)romFlashCapacity(w));
     printLog(buf);
     return nullptr;
   }
-  const uintptr_t base = (w == ROMFLASH_BIOS) ? biosBase() : biosBase() - alignUp(len);
+  const uintptr_t base = (w == ROMFLASH_BIOS)    ? biosBase() + offset
+                       : (w == ROMFLASH_DISKROM) ? diskBase()
+                                                 : diskBase() - alignUp(len);
 
-  uint8_t *chunk = (uint8_t *)malloc(kSector);
+  // A running C64 leaves under 1K of heap, so a caller may lend a 4K buffer of its own instead.
+  uint8_t *chunk = staging ? staging : (uint8_t *)malloc(kSector);
   if (!chunk) { printLog("ROMFLASH: no heap for the 4K staging buffer"); return nullptr; }
 
   uint32_t written = 0;
@@ -87,7 +96,7 @@ const uint8_t *romFlashLoad(RomFlashWindow w, File &f, uint32_t len)
 #endif
     written++;
   }
-  free(chunk);
+  if (!staging) free(chunk);
 
   if (!ok) { printLog("ROMFLASH: SD read came up short"); return nullptr; }
   sprintf(buf, "ROMFLASH: %uK at 0x%08x, %u of %u sectors rewritten", (unsigned)(len / 1024),

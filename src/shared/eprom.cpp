@@ -115,6 +115,7 @@ void epromSetup() {
   screenFill = (EEPROM.readChar(ScreenFillEEPROMaddress) == 1);
   { char s = EEPROM.readChar(NesDisplaySkipEEPROMaddress); nesDisplaySkip = (s >= 1 && s <= 3) ? (uint8_t)s : 3; }  // default 3; fresh EEPROM (0xFF) -> 3
   msxFast = (EEPROM.readChar(MsxSpeedEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> NORMAL
+  msxDiskRom = (EEPROM.readChar(MsxDiskRomEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> AUTO
   nesFast = (EEPROM.readChar(NesSpeedEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> NORMAL
   smsFast = (EEPROM.readChar(SmsSpeedEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> NORMAL
   colecoFast = (EEPROM.readChar(ColecoSpeedEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> NORMAL
@@ -236,6 +237,7 @@ void saveEEPROM() {
     EEPROM.writeChar(ScreenFillEEPROMaddress, screenFill ? 1 : 0);
     EEPROM.writeChar(NesDisplaySkipEEPROMaddress, (char)nesDisplaySkip);
     EEPROM.writeChar(MsxSpeedEEPROMaddress, msxFast ? 1 : 0);
+    EEPROM.writeChar(MsxDiskRomEEPROMaddress, msxDiskRom ? 1 : 0);
     EEPROM.writeChar(NesSpeedEEPROMaddress, nesFast ? 1 : 0);
     EEPROM.writeChar(SmsSpeedEEPROMaddress, smsFast ? 1 : 0);
     EEPROM.writeChar(ColecoSpeedEEPROMaddress, colecoFast ? 1 : 0);

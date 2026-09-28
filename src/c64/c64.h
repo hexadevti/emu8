@@ -7,6 +7,19 @@
 
 #include <cstdint>
 
+// PicoCalc: the 6510 hot path (cpuLoop, read8/write8, the CIA tick, the raster step and the opcode
+// tables) runs from SRAM, as the Apple II core's does. From flash it fetched through the 16K XIP
+// cache that both cores share, and the render task's panel code kept evicting it -- the C64 ran at
+// under half speed. About 8K of SRAM, paid for by the system ROMs having moved into flash. Other
+// boards keep their default placement (the ESP32's IRAM is too small to take it).
+#if defined(BOARD_PICOCALC)
+#define C64_HOT      IRAM_ATTR
+#define C64_HOT_DATA DRAM_ATTR
+#else
+#define C64_HOT
+#define C64_HOT_DATA
+#endif
+
 // C64 ROM images — loaded at boot from /roms/c64/*.bin on the SD card into PSRAM buffers
 // (c64rom.cpp); pointers, not arrays, and null until c64LoadRoms() has run.
 extern const unsigned char *basic_rom;
@@ -38,6 +51,12 @@ extern volatile bool c64ResetReq;   // request a CPU reset (e.g. after mounting 
 // ---- VIC-II state (shared by memory + vic + render) ----
 extern uint8_t vicreg[0x40];
 extern uint8_t latchd011, latchd012;
+enum { VIC_FB_FREE, VIC_FB_WRITING, VIC_FB_DONE };   // framebuffer handoff, VIC <-> render task
+extern volatile uint8_t vicFbState;
+extern volatile uint8_t vicLinesDone;
+extern volatile uint32_t vicFrameNo, vicDrawnFrameNo;   // TEMP debug (serial fb dump)
+extern uint8_t vicLineRegs[200][4];
+extern bool vicCollPolled;       // the program has read $D01E/$D01F since reset (see c64_vic.cpp)
 extern uint16_t vicmem, bitmapstart, screenmemstart, rasterline;
 extern uint8_t syncd020;
 extern bool screenblank, badlinecond0;

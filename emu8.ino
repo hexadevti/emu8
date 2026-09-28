@@ -73,6 +73,9 @@ void setup() {
     videoSetup();
     sdSerialSetup();
   } else if (currentPlatform == PLATFORM_C64) {
+#if defined(BOARD_PICOCALC)
+    c64ReserveRam();   // 64K contiguous, BEFORE the SD mount splits the RP2040 heap (c64.cpp)
+#endif
     bootProgressStep("Mounting SD card");
     FSSetup();         // SD next: its DMA buffer needs the contiguous low-DRAM region before
                        // the big C64 allocations (64K RAM + framebuffer) fragment it.

@@ -6,6 +6,7 @@
 // log.cpp
 void logSetup();
 void printLog(String txt);
+void printLog(const char *txt);   // no heap copy: a running C64 has little to spare
 // Boot progress screen: the panel comes up before the emulator does and names the step the
 // firmware is on, so the seconds spent waiting for the mainboard rail, waiting for a USB
 // terminal, reading ROMs and scanning the card are not a black screen. No-ops off the PicoCalc.
@@ -23,6 +24,9 @@ bool bootHintShowing();   // the hint owns panel rows 280..319 right now (full-p
 #if defined(BOARD_PICOCALC)
 bool picocalcWaitForMainboard();   // block until the PicoCalc's own power rail is up
 bool picocalcWaitAnyKey(uint32_t timeoutMs);   // hold the screen until a key is pressed
+void picocalcRebootToLoaderMenu(const char *why);   // loader_picocalc.cpp: reboot into the UF2 Loader's SD menu
+void picocalcCheckLoaderCmd();                      // ...if the PC sent PICOCALC_LOADER_CMD over USB serial
+bool picocalcLoaderCmdFeed(uint8_t c);              // ...the same, fed byte by byte (sdserial, between frames)
 #endif
 void printSequence(int seq);
 void printProgress(size_t prg, size_t sz);
@@ -124,6 +128,12 @@ void optionsUiRender();
 void optionsUiPoll();
 void optionsUiOpen();
 void optionsUiMarkDirty();
+// romsel.cpp - user-picked system ROMs, saved in EEPROM (see RomSlot in emu.h)
+const RomSlotInfo &romSlotInfo(int slot);
+bool romSlotVisible(int slot);            // belongs to the running platform / Apple model
+const char *romOverride(int slot);        // saved pick, or nullptr (static buffer)
+const char *romPath(int slot);            // saved pick, else the default path (static buffer)
+bool romSetOverride(int slot, const char *path);   // nullptr/"" = back to default; commits
 void uiDirScanProgress(int count);    // draw a "Loading…" bar while a directory is scanned (+yield)
 
 // video.cpp
@@ -147,9 +157,12 @@ void splashOpen();                     // Ctrl-F6: the system menu over the runn
 #if BOARD_ROM_IN_FLASH
 // romflash_picocalc.cpp: copy a ROM image (MSX BIOS, MSX or SMS cartridge) from an open SD file into a fixed window of spare flash
 // and return its XIP address (nullptr on failure). Unchanged sectors are not rewritten.
-enum RomFlashWindow { ROMFLASH_BIOS, ROMFLASH_CART };
+enum RomFlashWindow { ROMFLASH_BIOS, ROMFLASH_CART, ROMFLASH_DISKROM };   // DISKROM: MSX disk-interface ROM (16K)
 uint32_t romFlashCapacity(RomFlashWindow w);
-const uint8_t *romFlashLoad(RomFlashWindow w, File &f, uint32_t len);
+// `staging`: an optional 4K scratch buffer to use instead of malloc'ing one. `offset` (BIOS window
+// only, 4K-aligned): where in the window the image goes, so several small ROMs can share it (C64).
+const uint8_t *romFlashLoad(RomFlashWindow w, File &f, uint32_t len, uint8_t *staging = nullptr,
+                            uint32_t offset = 0);
 #endif
 int red(int color);
 int green(int color);
@@ -255,7 +268,9 @@ char ProcessC0xx(ushort address, byte b, bool Read_Write);
 
 // C64 core entry points (src/c64/c64.cpp)
 void c64Setup();
+void c64ReserveRam();   // PicoCalc: grab the 64K RAM block before the SD mount fragments the heap
 void c64Loop();
+bool c64RenderLoadWarning();   // renderLoop hook: "ROMs not found" screen, yields to SETTINGS
 void c64RenderFrame();
 void c64KeyMatrix(uint8_t row, uint8_t col, bool down);   // touch keyboard -> CIA1 matrix
 void c64SetJoystick(uint8_t mask);                        // analog stick + fire -> CIA1 (port 1/2)
@@ -294,6 +309,12 @@ void msxKeyMatrix(uint8_t row, uint8_t col, bool down);  // on-screen/USB keyboa
 void msxSetInput(uint8_t joyMask);        // joystick -> MSX joystick (PSG port A, active-low)
 bool msxLoadSelected(const char *path);   // settings: load a .rom cartridge + reset the MSX
 void msxScanFiles();                      // settings: rescan SD root for *.rom / *.dsk
+void msxApplyDiskRom();
+bool msxMountDisk(const char *path, bool run);   // settings: MOUNT (live swap) / MOUNT & RUN (boot) a .dsk
+void msxUnmountDisk();                         // settings: UNMOUNT the .dsk (no reset)
+bool msxDiskMounted(const char *path);         // settings: is this .dsk the mounted one?
+void msxUnloadCart();                          // settings: UNMOUNT the cartridge (resets the MSX)
+bool msxCartLoaded(const char *path);          // settings: is this .rom/.mx1 the loaded cartridge?                   // settings: DISK ROM toggle changed -> install/remove it + reset
 bool msxRenderLoadWarning();              // startup no-BIOS / C-BIOS note overlay (true while showing)
 void loadMsxFilesSync();                  // scan SD root -> msxFiles (ROM/disk browser)
 void msxBrowseEnter(const char *path); // navigate into a subdirectory and rescan
@@ -389,6 +410,15 @@ bool c64LoadSelected(const char *path); // menu dispatch: .prg loads&runs, .d64 
 bool c64LoadAndRun(const char *path);   // same, but resets first and loads at the BASIC prompt
 void c64MountD64(const char *path);   // mount a .d64 as the virtual drive (device 8)
 bool c64DiskMounted();                // is a .d64 currently mounted?
+// Why a C64 browser entry cannot be loaded. A uint16_t code: the reason in the low byte, and for
+// C64F_CRT_TYPE the cartridge hardware type in the high byte. c64FileProblemText() words it.
+enum : uint16_t { C64F_OK = 0, C64F_EXT, C64F_OPEN, C64F_CRT_HDR, C64F_CRT_TYPE, C64F_CRT_EMPTY,
+                  C64F_CRT_BIG, C64F_NOMEM, C64F_FLASH };
+const char *c64FileProblemText(uint16_t code);
+const char *c64FileProblem(size_t idx);              // c64Files[idx]: reason it cannot load, or nullptr
+void c64SetFileProblem(size_t idx, uint16_t code);   // record a failed load against the entry
+uint16_t c64CrtProbe(File &f);        // .crt header check, no load (C64F_* code)
+uint16_t c64CrtLastError();           // C64F_* code of the last c64LoadCRT() failure
 bool c64LoadCRT(const char *path);    // mount & launch a .crt cartridge (generic 8K/16K/Ultimax)
 void c64CartUnmount();                // detach the cartridge (restore normal $8000/$A000)
 void c64CartBankWrite(uint16_t addr, uint8_t val);   // cart banking register ($DE00-$DEFF)
