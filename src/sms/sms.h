@@ -72,6 +72,7 @@ int     psgGenSample(int masterVol, bool mute);  // one 22050 Hz sample (0..255)
 void    cartReset();
 uint8_t cartRead(uint16_t a);      // CPU 0x0000-0xBFFF (ROM banks + optional cart RAM)
 void    cartWrite(uint16_t a, uint8_t v);  // cart-RAM writes + mapper registers $FFFC-$FFFF
+extern const uint8_t* cartRdPage[6];      // 8 KB read windows over 0x0000-0xBFFF; nullptr -> cartRead
 void    cartSetImage(const uint8_t* data, int len);
 
 } // namespace sms

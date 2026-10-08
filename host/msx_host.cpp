@@ -119,7 +119,7 @@ static int runZex(const char* path) {
   cpu.reset(); cpu.PC = 0x0100; cpu.SP = 0xF000;
 
   const uint64_t MAX_STEPS = 6000ull * 1000 * 1000;
-  uint64_t steps = 0;
+  uint64_t steps = 0, tstates = 0;   // cpu.cycles is 32-bit and wraps on a full ZEXALL run
   for (; steps < MAX_STEPS; steps++) {
     if (cpu.PC == 0x0005) {
       if (cpu.C == 2) putchar(cpu.E);
@@ -129,10 +129,10 @@ static int runZex(const char* path) {
       continue;
     }
     if (cpu.PC == 0x0000) { printf("\n[warm boot - finished]\n"); break; }
-    cpu.step();
+    tstates += cpu.step();
   }
   if (steps >= MAX_STEPS) printf("\n[step cap reached]\n");
-  printf("ran %llu instr, %llu T-states\n", (unsigned long long)steps, (unsigned long long)cpu.cycles);
+  printf("ran %llu instr, %llu T-states\n", (unsigned long long)steps, (unsigned long long)tstates);
   return 0;
 }
 

@@ -17,6 +17,7 @@
 #include "sms.h"
 #include "sms_cart.h"
 #include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
+#include "../shared/dirty_bands.h"     // PicoCalc: push only the bands that changed
 
 static uint16_t* smsScratch = nullptr;   // per-frame RGB565 conversion band (like nesScratch/msxScratch)
 #if !BOARD_ROM_IN_FLASH
@@ -93,9 +94,9 @@ void smsSetup() {
 // benchmark reports the host's effective Z80 speed.
 void smsLoop() {
   if (sms::romLen > 0) {                                 // uncapped benchmark (~0.8 s emulated)
-    uint64_t c0 = sms::cpu.cycles; uint32_t t0 = millis();
+    uint32_t c0 = sms::cpu.cycles; uint32_t t0 = millis();
     while ((uint32_t)(millis() - t0) < 800) sms::runFrame();
-    uint32_t dt = millis() - t0; uint64_t dc = sms::cpu.cycles - c0;
+    uint32_t dt = millis() - t0; uint32_t dc = sms::cpu.cycles - c0;
     smsMeasuredMhz = (dt > 0) ? (float)((double)dc / ((double)dt * 1000.0)) : 0.0f;
     sprintf(buf, "SMS: uncapped Z80 = %.2f MHz (real SMS = 3.58)", smsMeasuredMhz);
     printLog(buf);
@@ -158,6 +159,7 @@ void smsRenderFrame() {
   const bool osk  = oskActive();
   const bool fill = screenFill && !osk;
   const bool borders = !fill && (clearScr || outTop != lastTop || outH != lastH || osk != lastOsk || lastFill);
+  const bool repaint = borders || clearScr;          // anything may have drawn over the picture
   clearScr = false;
   lastTop = outTop; lastH = outH; lastOsk = osk; lastFill = fill;
 #else
@@ -171,32 +173,16 @@ void smsRenderFrame() {
     tft.fillRect(S_OX + S_W, outTop, 320 - (S_OX + S_W), outH, TFT_BLACK);
   }
 #if defined(BOARD_PICOCALC)
-  // One address window for the whole picture, pixels streamed through writeColor()'s ping-pong DMA
-  // staging: the palette lookup of one line overlaps the SPI transfer of the previous one, instead
-  // of convert-then-wait per 8-line band.
-  if (fill) {
-    // 256x192 -> 320x240, nearest neighbour: each 4 source lines become 5 (sy = oy*4/5) and each
-    // 4 source pixels become 5 (the first one doubled). ~57% more SPI time than 1:1. The hidden
-    // left column is source pixels 0..7, i.e. the first two groups.
-    tft.setAddrWindow(0, 0, 320, 240);
-    tft.startWrite();
-    for (int oy = 0; oy < 240; oy++) {
-      const uint8_t* src = sms::framebuffer + (oy * 4 / 5) * S_W;
-      int x = 0;
-      if (hideLeft8) { tft.writeColor(0x0000, 10); x = 8; }
-      for (; x < S_W; x += 4) {
-        const uint16_t c0 = pal[src[x] & 0x1F];
-        tft.writeColor(c0, 1);
-        tft.writeColor(c0, 1);
-        tft.writeColor(pal[src[x + 1] & 0x1F], 1);
-        tft.writeColor(pal[src[x + 2] & 0x1F], 1);
-        tft.writeColor(pal[src[x + 3] & 0x1F], 1);
-      }
-    }
-    tft.endWrite();
+  // Fill or 1:1: only the 8-line bands that changed since the last push go out (dirty_bands.h).
+  if (fill || outH == S_H) {
+    const int sent = dband::pushIndexed256(sms::framebuffer, pal, 0x1F, S_OX, outTop, fill, hideLeft8,
+                                           0x534D5331u, repaint);
+    dband::frameDone("SMS", sent);
     sms::frameReady = false;
     return;
   }
+  // On-screen keyboard open (picture scaled): the whole picture in one address window, pixels
+  // streamed through writeColor()'s ping-pong DMA staging.
   tft.setAddrWindow(S_OX, outTop, S_W, outH);
   tft.startWrite();
   for (int oy = 0; oy < outH; oy++) {

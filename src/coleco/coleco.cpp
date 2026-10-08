@@ -16,6 +16,7 @@
 #include "../msx/msx.h"              // TMS9918A: msx::vram / msx::framebuffer / MSX_PALETTE / vdp*()
 #include "../sms/sms.h"              // SN76489 (reset from machineReset)
 #include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
+#include "../shared/dirty_bands.h"     // PicoCalc: push only the bands that changed
 
 static uint16_t* colScratch = nullptr;   // per-frame RGB565 conversion band (non-PicoCalc path)
 #if !BOARD_ROM_IN_FLASH
@@ -133,9 +134,9 @@ void colecoSetup() {
 // each frame to that wall-clock; FAST mode (colecoFast) runs uncapped.
 void colecoLoop() {
   if (coleco::biosLen > 0 && !colResetReq) {             // uncapped benchmark (~0.8 s emulated)
-    uint64_t c0 = coleco::cpu.cycles; uint32_t t0 = millis();
+    uint32_t c0 = coleco::cpu.cycles; uint32_t t0 = millis();
     while ((uint32_t)(millis() - t0) < 800) coleco::runFrame();
-    uint32_t dt = millis() - t0; uint64_t dc = coleco::cpu.cycles - c0;
+    uint32_t dt = millis() - t0; uint32_t dc = coleco::cpu.cycles - c0;
     colecoMeasuredMhz = (dt > 0) ? (float)((double)dc / ((double)dt * 1000.0)) : 0.0f;
     sprintf(buf, "COLECO: uncapped Z80 = %.2f MHz (real ColecoVision = 3.58)", colecoMeasuredMhz);
     printLog(buf);
@@ -190,6 +191,7 @@ void colecoRenderFrame() {
   const bool osk  = oskActive();
   const bool fill = screenFill && !osk;
   const bool borders = !fill && (clearScr || outTop != lastTop || outH != lastH || osk != lastOsk || lastFill);
+  const bool repaint = borders || clearScr;          // anything may have drawn over the picture
   clearScr = false;
   lastTop = outTop; lastH = outH; lastOsk = osk; lastFill = fill;
 #else
@@ -203,21 +205,11 @@ void colecoRenderFrame() {
     tft.fillRect(C_OX + C_W, outTop, 320 - (C_OX + C_W), outH, TFT_BLACK);
   }
 #if defined(BOARD_PICOCALC)
-  if (fill) {
-    tft.setAddrWindow(0, 0, 320, 240);
-    tft.startWrite();
-    for (int oy = 0; oy < 240; oy++) {
-      const uint8_t* src = msx::framebuffer + (oy * 4 / 5) * C_W;
-      for (int x = 0; x < C_W; x += 4) {
-        const uint16_t c0 = pal[src[x] & 0x0F];
-        tft.writeColor(c0, 1);
-        tft.writeColor(c0, 1);
-        tft.writeColor(pal[src[x + 1] & 0x0F], 1);
-        tft.writeColor(pal[src[x + 2] & 0x0F], 1);
-        tft.writeColor(pal[src[x + 3] & 0x0F], 1);
-      }
-    }
-    tft.endWrite();
+  // Fill or 1:1: only the 8-line bands that changed since the last push go out (dirty_bands.h).
+  if (fill || outH == C_H) {
+    const int sent = dband::pushIndexed256(msx::framebuffer, pal, 0x0F, C_OX, outTop, fill, false,
+                                           0x434F4C31u, repaint);
+    dband::frameDone("Coleco", sent);
     coleco::frameReady = false;
     return;
   }

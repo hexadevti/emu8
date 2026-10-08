@@ -66,6 +66,7 @@ int     psgGenSample(int masterVol, bool mute);  // one 22050 Hz sample (0..255)
 
 // ---- cartridge (msx_cart.cpp, M3) ----
 uint8_t cartRead(int slot, uint16_t a);          // slot 1 or 2
+const uint8_t* cartPage(int slot, int chunk);   // 8 KB of ROM at chunk (a >> 13) 2..5, or nullptr -> cartRead
 void    cartWrite(int slot, uint16_t a, uint8_t v);
 bool    cartPresent(int slot);
 

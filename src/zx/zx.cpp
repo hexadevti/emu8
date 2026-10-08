@@ -11,6 +11,7 @@
 
 #include "zx.h"
 #include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
+#include "../shared/dirty_bands.h"     // PicoCalc: push only the bands that changed
 
 // ---- buffers --------------------------------------------------------------------------------------
 // Everything lives in sharedBigBuf, on every board: the 48K RAM first (so no heap at all for it),
@@ -139,9 +140,9 @@ void zxSetup() {
 void zxLoop() {
   zxLoopRunning = true;
   if (zx::romLen > 0) {                                  // uncapped benchmark (~0.8 s emulated)
-    uint64_t c0 = zx::cpu.cycles; uint32_t t0 = millis();
+    uint32_t c0 = zx::cpu.cycles; uint32_t t0 = millis();
     while ((uint32_t)(millis() - t0) < 800) zx::runFrame();
-    uint32_t dt = millis() - t0; uint64_t dc = zx::cpu.cycles - c0;
+    uint32_t dt = millis() - t0; uint32_t dc = zx::cpu.cycles - c0;
     zxMeasuredMhz = (dt > 0) ? (float)((double)dc / ((double)dt * 1000.0)) : 0.0f;
     sprintf(buf, "ZX: uncapped Z80 = %.2f MHz (real Spectrum = 3.50)", zxMeasuredMhz);
     printLog(buf);
@@ -205,6 +206,71 @@ static void zxOutLine(int r, uint16_t* dst) {
   for (int x = zx::BORDER_X + 256; x < zx::OUT_W; x++) dst[x] = bc;
 }
 
+#if defined(BOARD_PICOCALC)
+// Checksum of everything that draws 8-line band b: the paper lines' bitmap bytes and their one
+// attribute row (bands line up with character rows: BORDER_Y is a multiple of 8), the FLASH phase
+// when any of those attributes flashes, and -- 1:1 only -- the border colour of each row.
+static uint32_t zxBandSum(int b, bool fill) {
+  uint32_t h = dband::SEED;
+  const int r0 = fill ? b * 8 + zx::BORDER_Y : b * 8;          // output row (1:1 numbering)
+  if (!fill) h = dband::hash(h, zx::borderLine + r0, 8);
+  const int py0 = r0 - zx::BORDER_Y;
+  if (py0 < 0 || py0 >= 192) return h;
+  for (int y = py0; y < py0 + 8; y++)
+    h = dband::hash(h, zx::screen + (((y & 0xC0) << 5) | ((y & 7) << 8) | ((y & 0x38) << 2)), 32);
+  const uint8_t* att = zx::screen + 6144 + (py0 >> 3) * 32;
+  h = dband::hash(h, att, 32);
+  uint8_t any = 0;
+  for (int c = 0; c < 32; c++) any |= att[c];
+  if (any & 0x80) h = dband::mix(h, zx::flashPhase);
+  return h;
+}
+
+// Dirty-band push: 1:1 is 30 bands of 8 rows (border included); FILL is the 24 paper bands, 10
+// output rows each. Runs of consecutive dirty bands share one address window.
+static void zxPushDirty(bool fill, bool repaint) {
+  const int bands = fill ? 24 : zx::OUT_H / 8, rowsPer = fill ? 10 : 8;
+  dband::begin(dband::mix(dband::hash(0x5A583438u, (const uint8_t*)zxPal, sizeof(zxPal)), fill), repaint);
+  bool dirty[zx::OUT_H / 8];
+  for (int b = 0; b < bands; b++) dirty[b] = dband::changed(b, zxBandSum(b, fill));
+  int sent = 0;
+  for (int b = 0; b < bands; ) {
+    if (!dirty[b]) { b++; continue; }
+    int e = b;
+    while (e < bands && dirty[e]) e++;
+    sent += e - b;
+    tft.setAddrWindow(0, b * rowsPer, zx::OUT_W, (e - b) * rowsPer);
+    tft.startWrite();
+    if (fill) {
+      int lastSy = -1;
+      for (int oy = b * 10; oy < e * 10; oy++) {
+        const int sy = oy * 4 / 5;
+        if (sy != lastSy) { zxPaperLine(sy, zxLine); lastSy = sy; }
+        for (int x = 0; x < 256; x += 4) {
+          tft.writeColor(zxLine[x], 2);
+          tft.writeColor(zxLine[x + 1], 1);
+          tft.writeColor(zxLine[x + 2], 1);
+          tft.writeColor(zxLine[x + 3], 1);
+        }
+      }
+    } else {
+      for (int r = b * 8; r < e * 8; r++) {
+        const uint16_t bc = zxPal[zx::borderLine[r] & 7];
+        const int py = r - zx::BORDER_Y;
+        if (py < 0 || py >= 192) { tft.writeColor(bc, zx::OUT_W); continue; }
+        zxPaperLine(py, zxLine);
+        tft.writeColor(bc, zx::BORDER_X);
+        for (int x = 0; x < 256; x++) tft.writeColor(zxLine[x], 1);
+        tft.writeColor(bc, zx::OUT_W - zx::BORDER_X - 256);
+      }
+    }
+    tft.endWrite();
+    b = e;
+  }
+  dband::frameDone("ZX", sent);
+}
+#endif
+
 void zxRenderFrame() {
   if (!zx::frameReady) return;
   if (!zxLine) { zx::frameReady = false; return; }
@@ -222,25 +288,9 @@ void zxRenderFrame() {
   // SCREEN: FILL drops the border and scales the 256x192 paper 5:4 to the whole 320x240 screen.
   extern bool screenFill;
   const bool fill = screenFill && !osk;
+  const bool repaint = clearScr;                     // a menu closed: anything may be on the panel
   clearScr = false;
-  if (fill) {
-    tft.setAddrWindow(0, 0, 320, 240);
-    tft.startWrite();
-    int lastSy = -1;
-    for (int oy = 0; oy < 240; oy++) {
-      const int sy = oy * 4 / 5;
-      if (sy != lastSy) { zxPaperLine(sy, zxLine); lastSy = sy; }
-      for (int x = 0; x < 256; x += 4) {
-        tft.writeColor(zxLine[x], 2);
-        tft.writeColor(zxLine[x + 1], 1);
-        tft.writeColor(zxLine[x + 2], 1);
-        tft.writeColor(zxLine[x + 3], 1);
-      }
-    }
-    tft.endWrite();
-    zx::frameReady = false;
-    return;
-  }
+  if (!osk) { zxPushDirty(fill, repaint); zx::frameReady = false; return; }
   tft.setAddrWindow(0, outTop, zx::OUT_W, outH);
   tft.startWrite();
   for (int oy = 0; oy < outH; oy++) {

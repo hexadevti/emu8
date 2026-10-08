@@ -6,6 +6,7 @@
 // instant-load tape trap. Arduino-free: everything board-specific lives in zx.cpp.
 
 #include "zx.h"
+#include "../z80/z80_core.h"
 #include <string.h>
 
 namespace zx {
@@ -15,7 +16,7 @@ static uint8_t  atRow[8];             // scripted typing overlay (autoTypeStart)
 static uint8_t  kempston = 0;         // active-HIGH
 static uint8_t  borderCol = 7;
 static uint8_t  lastFE = 0;           // last value written to port 0xFE (EAR/MIC bits)
-static uint64_t frameStart = 0;       // cpu.cycles at the top of the current frame
+static uint32_t frameStart = 0;       // cpu.cycles at the top of the current frame (wraps with it)
 static int      frameCount = 0;       // drives the FLASH attribute (toggles every 16 frames)
 
 // ---- memory ---------------------------------------------------------------------------------------
@@ -180,6 +181,16 @@ static void tapeTrap() {
 }
 
 // ---- reset / wiring -------------------------------------------------------------------------------
+// The frame loop runs Z80Core<ZxBus>: the memory map and ULA port compile straight into the
+// interpreter. The rd/wr/in/out hooks stay wired for generic users (Z80::step(), the debugger).
+struct ZxBus {
+  static inline uint8_t rd (Z80&, uint16_t a)            { return memRead8(a); }
+  static inline void    wr (Z80&, uint16_t a, uint8_t v) { memWrite8(a, v); }
+  static inline uint8_t in (Z80&, uint16_t p)            { return ioIn(p); }
+  static inline void    out(Z80&, uint16_t p, uint8_t v) { ioOut(p, v); }
+};
+typedef Z80Core<ZxBus> Cpu;
+
 void machineWire() {
   cpu.rd  = memRead8;
   cpu.wr  = memWrite8;
@@ -212,20 +223,20 @@ void runFrame() {
   autoTypeFrame();
 
   while (frameT() < 32) {
-    if (cpu.irq(0xFF)) break;
-    cpu.step();
+    if (Cpu::irq(cpu, 0xFF)) break;
+    Cpu::step(cpu);
   }
 
   const int firstShown = FIRST_PAPER_LINE - BORDER_Y;   // scanline shown as output row 0
   for (int line = 0; line < LINES; line++) {
-    const uint64_t target = frameStart + (uint64_t)(line + 1) * T_LINE;
+    const uint32_t target = frameStart + (uint32_t)(line + 1) * T_LINE;
     if (trap) {
-      while (cpu.cycles < target) {
+      while ((int32_t)(cpu.cycles - target) < 0) {
         if (cpu.PC == 0x0556) tapeTrap();
-        cpu.step();
+        Cpu::step(cpu);
       }
     } else {
-      while (cpu.cycles < target) cpu.step();
+      Cpu::runUntil(cpu, target);
     }
     const int row = line - firstShown;
     if (capture && row >= 0 && row < OUT_H) borderLine[row] = borderCol;

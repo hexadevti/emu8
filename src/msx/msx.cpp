@@ -19,6 +19,7 @@
 #include "msx_disk.h"
 #include "msx_diskrom.h"
 #include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
+#include "../shared/dirty_bands.h"     // PicoCalc: push only the bands that changed
 
 // ---- per-frame RGB565 conversion band (malloc'd on the MSX path only, like nesScratch) ----------
 static uint16_t* msxScratch = nullptr;
@@ -193,9 +194,9 @@ void msxSetup() {
 // host's effective Z80 speed so we know how much headroom there is over the real 3.58 MHz.
 void msxLoop() {
   if (msx::biosLen > 0) {                              // uncapped benchmark (~0.8 s of emulated time)
-    uint64_t c0 = msx::cpu.cycles; uint32_t t0 = millis();
+    uint32_t c0 = msx::cpu.cycles; uint32_t t0 = millis();
     while ((uint32_t)(millis() - t0) < 800) msx::runFrame();
-    uint32_t dt = millis() - t0; uint64_t dc = msx::cpu.cycles - c0;
+    uint32_t dt = millis() - t0; uint32_t dc = msx::cpu.cycles - c0;
     msxMeasuredMhz = (dt > 0) ? (float)((double)dc / ((double)dt * 1000.0)) : 0.0f;
     sprintf(buf, "MSX: uncapped Z80 = %.2f MHz (real MSX1 = 3.58)", msxMeasuredMhz);
     printLog(buf);
@@ -259,6 +260,7 @@ void msxRenderFrame() {
   const bool osk  = oskActive();
   const bool fill = screenFill && !osk;
   const bool borders = !fill && (clearScr || outTop != lastTop || outH != lastH || osk != lastOsk || lastFill);
+  const bool repaint = borders || clearScr;          // anything may have drawn over the picture
   clearScr = false;
   lastTop = outTop; lastH = outH; lastOsk = osk; lastFill = fill;
 #else
@@ -274,29 +276,16 @@ void msxRenderFrame() {
     tft.fillRect(M_OX + M_W, outTop, 320 - (M_OX + M_W), outH, TFT_BLACK); // right border
   }
 #if defined(BOARD_PICOCALC)
-  // One address window for the whole picture, pixels streamed through writeColor()'s ping-pong DMA
-  // staging: the palette lookup of one line overlaps the SPI transfer of the previous one, instead
-  // of convert-then-wait per 8-line band.
-  if (fill) {
-    // 256x192 -> 320x240, nearest neighbour: each 4 source lines become 5 (sy = oy*4/5) and each
-    // 4 source pixels become 5 (the first one doubled). ~57% more SPI time than 1:1.
-    tft.setAddrWindow(0, 0, 320, 240);
-    tft.startWrite();
-    for (int oy = 0; oy < 240; oy++) {
-      const uint8_t* src = msx::framebuffer + (oy * 4 / 5) * M_W;
-      for (int x = 0; x < M_W; x += 4) {
-        const uint16_t c0 = pal[src[x] & 0x0F];
-        tft.writeColor(c0, 1);
-        tft.writeColor(c0, 1);
-        tft.writeColor(pal[src[x + 1] & 0x0F], 1);
-        tft.writeColor(pal[src[x + 2] & 0x0F], 1);
-        tft.writeColor(pal[src[x + 3] & 0x0F], 1);
-      }
-    }
-    tft.endWrite();
+  // Fill or 1:1: only the 8-line bands that changed since the last push go out (dirty_bands.h).
+  if (fill || outH == M_H) {
+    const int sent = dband::pushIndexed256(msx::framebuffer, pal, 0x0F, M_OX, outTop, fill, false,
+                                           0x4D535831u, repaint);
+    dband::frameDone("MSX", sent);
     msx::frameReady = false;
     return;
   }
+  // On-screen keyboard open (picture scaled): the whole picture in one address window, pixels
+  // streamed through writeColor()'s ping-pong DMA staging.
   tft.setAddrWindow(M_OX, outTop, M_W, outH);
   tft.startWrite();
   for (int oy = 0; oy < outH; oy++) {

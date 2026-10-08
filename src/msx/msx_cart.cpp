@@ -46,6 +46,18 @@ uint8_t cartRead(int slot, uint16_t a) {
   return (off < (uint32_t)c.size) ? c.data[off] : 0xFF;
 }
 
+// Direct pointer to the 8 KB of cart ROM the CPU sees at chunk (a >> 13), for the Z80 bus's page map
+// (msx_machine.cpp). nullptr sends the window through cartRead instead: no cart, outside $4000-$BFFF,
+// the SCC register area mapped in, or a bank that runs past the end of the image.
+const uint8_t* cartPage(int slot, int chunk) {
+  if (slot < 1 || slot > 2 || chunk < 2 || chunk > 5) return nullptr;
+  Cart& c = g_cart[slot];
+  if (!c.data) return nullptr;
+  if (c.mapper == MAP_SCC && c.sccEnabled && chunk == 4) return nullptr;
+  uint32_t off = (uint32_t)c.bank8k[chunk - 2] * 0x2000;
+  return (off + 0x2000 <= (uint32_t)c.size) ? c.data + off : nullptr;
+}
+
 void cartWrite(int slot, uint16_t a, uint8_t v) {
   if (slot < 1 || slot > 2) return;
   Cart& c = g_cart[slot];

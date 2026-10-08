@@ -45,7 +45,9 @@ struct Z80 {
   int  eiPending;       // (reserved) EI bookkeeping
   bool _eiBlock;        // true for exactly one instruction after EI: blocks irq() acceptance
 
-  uint64_t cycles;      // running T-state count
+  uint32_t cycles;      // running T-state count. 32-bit on purpose (64-bit math is several
+                        //   instructions per op on Cortex-M0+): it wraps every ~20 min at 3.58 MHz,
+                        //   so compare with (int32_t)(a - b), never a < b -- see Z80Core::runUntil
 
   // memory + I/O hooks supplied by the host
   uint8_t (*rd)(uint16_t addr);
@@ -54,6 +56,8 @@ struct Z80 {
   void    (*out)(uint16_t port, uint8_t val);
 
   void reset();         // power-on / RESET: PC=0, I=R=0, IFF=0, IM 0, SP=FFFF
+  // Generic entry points through the rd/wr/in/out hooks. The machines' frame loops use their own
+  // Z80Core<Bus> instantiation instead (z80_core.h), which inlines the memory map.
   int  step();          // execute one instruction; returns the T-states it took
   bool irq(uint8_t bus);// raise a maskable INT (bus = byte placed on the data bus for IM0/IM2);
                         //   returns true if accepted (IFF1 was set). MSX uses IM 1 (bus ignored).

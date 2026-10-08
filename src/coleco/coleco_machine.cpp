@@ -23,6 +23,7 @@
 #include "coleco.h"
 #include "../msx/msx.h"   // the TMS9918A (msx::vdp*) and its vram/framebuffer pointers
 #include "../sms/sms.h"   // the SN76489 (sms::psgWrite)
+#include "../z80/z80_core.h"
 
 namespace coleco {
 
@@ -112,6 +113,15 @@ void ioOut(uint16_t port, uint8_t v) {
   }
 }
 
+// The frame loop runs Z80Core<ColecoBus>: the memory map above is small enough to inline whole.
+struct ColecoBus {
+  static inline uint8_t rd (Z80&, uint16_t a)            { return memRead8(a); }
+  static inline void    wr (Z80&, uint16_t a, uint8_t v) { memWrite8(a, v); }
+  static inline uint8_t in (Z80&, uint16_t p)            { return ioIn(p); }
+  static inline void    out(Z80&, uint16_t p, uint8_t v) { ioOut(p, v); }
+};
+typedef Z80Core<ColecoBus> Cpu;
+
 void machineWire() {
   cpu.rd  = memRead8;
   cpu.wr  = memWrite8;
@@ -138,10 +148,9 @@ void machineReset() {
 // level is sampled once per scanline, which is well inside the VBlank window games expect.
 void runFrame() {
   const int LINES = 262;
-  const uint64_t TPL = 228;
+  const uint32_t TPL = 228;
   for (int line = 0; line < LINES; line++) {
-    uint64_t target = cpu.cycles + TPL;
-    while (cpu.cycles < target) cpu.step();
+    Cpu::runUntil(cpu, cpu.cycles + TPL);
     if (line == VDP_H - 1) {
       // End of the active display: render race-free (only once core 0 has shown the last frame),
       // then raise the VBlank flag. Sprite collision / 5th-sprite status come out of the render.
@@ -149,7 +158,7 @@ void runFrame() {
       msx::vdpEndFrame();
     }
     bool level = msx::vdpIrqActive();
-    if (level && !nmiLine) cpu.nmi();
+    if (level && !nmiLine) Cpu::nmi(cpu);
     nmiLine = level;
   }
 }

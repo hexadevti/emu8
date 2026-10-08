@@ -40,12 +40,33 @@ static uint8_t* cartRam = nullptr;
 
 static uint32_t slotBase[3] = {0, 0x4000, 0x8000};   // bankReg[] resolved to ROM offsets (per write)
 
+// The same mapping as cartRead, resolved to one pointer per 8 KB of CPU space for the Z80 bus in
+// sms_machine.cpp. Kept current by updatePages() on every mapper write and image change; nullptr
+// means "ask cartRead" (the 1 KB fixed vector area while slot 0 is paged, cart RAM not allocated,
+// or a bank past the end of the image).
+const uint8_t* cartRdPage[6];
+
+static void updatePages() {
+  for (int k = 0; k < 6; k++) {
+    const int slot = k >> 1;
+    const uint32_t half = (uint32_t)(k & 1) * 0x2000;
+    const uint8_t* p = nullptr;
+    if (slot == 2 && (ramCtrl & 0x08)) {
+      if (cartRam) p = cartRam + ((ramCtrl & 0x04) ? 0x4000 : 0) + half;
+    } else if (k != 0 || slotBase[0] == 0) {
+      uint32_t off = slotBase[slot] + half;
+      if (rom && off + 0x2000 <= (uint32_t)romLen) p = rom + off;
+    }
+    cartRdPage[k] = p;
+  }
+}
+
 static inline uint32_t bankBase(int slot) {
   int b = bankReg[slot];
   b = bankPow2 ? (b & bankMask) : (b % numBanks);
   return (uint32_t)b * 0x4000;
 }
-static void updateSlots() { for (int s = 0; s < 3; s++) slotBase[s] = bankBase(s); }
+static void updateSlots() { for (int s = 0; s < 3; s++) slotBase[s] = bankBase(s); updatePages(); }
 
 void cartSetImage(const uint8_t* data, int len) {
   rom = (uint8_t*)data; romLen = len;
@@ -82,10 +103,11 @@ void cartWrite(uint16_t a, uint8_t v) {
       ramCtrl = v;
       if ((v & 0x08) && !cartRam && (cartRam = (uint8_t*)malloc(CART_RAM_SIZE)))
         memset(cartRam, 0, CART_RAM_SIZE);
+      updatePages();
       return;
-    case 0xFFFD: bankReg[0] = v; slotBase[0] = bankBase(0); return;
-    case 0xFFFE: bankReg[1] = v; slotBase[1] = bankBase(1); return;
-    case 0xFFFF: bankReg[2] = v; slotBase[2] = bankBase(2); return;
+    case 0xFFFD: bankReg[0] = v; slotBase[0] = bankBase(0); updatePages(); return;
+    case 0xFFFE: bankReg[1] = v; slotBase[1] = bankBase(1); updatePages(); return;
+    case 0xFFFF: bankReg[2] = v; slotBase[2] = bankBase(2); updatePages(); return;
   }
   if (a >= 0x8000 && a < 0xC000 && (ramCtrl & 0x08) && cartRam) {   // write to mapped cart RAM
     int rb = (ramCtrl & 0x04) ? 1 : 0;

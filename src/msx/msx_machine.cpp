@@ -11,6 +11,7 @@
 
 #include "msx.h"
 #include "msx_disk.h"
+#include "../z80/z80_core.h"
 #include <string.h>
 #if defined(BOARD_DESKTOP)
 #include "../desktop/debug_bridge.h"   // desktop debugger: pause/step/breakpoints/watchpoints/heat (no-op on device)
@@ -66,6 +67,62 @@ void ioOut(uint16_t port, uint8_t v) {
   }
 }
 
+// ---- Z80 bus ----------------------------------------------------------------------------------------
+// The frame loop runs Z80Core<MsxBus>. Reads and RAM writes go through a map of 8 KB page pointers --
+// one load and an index instead of the slot decode + cartRead bank arithmetic per byte. A null page
+// takes the full memRead8/memWrite8 path (disk interface, SCC registers, open bus, partial BIOS).
+// The map is rebuilt whenever the mapping can have changed: after any slow-path write (cart mapper
+// and disk bank-select registers are memory writes), after an OUT to the slot register $A8, and at
+// the top of every frame (BIOS/cart load, reset and eject all happen with the Z80 parked). The
+// desktop build keeps the slow path for every access so the debugger's heat map and watchpoints see
+// the whole bus.
+#if !defined(BOARD_DESKTOP)
+static const uint8_t* rdPage[8];
+static uint8_t*       wrPage[8];
+
+static void mapPages() {
+  for (int k = 0; k < 8; k++) {
+    const uint32_t a = (uint32_t)k << 13;
+    const uint8_t* r = nullptr;
+    uint8_t*       w = nullptr;
+    switch (ppiPageSlot(k >> 1)) {
+      case 0:  if (bios && a + 0x2000 <= (uint32_t)biosLen) r = bios + a; break;
+      case 1:  r = cartPage(1, k); break;
+      case 2:  break;                                   // disk interface: always the slow path
+      default: if (ram) { r = ram + a; w = ram + a; } break;
+    }
+    rdPage[k] = r;
+    wrPage[k] = w;
+  }
+}
+#endif
+
+struct MsxBus {
+#if defined(BOARD_DESKTOP)
+  static inline uint8_t rd(Z80&, uint16_t a)            { return memRead8(a); }
+  static inline void    wr(Z80&, uint16_t a, uint8_t v) { memWrite8(a, v); }
+#else
+  static inline uint8_t rd(Z80&, uint16_t a) {
+    const uint8_t* p = rdPage[a >> 13];
+    return p ? p[a & 0x1FFF] : memRead8(a);
+  }
+  static inline void wr(Z80&, uint16_t a, uint8_t v) {
+    uint8_t* p = wrPage[a >> 13];
+    if (p) { p[a & 0x1FFF] = v; return; }
+    memWrite8(a, v);
+    mapPages();
+  }
+#endif
+  static inline uint8_t in (Z80&, uint16_t p) { return ioIn(p); }
+  static inline void    out(Z80&, uint16_t p, uint8_t v) {
+    ioOut(p, v);
+#if !defined(BOARD_DESKTOP)
+    if ((p & 0xFF) == 0xA8) mapPages();
+#endif
+  }
+};
+typedef Z80Core<MsxBus> Cpu;
+
 void machineWire() {
   cpu.rd  = memRead8;
   cpu.wr  = memWrite8;
@@ -86,10 +143,13 @@ void machineReset() {
 // (handling HALT internally), so this loop terminates even when the CPU is halted waiting for the
 // VBlank interrupt that we raise at the end of the frame.
 void runFrame() {
-  const uint64_t TPF = 59736;
-  uint64_t target = cpu.cycles + TPF;
-  while (cpu.cycles < target) {
-#if defined(BOARD_DESKTOP)
+  const uint32_t TPF = 59736;
+  const uint32_t target = cpu.cycles + TPF;
+#if !defined(BOARD_DESKTOP)
+  mapPages();
+  Cpu::runUntil(cpu, target);
+#else
+  while ((int32_t)(cpu.cycles - target) < 0) {
     // Desktop debugger: break at the upcoming PC (breakpoint / run-to-cursor / step-over / step-out).
     if (dbgBpShouldBreak(cpu.PC)) paused = true;                                                      // breakpoint
     if (g_dbgRunToPC >= 0 && cpu.PC == (uint16_t)g_dbgRunToPC) { paused = true; g_dbgRunToPC = -1; }  // run-to / step-over
@@ -102,9 +162,9 @@ void runFrame() {
       g_dbgBreakArmed = true;
     }
     dbgBusTouch(cpu.PC, DBG_HEAT_X);                 // heat map (executed opcode byte)
-#endif
-    cpu.step();
+    Cpu::step(cpu);
   }
+#endif
   // Render on THIS core (the CPU core) so the VDP reads the sprite/VRAM tables race-free, at a
   // consistent point - the end of the active frame, before the VBlank ISR updates them for the
   // next one. Only render into the shared framebuffer once core 0 has finished DISPLAYING the
@@ -113,7 +173,7 @@ void runFrame() {
   // still run every frame regardless, so emulation timing is unaffected.
   if (!frameReady) { vdpRender(); frameReady = true; }
   vdpEndFrame();
-  if (vdpIrqActive()) cpu.irq(0xFF);    // MSX uses IM 1; the data-bus byte is ignored
+  if (vdpIrqActive()) Cpu::irq(cpu, 0xFF);    // MSX uses IM 1; the data-bus byte is ignored
 }
 
 } // namespace msx

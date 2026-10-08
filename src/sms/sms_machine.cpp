@@ -10,6 +10,7 @@
 // links into host/sms_host.cpp. See sms.h.
 
 #include "sms.h"
+#include "../z80/z80_core.h"
 #include <string.h>
 
 namespace sms {
@@ -26,6 +27,20 @@ void memWrite8(uint16_t a, uint8_t v) {
   ram[a & 0x1FFF] = v;                            // work RAM + 0xE000 mirror
   if (a >= 0xFFFC) cartWrite(a, v);               // mapper registers live at the top of RAM
 }
+
+// The frame loop runs Z80Core<SmsBus>: work RAM and the current ROM banks are read straight through
+// cartRdPage (maintained by the mapper in sms_cart.cpp), everything else via the routers above.
+struct SmsBus {
+  static inline uint8_t rd(Z80&, uint16_t a) {
+    if (a >= 0xC000) return ram[a & 0x1FFF];
+    const uint8_t* p = cartRdPage[a >> 13];
+    return p ? p[a & 0x1FFF] : cartRead(a);
+  }
+  static inline void    wr (Z80&, uint16_t a, uint8_t v) { memWrite8(a, v); }
+  static inline uint8_t in (Z80&, uint16_t p)            { return ioIn(p); }
+  static inline void    out(Z80&, uint16_t p, uint8_t v) { ioOut(p, v); }
+};
+typedef Z80Core<SmsBus> Cpu;
 
 void machineWire() {
   cpu.rd  = memRead8;
@@ -54,17 +69,16 @@ void machineReset() {
 void runFrame() {
   const int LINES = 262;
   const int ACTIVE = VDP_H;          // 192 active scanlines
-  const uint64_t TPL = 228;          // T-states per scanline (228*262 = 59736, matches MSX frame)
+  const uint32_t TPL = 228;          // T-states per scanline (228*262 = 59736, matches MSX frame)
   for (int line = 0; line < LINES; line++) {
-    uint64_t target = cpu.cycles + TPL;
-    while (cpu.cycles < target) cpu.step();
+    Cpu::runUntil(cpu, cpu.cycles + TPL);
     vdpLineTick(line);                          // line counter + VBlank flag at line 192
     if (line < ACTIVE) vdpSnapshotLine(line);   // capture R8 hscroll for this raster
-    if (vdpIrqActive()) cpu.irq(0xFF);          // IM 1 -> RST 38h (data-bus byte ignored)
+    if (vdpIrqActive()) Cpu::irq(cpu, 0xFF);    // IM 1 -> RST 38h (data-bus byte ignored)
   }
   // Render race-free at the frame boundary, only once core 0 has displayed the previous frame.
   if (!frameReady) { vdpRender(); frameReady = true; }
-  if (pauseLatch) { pauseLatch = false; cpu.nmi(); }   // PAUSE -> NMI between frames
+  if (pauseLatch) { pauseLatch = false; Cpu::nmi(cpu); }   // PAUSE -> NMI between frames
 }
 
 } // namespace sms
