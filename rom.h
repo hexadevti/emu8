@@ -1,5 +1,5 @@
 // Apple II system ROMs: these used to be ~30K of flash byte-arrays right here in rom.h. They now
-// live on the SD card under /roms/apple2/ and are loaded into PSRAM/SRAM buffers at boot by
+// live on the SD card in /roms/ (AppleWin's file names) and are loaded into PSRAM/SRAM buffers at boot by
 // apple2LoadRoms() (src/apple2/apple2_roms.cpp). Declared here (rom.h is pulled in by emu.h
 // everywhere) as pointers, null until loaded. `rom` is a unique global (SMS's ROM is sms::rom).
 extern const unsigned char* rom;                  // $D000-$FFFF native (II+) ROM (12K)

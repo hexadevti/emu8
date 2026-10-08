@@ -65,7 +65,7 @@ A corrupted length field can make a client wait for bytes that will never come. 
 
 ## Commands
 
-Paths are absolute UTF-8 strings such as `/roms/msx/cbios.rom`, without a trailing NUL unless noted. `..` segments are rejected.
+Paths are absolute UTF-8 strings such as `/roms/hotbit12.rom`, without a trailing NUL unless noted. `..` segments are rejected.
 
 | cmd | name | request payload | reply payload (after status) |
 |---|---|---|---|

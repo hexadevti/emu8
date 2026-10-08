@@ -4,7 +4,7 @@ import { zipStore } from './zip.js';
 
 const $ = id => document.getElementById(id);
 const DEFAULT_BAUD = 115200;
-const PLACES = ['/', '/roms', '/roms/apple2', '/roms/c64', '/roms/msx', '/roms/pcxt'];
+const PLACES = ['/', '/roms'];
 
 // Extension -> which emu8 system opens it (README "microSD card preparation").
 const SYSTEMS = {

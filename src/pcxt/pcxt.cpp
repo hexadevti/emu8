@@ -38,13 +38,14 @@ static inline uint8_t* pcAllocFast(size_t n) {                 // internal SRAM 
   return p;
 }
 
-// Read /roms/pcxt/bios.bin off the SD card into a malloc'd buffer (kept for the session). Defined
+// Read /roms/pcxt_bios.bin off the SD card into a malloc'd buffer (kept for the session). Defined
 // here because the fabgl BIOS TU (fabgl/bios.cpp, GPLv3) doesn't include emu.h / the Arduino SD API;
 // BIOS::init + pcBiosFont8x8 call this to fetch what used to be the embedded `biosrom` array.
 uint8_t* pcxtReadBiosRom(size_t* outLen) {
   *outLen = 0;
   char path[ROMSEL_SLOT_LEN];
-  strcpy(path, romPath(ROMSEL_PCXT_BIOS));   // ROMS page pick, else /roms/pcxt/bios.bin
+  strcpy(path, romPath(ROMSEL_PCXT_BIOS));   // ROMS page pick, else /roms/pcxt_bios.bin
+  if (!*path) { printLog("PC-XT: no BIOS set - cannot boot"); return 0; }
   busTake();
   File f = FSTYPE.open(path, FILE_READ);
   int len = f ? (int)f.size() : 0;
@@ -71,7 +72,8 @@ uint8_t* pcxtReadBiosRom(size_t* outLen) {
 size_t pcxtReadBiosRomInto(uint8_t* dst, size_t maxLen) {
   if (!dst) return 0;
   char path[ROMSEL_SLOT_LEN];
-  strcpy(path, romPath(ROMSEL_PCXT_BIOS));   // ROMS page pick, else /roms/pcxt/bios.bin
+  strcpy(path, romPath(ROMSEL_PCXT_BIOS));   // ROMS page pick, else /roms/pcxt_bios.bin
+  if (!*path) { printLog("PC-XT: no BIOS set - cannot boot"); return 0; }
   busTake();
   File f = FSTYPE.open(path, FILE_READ);
   size_t len = f ? (size_t)f.size() : 0;
@@ -186,7 +188,7 @@ static bool pcLooksLikePcDisk(const char* path) {
 // AFTER releasing the bus lock -- pcLooksLikePcDisk() takes that lock itself.
 #define PCXT_MAX_FILES 200
 static bool pcxtAccept(const std::string &n) { return pcIsDiskImage(n); }
-static FileBrowser pcxtBrowser = { "PCXT", &pcFiles, pcxtAccept, pcLooksLikePcDisk, PCXT_MAX_FILES, "/" };
+static FileBrowser pcxtBrowser = { "PCXT", &pcFiles, pcxtAccept, pcLooksLikePcDisk, PCXT_MAX_FILES, "" };
 
 void loadPcxtFilesSync()      { fbScan(pcxtBrowser); }
 void pcxtBrowseEnter(const char *path) { fbEnter(pcxtBrowser, path); }

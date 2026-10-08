@@ -2,7 +2,7 @@
 //
 // The emulated SD card is a host directory (g_sdRoot). Default = the repo's sdcard/ (absolute, so the
 // ROMs under sdcard/roms/ are found no matter where the .exe is launched from), overridable via the
-// EMU_SD_DIR env var. SD-relative paths the cores pass ("/roms/c64/basic.bin") are mapped under it by
+// EMU_SD_DIR env var. SD-relative paths the cores pass ("/roms/basic-901226-01.bin") are mapped under it by
 // sdHostPath(). Also defines the globals that sd.cpp owned on the device (hspi, gBusLock, SD).
 #if defined(BOARD_DESKTOP)
 
@@ -23,7 +23,7 @@ SDClass           SD;                     // the emulated card (FSTYPE == SD via
 const char *desktopBaseDir();             // hal.cpp — directory of the .exe (trailing slash)
 
 // SD-card root on the host + relative-path mapper (declared in FS.h). Dev builds use the repo's
-// sdcard/ (absolute, passed in by CMake as EMU_DEFAULT_SD_DIR) so /roms/<platform>/*.bin resolve
+// sdcard/ (absolute, passed in by CMake as EMU_DEFAULT_SD_DIR) so /roms/*.rom resolve
 // regardless of the working directory. Portable/release builds (EMU_PORTABLE) leave it undefined and
 // use sdcard/ next to the .exe instead -- resolved in FSSetup(), after SDL is up. EMU_SD_DIR overrides.
 #if defined(EMU_DEFAULT_SD_DIR)

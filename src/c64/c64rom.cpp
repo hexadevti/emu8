@@ -3,9 +3,9 @@
 
 // C64 system ROMs: BASIC ($A000-$BFFF), KERNAL ($E000-$FFFF) and CHARGEN ($D000-$DFFF).
 // These used to be embedded here as ~20K of flash byte-arrays. They now live on the SD card
-// under /roms/c64/ and are loaded into PSRAM buffers at boot by c64LoadRoms(), so the firmware
-// no longer carries them. The .bin files were dumped byte-for-byte from the old arrays with
-// tools/extract_rom.py (see sdcard/roms/c64/ in the repo for the staging copies).
+// in /roms/ under VICE's names (basic-901226-01.bin, kernal-901227-03.bin, chargen-901225-01.bin)
+// and are loaded into PSRAM buffers at boot by c64LoadRoms(), so the firmware no longer carries
+// them. They are byte-identical to the old arrays.
 
 const unsigned char *basic_rom   = nullptr;   // $A000-$BFFF  (8K)
 const unsigned char *kernal_rom  = nullptr;   // $E000-$FFFF  (8K)
@@ -21,6 +21,7 @@ const unsigned char *charset_rom = nullptr;   // $D000-$DFFF  (4K character gene
 // loads then failed or threw at random. Called from c64Setup before vicSetup, so sharedBigBuf (the
 // framebuffer later) is free to stage the 4K sectors.
 static const unsigned char *loadRomFile(const char *path, int len, uint32_t flashOff) {
+  if (!*path) { printLog("C64: a ROM is set to none on the ROMS page"); return nullptr; }
   File f = FSTYPE.open(path, FILE_READ);
   if (!f) { sprintf(buf, "C64: ROM missing: %s", path); printLog(buf); return nullptr; }
   if ((int)f.size() != len) {
@@ -44,11 +45,11 @@ static const unsigned char *loadRomFile(const char *path, int len, uint32_t flas
 #endif
 }
 
-// Load all three system ROMs from /roms/c64 on the SD card. Returns false if any is missing
+// Load all three system ROMs from /roms on the SD card. Returns false if any is missing
 // or the wrong size; the caller must then show an error and NOT run the 6510 (the read paths
 // index these pointers directly and would dereference null).
 bool c64LoadRoms() {
-  // romPath(): the file picked on the settings ROMS page, else /roms/c64/<name>.
+  // romPath(): the file picked on the settings ROMS page, else /roms/<name>.
   basic_rom   = loadRomFile(romPath(ROMSEL_C64_BASIC),   0x2000, 0x0000);
   kernal_rom  = loadRomFile(romPath(ROMSEL_C64_KERNAL),  0x2000, 0x2000);
   charset_rom = loadRomFile(romPath(ROMSEL_C64_CHARGEN), 0x1000, 0x4000);

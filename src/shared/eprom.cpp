@@ -51,6 +51,36 @@ void apple2LoadMachineConfig()
   a2ReadName(s.hdName,   &selectedHdFileName);
 }
 
+// The settings a new device starts with. Written to the EEPROM buffer only; the caller commits.
+static void eepromWriteDefaults()
+{
+  EEPROM.writeBool(HdDiskEEPROMaddress, false);
+  EEPROM.writeBool(IIpIIeEEPROMaddress, false);
+  EEPROM.writeBool(Fast1MhzSpeedEEPROMaddress, true);
+  EEPROM.writeBool(JoystickEEPROMaddress, true);
+  EEPROM.writeBool(VideoColorEEPROMaddress, true);
+  EEPROM.writeBool(SoundEEPROMaddress, true);
+  EEPROM.writeChar(VolumeEEPROMaddress, 0x40);
+  EEPROM.writeBool(dacSoundEEPROMaddress, false);
+  EEPROM.writeChar(PlatformEEPROMaddress, PLATFORM_APPLE2);
+  writeStringToEEPROM(NewDeviceConfigEEPROMaddress, "ok");
+  writeStringToEEPROM(HdFileNameEEPROMaddress, "/");
+  writeStringToEEPROM(DiskFileNameEEPROMaddress, "/");   // "/" = drive empty (disk.cpp)
+}
+
+// General settings -> RESET SETTINGS: every byte back to the erased state, then the defaults written
+// straight away, so the reboot that follows is an ordinary boot and not a "New Device" one (on the
+// PicoCalc that first boot hung on the disk scan). The ROM picks / base folders go with it.
+void eepromFactoryReset()
+{
+  for (int i = 0; i < EEPROM_SIZE; i++) EEPROM.write(i, 0xFF);
+  eepromWriteDefaults();
+  EEPROM.commit();
+  a2SeedIIeConfig();
+  romSelEraseAll();   // on the PicoCalc those live in a flash sector of their own, not the EEPROM
+  printLog("EEPROM: reset to factory defaults");
+}
+
 void epromSetup() {
     
   EEPROM.begin(EEPROM_SIZE);
@@ -64,19 +94,17 @@ void epromSetup() {
   {
     
     Serial.println("New Device");
-    int e1 = EEPROM.writeBool(HdDiskEEPROMaddress, false);
-    int e2 = EEPROM.writeBool(IIpIIeEEPROMaddress, false);
-    int e3 = EEPROM.writeBool(Fast1MhzSpeedEEPROMaddress, true);
-    int e4 = EEPROM.writeBool(JoystickEEPROMaddress, true);
-    int e8 = EEPROM.writeBool(VideoColorEEPROMaddress, true);
-    int e9 = EEPROM.writeBool(SoundEEPROMaddress, true);
-    int e10 = EEPROM.writeChar(VolumeEEPROMaddress, 0x40);
-    int e11 = EEPROM.writeBool(dacSoundEEPROMaddress, false);
-    int e12 = EEPROM.writeChar(PlatformEEPROMaddress, PLATFORM_APPLE2);
-    int e7 = writeStringToEEPROM(NewDeviceConfigEEPROMaddress, "ok");
-    int e5 = writeStringToEEPROM(HdFileNameEEPROMaddress, "/");
-    int e6 = writeStringToEEPROM(DiskFileNameEEPROMaddress, "/karateka.dsk");
+    eepromWriteDefaults();
     EEPROM.commit();
+#if defined(BOARD_PICOCALC)
+    // The PicoCalc's first boot after the settings flash is written hangs on the disk scan, while
+    // the next one comes up fine: reboot once now, with the defaults saved, into the system menu.
+    a2SeedIIeConfig();
+    printLog("EEPROM: defaults written, rebooting once");
+    requestSplashOnNextBoot();
+    delay(100);
+    ESP.restart();
+#endif
   }
   
   a2SeedIIeConfig();
@@ -115,7 +143,8 @@ void epromSetup() {
   screenFill = (EEPROM.readChar(ScreenFillEEPROMaddress) == 1);
   { char s = EEPROM.readChar(NesDisplaySkipEEPROMaddress); nesDisplaySkip = (s >= 1 && s <= 3) ? (uint8_t)s : 3; }  // default 3; fresh EEPROM (0xFF) -> 3
   msxFast = (EEPROM.readChar(MsxSpeedEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> NORMAL
-  msxDiskRom = (EEPROM.readChar(MsxDiskRomEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> AUTO
+  msxDiskRom = (uint8_t)EEPROM.readChar(MsxDiskRomEEPROMaddress);
+  if (msxDiskRom != MSX_DISKROM_ON && msxDiskRom != MSX_DISKROM_OFF) msxDiskRom = MSX_DISKROM_AUTO;   // fresh EEPROM (0xFF) too
   nesFast = (EEPROM.readChar(NesSpeedEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> NORMAL
   smsFast = (EEPROM.readChar(SmsSpeedEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> NORMAL
   colecoFast = (EEPROM.readChar(ColecoSpeedEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> NORMAL
@@ -237,7 +266,7 @@ void saveEEPROM() {
     EEPROM.writeChar(ScreenFillEEPROMaddress, screenFill ? 1 : 0);
     EEPROM.writeChar(NesDisplaySkipEEPROMaddress, (char)nesDisplaySkip);
     EEPROM.writeChar(MsxSpeedEEPROMaddress, msxFast ? 1 : 0);
-    EEPROM.writeChar(MsxDiskRomEEPROMaddress, msxDiskRom ? 1 : 0);
+    EEPROM.writeChar(MsxDiskRomEEPROMaddress, msxDiskRom);
     EEPROM.writeChar(NesSpeedEEPROMaddress, nesFast ? 1 : 0);
     EEPROM.writeChar(SmsSpeedEEPROMaddress, smsFast ? 1 : 0);
     EEPROM.writeChar(ColecoSpeedEEPROMaddress, colecoFast ? 1 : 0);

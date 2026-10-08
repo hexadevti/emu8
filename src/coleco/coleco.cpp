@@ -39,18 +39,15 @@ static bool colEqCI(const std::string& s, const char* t) {
 }
 
 // ---- BIOS (8K, copyrighted: the user supplies it) -----------------------------------------------
-static const char* const BIOS_NAMES[] = { "/roms/coleco/coleco.rom", "/roms/coleco/colecovision.rom",
-                                          "/roms/coleco/bios.rom", "/coleco.rom", "/colecovision.rom" };
 static bool isBiosName(const std::string& n) {
   return colEqCI(n, "coleco.rom") || colEqCI(n, "colecovision.rom") || colEqCI(n, "bios.rom");
 }
 
 static bool loadBiosFromSD() {
-  // A BIOS picked on the settings ROMS page goes first; the usual names are the fallback.
-  char picked[ROMSEL_SLOT_LEN] = "";
-  if (const char* o = romOverride(ROMSEL_COLECO_BIOS)) strcpy(picked, o);
-  const char* names[1 + sizeof(BIOS_NAMES) / sizeof(BIOS_NAMES[0])] = { picked };
-  for (size_t i = 0; i < sizeof(BIOS_NAMES) / sizeof(BIOS_NAMES[0]); i++) names[i + 1] = BIOS_NAMES[i];
+  // Exactly one file: the BIOS picked on the settings ROMS page, else /roms/coleco.rom.
+  char picked[ROMSEL_SLOT_LEN];
+  strcpy(picked, romPath(ROMSEL_COLECO_BIOS));
+  const char* names[] = { picked };
   for (const char* nm : names) {
     if (!*nm) continue;
     File f = FSTYPE.open(nm, FILE_READ);
@@ -74,7 +71,7 @@ static bool loadBiosFromSD() {
 #endif
   }
   coleco::biosLen = 0;
-  printLog("COLECO: NO BIOS - put coleco.rom (8K) in /roms/coleco on the SD card");
+  printLog("COLECO: NO BIOS - put coleco.rom (8K) in /roms on the SD card");
   return false;
 }
 
@@ -85,7 +82,7 @@ static bool colAccept(const std::string &n) {
   if (isBiosName(n)) return false;
   return colEndsCI(n, ".col") || colEndsCI(n, ".rom") || colEndsCI(n, ".bin");
 }
-static FileBrowser colBrowser = { "COLECO", &colecoFiles, colAccept, nullptr, COLECO_MAX_FILES, "/" };
+static FileBrowser colBrowser = { "COLECO", &colecoFiles, colAccept, nullptr, COLECO_MAX_FILES, "" };
 
 void loadColecoFilesSync()   { fbScan(colBrowser); }
 void colecoBrowseEnter(const char *path) { fbEnter(colBrowser, path); }
@@ -147,7 +144,7 @@ void colecoLoop() {
   const uint32_t FRAME_US = 16687;
   uint32_t nextUs = micros();
   for (;;) {
-    if (OptionsWindow) { vTaskDelay(pdMS_TO_TICKS(20)); nextUs = micros(); continue; }
+    if (OptionsWindow || paused) { vTaskDelay(pdMS_TO_TICKS(20)); nextUs = micros(); continue; }
     if (colResetReq)   { colResetReq = false; coleco::machineReset(); nextUs = micros(); }
     if (coleco::biosLen == 0) { vTaskDelay(pdMS_TO_TICKS(100)); continue; }   // no BIOS -> nothing to run
 
@@ -291,6 +288,26 @@ bool colecoLoadSelected(const char* path) {
   return true;
 }
 
+// Standard unmount (proto.h / src/shared/media.cpp). Called with the Z80 parked (settings open).
+// The cartridge is pulled out and the machine resets when it resumes: the BIOS keeps running with
+// open bus (0xFF) at 0x8000, as a real ColecoVision with an empty slot, behind the same
+// "no cartridge" overlay as a cartless boot. colecoLoadSelected() plugs a new one in.
+bool colecoMediaMounted(const char *path) {
+  return path && *path && coleco::romLen > 0 && selectedColecoFileName == path;
+}
+
+void colecoUnmount(const char *path) {
+  if (!colecoMediaMounted(path)) return;
+  coleco::cartSetImage(nullptr, 0);                      // unmap first: cart space reads 0xFF
+#if !BOARD_ROM_IN_FLASH
+  if (g_romBuf) { free(g_romBuf); g_romBuf = nullptr; }  // (flash image: nothing to free)
+#endif
+  sprintf(buf, "COLECO: %s unmounted", path);           // log before the clear: path may BE the marker
+  printLog(buf);
+  selectedColecoFileName = "";                           // not auto-loaded on the next boot
+  colResetReq = true;
+}
+
 void colecoScanFiles() { loadColecoFilesSync(); }
 
 // ---- startup overlay: no BIOS, or no cartridge ----
@@ -311,7 +328,7 @@ bool colecoRenderLoadWarning() {
       tft.drawString("COLECO: NO BIOS FOUND", 8, 8, 2);
       tft.setTextColor(TFT_WHITE, TFT_BLACK);
       tft.drawString("Put the 8K ColecoVision BIOS on the SD card", 8, 40, 1);
-      tft.drawString("as /roms/coleco/coleco.rom and restart,", 8, 56, 1);
+      tft.drawString("as /roms/coleco.rom and restart,", 8, 56, 1);
       tft.drawString("or pick one in SETTINGS (Ctrl-F1) > ROMS.", 8, 72, 1);
     } else {
       tft.drawString("COLECO: NO CARTRIDGE LOADED", 8, 8, 2);

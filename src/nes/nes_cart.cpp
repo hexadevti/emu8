@@ -230,7 +230,7 @@ bool nesLoadROM(const char *path) {
 // SD ROM browser (.nes + subdirectories). fbScan lists directories with a trailing "/" and
 // the options UI navigates into them; see src/shared/filebrowser.h.
 static bool nesAccept(const std::string &n) { return endsWithCI(n, ".nes"); }
-static FileBrowser nesBrowser = { "NES", &nesFiles, nesAccept, nullptr, NES_MAX_FILES, "/" };
+static FileBrowser nesBrowser = { "NES", &nesFiles, nesAccept, nullptr, NES_MAX_FILES, "" };
 
 void loadNesFilesSync()      { fbScan(nesBrowser); }
 void browseEnter(const char *path) { fbEnter(nesBrowser, path); }
@@ -277,3 +277,21 @@ bool nesLoadFirstRom() {
 }
 
 } // namespace nes
+
+// Standard media unmount (proto.h). Called with the CPU paused in the settings window: the cart is
+// pulled out and, when the CPU resumes, cpuLoop finds no ROM and idles on a black screen until the
+// browser loads another one.
+bool nesMediaMounted(const char *path) {
+  return path && *path && nes::prgRomSize > 0 && selectedNesFileName == path;
+}
+
+void nesUnmount(const char *path) {
+  if (!nesMediaMounted(path)) return;
+  for (int i = 0; i < 4; i++) nes::prgMap[i] = nullptr;   // unmap first: readers see no cart,
+  for (int i = 0; i < 8; i++) nes::chrMap[i] = nullptr;   // never freed memory
+  nes::freeCart();
+  sprintf(buf, "NES: %s unmounted", path);             // log before the clear: path may BE the marker
+  printLog(buf);
+  selectedNesFileName = "";                            // not auto-loaded on the next boot
+  nes::nesResetReq = true;
+}

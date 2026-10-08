@@ -176,6 +176,7 @@ static void fbScanBody(FileBrowser &b)
 // is not. Exceptions are on in this build (the FQBN carries exceptions=Enabled).
 void fbScan(FileBrowser &b)
 {
+  if (b.dir.length() == 0) b.dir = appsBaseDir();   // first scan: the general settings' apps folder
   try {
     fbScanBody(b);
   } catch (const std::bad_alloc &) {

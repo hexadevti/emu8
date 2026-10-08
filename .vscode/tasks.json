@@ -306,18 +306,15 @@
       "problemMatcher": []
     },
     {
-      // With the UF2 Loader installed, BOOTSEL flashing (above) would overwrite its boot hook. This
-      // copies the build into pico1-apps/emu8-dev.uf2 on the SD card instead: emu8 on COM5 is sent
-      // into the loader menu (1234-baud touch), whose USB drive mode mounts the card; the script
-      // copies and ejects, then pick the file in the menu. See tools/deploy-picocalc.ps1.
+      // Copies the build into pico1-apps/emu8.uf2 over emu8's USB serial port only (SD Manager
+      // protocol): no USB drive, no eject, no rescan. Then opens the UF2 Loader menu: Enter on the
+      // file. See tools/deploy-serial.py. The old drive-based deploy is tools/deploy-picocalc.ps1.
       "label": "Deploy RP2040 (SD)",
       "type": "process",
-      "command": "powershell.exe",
+      "command": "python",
       "args": [
-        "-NoProfile",
-        "-ExecutionPolicy", "Bypass",
-        "-File", "${workspaceFolder}/tools/deploy-picocalc.ps1",
-        "-Uf2", "${workspaceFolder}/build-picocalc-rp2040/emu8.ino.uf2"
+        "${workspaceFolder}/tools/deploy-serial.py",
+        "--uf2", "${workspaceFolder}/build-picocalc-rp2040/emu8.ino.uf2"
       ],
       "problemMatcher": [],
       "presentation": { "reveal": "always", "panel": "shared", "clear": true }

@@ -163,7 +163,7 @@ extern char keymem;
 // their own, read in place (romsel.cpp) -- the EEPROM stops at the Apple IIe HD name.
 #define EEPROM_SIZE 1792
 #else
-#define EEPROM_SIZE 2624   // ... + the ColecoVision cartridge name (1280) + the ZX Spectrum file name (1408) + the Apple IIe's own disk/HD names (1536, 1664) + the picked system ROMs (1792, ROMSEL_COUNT x ROMSEL_SLOT_LEN)
+#define EEPROM_SIZE 2752   // ... + the ColecoVision cartridge name (1280) + the ZX Spectrum file name (1408) + the Apple IIe's own disk/HD names (1536, 1664) + the picked system ROMs (1792, ROMSEL_COUNT x ROMSEL_SLOT_LEN) + the ROM / apps base folders (2624, 2688)
 #endif
 extern int fnSelected;
 extern int joystickCycles0;
@@ -250,7 +250,7 @@ extern int logLineCount;
 #define ColecoSpeedEEPROMaddress 16    // Coleco: 1 = FAST (uncapped) / 0 = NORMAL (paced to 3.58 MHz)
 #define NesSpeedEEPROMaddress 17       // NES: 1 = FAST (uncapped) / 0 = NORMAL (paced ~60fps/1.79MHz)
 #define ZxSpeedEEPROMaddress 21        // ZX Spectrum: 1 = FAST (uncapped) / 0 = NORMAL (paced to 3.5 MHz)
-#define MsxDiskRomEEPROMaddress 22     // MSX: 1 = disk ROM always in slot 2 / 0 = AUTO (only with a .dsk mounted)
+#define MsxDiskRomEEPROMaddress 22     // MSX: DISK ROM setting, MSX_DISKROM_* (anything else = AUTO)
 // The Apple IIe keeps its own copy of the Apple-only settings (DEVICE, SPEED, the disk and HD
 // images); the addresses above without "IIe" are the II+'s. See eprom.cpp.
 #define IIeHdDiskEEPROMaddress 18
@@ -271,15 +271,21 @@ extern int logLineCount;
 #define IIeDiskFileNameEEPROMaddress 1536  // Apple IIe: last .dsk (the II+'s is DiskFileNameEEPROMaddress)
 #define IIeHdFileNameEEPROMaddress 1664    // Apple IIe: last HD image (the II+'s is HdFileNameEEPROMaddress)
 // User-picked system ROM files (settings menu -> ROMS; src/shared/romsel.cpp). One short slot per
-// ROM a platform needs; an empty slot means the default /roms/<platform>/ name.
+// ROM a platform needs; an empty slot means the default name in /roms/.
 #define RomSelEEPROMaddress 1792
 #define ROMSEL_SLOT_LEN 64                // length byte + up to 63 chars of path
+#define ROMSEL_NONE     "-"               // stored in a slot: no ROM file at all (romPath() = "")
 enum RomSlot : uint8_t {
   ROMSEL_A2_IIPLUS, ROMSEL_A2_IIE, ROMSEL_A2_DISKII, ROMSEL_A2_MOUSE, ROMSEL_A2_HD,
   ROMSEL_C64_BASIC, ROMSEL_C64_KERNAL, ROMSEL_C64_CHARGEN,
   ROMSEL_MSX_BIOS, ROMSEL_MSX_DISK, ROMSEL_COLECO_BIOS, ROMSEL_ZX_ROM, ROMSEL_PCXT_BIOS,
   ROMSEL_COUNT                            // 13 x 64 = 832 bytes: 1792..2623
 };
+// Two more records of the same shape right after the ROM slots (general settings, splash Ctrl-F1):
+// the folder the default ROM names live in, and the folder every file browser starts in.
+#define ROMSEL_BASE_ROMS  ROMSEL_COUNT          // 2624..2687, empty = "/roms"
+#define ROMSEL_BASE_APPS  (ROMSEL_COUNT + 1)    // 2688..2751, empty = "/"
+#define ROMSEL_RECORDS    (ROMSEL_COUNT + 2)
 struct RomSlotInfo {
   uint8_t platform;                       // Platform the ROM belongs to
   int8_t  a2Model;                        // Apple II only: 0 = II+, 1 = IIe, -1 = both
@@ -295,7 +301,12 @@ extern String selectedAtariFileName; // Atari: currently-loaded ROM (settings fi
 extern String selectedMsxFileName;   // MSX: currently-loaded .rom cartridge (settings file browser marker)
 extern bool msxFast;                 // MSX: true = run uncapped (FAST), false = pace to real 3.58 MHz
 extern float msxMeasuredMhz;         // MSX: measured uncapped Z80 speed (one-time boot benchmark)
-extern bool msxDiskRom;              // MSX: true = disk ROM always installed (Disk BASIC), false = only with a .dsk
+// MSX DISK ROM setting: whether the disk-interface ROM (Disk BASIC) sits in slot 2. A mounted .dsk
+// always gets it, whatever the setting -- the drive cannot work without it.
+enum { MSX_DISKROM_AUTO = 0,          // in, except beside a cartridge
+       MSX_DISKROM_ON   = 1,          // always in, beside a cartridge too
+       MSX_DISKROM_OFF  = 2 };        // only with a .dsk mounted
+extern uint8_t msxDiskRom;
 extern String selectedSmsFileName;   // SMS: currently-loaded .sms/.bin ROM (settings file browser marker)
 extern bool smsFast;                 // SMS: true = run uncapped (FAST), false = pace to real 3.58 MHz
 extern float smsMeasuredMhz;         // SMS: measured uncapped Z80 speed (one-time boot benchmark)

@@ -718,7 +718,6 @@ volatile uint8_t vicFbState = VIC_FB_FREE;
 volatile uint8_t vicLinesDone = 0;   // display lines (0..200) of the WRITING frame complete
 volatile uint32_t vicFrameNo = 0;    // TEMP debug: PAL frames since boot (serial fb dump)
 volatile uint32_t vicDrawnFrameNo = 0;
-uint8_t vicLineRegs[200][4];         // TEMP debug: d011 d016 d018 bank per drawn line
 static bool vicDrawFrame = true;     // this frame goes to the framebuffer
 // At most one frame in VIC_MIN_FRAMES is drawn, even when the panel is quick to take it (the render
 // task only sends the bands that changed, so a mostly-still screen goes out in a few ms): rendering
@@ -761,10 +760,6 @@ void drawRasterline() {
     // framebuffer may be on its way to the panel.
     static uint8_t scratchLine[320 + 16];   // +16: double-width sprite spill, as in the fb halves
     bitmap = vicDrawFrame ? vicLine(rasterline - 51) : scratchLine;
-    if (vicDrawFrame) {
-      uint8_t *lr = vicLineRegs[rasterline - 51];
-      lr[0] = vicreg[0x11] | (vertborder ? 0x80 : 0); lr[1] = vicreg[0x16]; lr[2] = vicreg[0x18]; lr[3] = vicmem >> 14;
-    }
     if (!vertborder) {
       uint8_t d011 = vicreg[0x11];
       uint8_t deltay = d011 & 7;

@@ -10,7 +10,8 @@
 // more for readability than the handful of bytes these empty functions cost.
 //
 // The bool returns are false on purpose: "no warning overlay is showing" for the two
-// RenderLoadWarning hooks, and "nothing was loaded" for the two LoadSelected hooks -- exactly
+// RenderLoadWarning hooks, and "nothing was loaded" for the LoadSelected hooks and "nothing is mounted" for
+// the MediaMounted / unmount hooks -- exactly
 // what a caller expects from a core with nothing to draw and no file to open.
 // The browse hooks are no-ops for the same reason: with no core there is no browser to move.
 #include "../../emu.h"
@@ -25,6 +26,10 @@ void msxScanFiles() {}
 void msxBrowseEnter(const char *) {}
 void msxBrowseUp() {}
 bool msxLoadSelected(const char *) { return false; }
+void msxUnmountDisk() {}
+bool msxDiskMounted(const char *) { return false; }
+void msxUnloadCart() {}
+bool msxCartLoaded(const char *) { return false; }
 
 #endif  // !BOARD_HAS_MSX_CORE
 
@@ -39,6 +44,8 @@ void smsScanFiles() {}
 void smsBrowseEnter(const char *) {}
 void smsBrowseUp() {}
 bool smsLoadSelected(const char *) { return false; }
+bool smsMediaMounted(const char *) { return false; }
+void smsUnmount(const char *) {}
 
 #endif  // !BOARD_HAS_SMS_CORE
 
@@ -53,6 +60,8 @@ void colecoScanFiles() {}
 void colecoBrowseEnter(const char *) {}
 void colecoBrowseUp() {}
 bool colecoLoadSelected(const char *) { return false; }
+bool colecoMediaMounted(const char *) { return false; }
+void colecoUnmount(const char *) {}
 
 #endif  // !BOARD_HAS_COLECO_CORE
 
@@ -68,5 +77,7 @@ void zxScanFiles() {}
 void zxBrowseEnter(const char *) {}
 void zxBrowseUp() {}
 bool zxLoadSelected(const char *) { return false; }
+bool zxMediaMounted(const char *) { return false; }
+void zxUnmount(const char *) {}
 
 #endif  // !BOARD_HAS_ZX_CORE

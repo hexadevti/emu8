@@ -151,24 +151,43 @@ static inline __attribute__((always_inline)) void setflags() {
   if (opflags & FL_V) SR |= ((result ^ ((unsigned short)A)) & (result ^ value16) & 0x0080) >> 1;
 }
 
-void cpuLoop() {
-  // No ROM at boot (e.g. the carts live in a subfolder, which the boot autoload does not search):
-  // idle until the settings browser loads one, instead of parking forever -- otherwise a ROM
-  // picked there only starts after a reboot. Also wait out the pause so the cart is fully read.
-  if (!cartRom) {
-    printLog("Atari: no ROM loaded; CPU idle until one is picked in settings");
-    while (running && (!cartRom || paused)) delay(100);
-    if (!running) return;
-    atariResetReq = false;             // the reset below covers the pending request
-    tiaReset(); riotReset();
+// No cartridge: none at boot (e.g. the carts live in a subfolder, which the boot autoload does not
+// search), or unmounted from the settings window. Idle until the settings browser loads one instead
+// of parking forever -- otherwise a ROM picked there only starts after a reboot. The screen goes
+// black and the voices silent; the pause is waited out too, so the new cart is fully read.
+static void idleWithoutCart() {
+  printLog("Atari: no ROM loaded; CPU idle until one is picked in settings");
+  audioWrite(0x19, 0); audioWrite(0x1A, 0);        // AUDV0/AUDV1 = 0: no stuck tone
+  tiaReset();                                      // clears the live framebuffer to black
+  bool blanked = false;
+  while (running && (!cartRom || paused)) {
+    // Hand the renderer one black snapshot (it only draws frontBuf when frontState==1).
+    if (!blanked && frontBuf && frontState == 0) {
+      memset(frontBuf, 0, 160 * ATARI_FB_H);
+      frontRows = 192;
+      __sync_synchronize();
+      frontState = 1;
+      blanked = true;
+    }
+    delay(100);
   }
-  cpuReset();
+}
+
+void cpuLoop() {
+  if (cartRom) cpuReset();             // else the no-cart idle below runs first and requests the reset
   lastPC = PC;
 
   uint32_t fpsLastMs = millis(), fpsLastFrames = atariFrameCount, fpsSeenFrame = atariFrameCount;
 
   while (running) {
     while (paused) { delay(100); fpsLastMs = millis(); fpsLastFrames = atariFrameCount; }
+
+    if (!cartRom) {                    // no cart at boot, or unmounted while paused
+      idleWithoutCart();
+      if (!running) return;
+      atariResetReq = true;            // start the newly loaded cart from a clean reset
+      fpsLastMs = millis(); fpsLastFrames = atariFrameCount;
+    }
 
     // A new ROM was loaded from the settings window -> reset TIA/RIOT/CPU to start it cleanly.
     if (atariResetReq) { atariResetReq = false; tiaReset(); riotReset(); cpuReset(); lastPC = PC; }

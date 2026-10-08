@@ -39,8 +39,8 @@ static unsigned char* a2Alloc(size_t n, const char* what) {
 // ROMs it still loads from SD once FSSetup has run, plus FSSetup's own buffers (~5K measured), the
 // disk/HD image scan, the file-browser vectors and the FreeRTOS task stacks that setup() creates
 // below us. A IIe does NOT load iiplus.bin -- read8 reaches it only from the II+ side of
-// `if (AppleIIe)` -- so the ROM half of this is iie.bin plus 1072 bytes of card ROM, and where
-// BOARD_A2_ROM_IN_FLASH holds iie.bin in flash it is the 1072 bytes alone.
+// `if (AppleIIe)` -- so the ROM half of this is the IIe ROM plus 768 bytes of card ROM, and where
+// BOARD_A2_ROM_IN_FLASH holds the IIe ROM in flash it is the 768 bytes alone.
 //
 // Compared against the reported free size and NOT against a probe malloc, which is what this
 // originally did. On the RP2040 malloc handed back a 46000-byte block with 25404 bytes free and the
@@ -50,13 +50,17 @@ static unsigned char* a2Alloc(size_t n, const char* what) {
 // It is still only an estimate of what comes later, so it is the cheap early exit rather than the
 // decision: apple2LoadRoms() makes the real call once FSSetup's buffers are also on the books.
 #if defined(BOARD_PICOCALC)
-// Less the speaker's 2K task stack, which on this board sits in sharedBigBuf's idle end instead
-// of the heap (speakerSetup, src/shared/speaker.cpp).
-#define A2_IIE_RESERVE (20000 - 2048)
+// What still comes off the heap after the map on this board: card ROMs 0.8K, the disk scan 0.8K,
+// the video / keyboard / OSK setup, and headroom for the file browser at run time. Not counted:
+// the menu buffers and language-card bank 2.1 (idle C64 code RAM, a2LendC64Code), the speaker
+// stack (sharedBigBuf's idle end), the IIe ROM (flash, staged through trackRawData) and the late
+// disk save (polled from cpuLoop(), no task). 8000 was too little -- the boot passed and then
+// hung -- so this keeps well clear of it.
+#define A2_IIE_RESERVE 12000
 #elif BOARD_A2_ROM_IN_FLASH
-#define A2_IIE_RESERVE 20000    // 1072 of card ROM + SD buffers + scan + task stacks
+#define A2_IIE_RESERVE 20000    // 768 of card ROM + SD buffers + scan + task stacks
 #else
-#define A2_IIE_RESERVE 34000    // ...and 16696 more when iie.bin comes off the card
+#define A2_IIE_RESERVE 34000    // ...and 16K more when the IIe ROM comes off the card
 #endif
 
 // True while auxram / the three heap IIe banks hold malloc'd blocks, so apple2FallbackToIIplus()
@@ -69,6 +73,49 @@ static bool a2IIeMapOnHeap = false;
 // .bss that would otherwise sit idle on the one board where the IIe map is short of exactly that
 // much heap. Everywhere else, and if the lend is refused, it comes off the heap like its siblings.
 static unsigned char* a2LentBank = nullptr;
+
+// The C64's hot path runs from SRAM on this board (C64_HOT, src/c64/c64.h): ~7K of code in one
+// run of .data, from c64::ciaTick up to c64::nextRasterline. The system is fixed for the session
+// (picking another one reboots), so while an Apple II runs that code is never executed -- and
+// it is the same 7K the IIe has been short of since it moved there. So the Apple II borrows it:
+// the language card's 4K bank 2.1 and the two menu buffers are carved out of it, and the C64
+// keeps its full speed. The bounds are sanity-checked; if the layout ever changes, this returns
+// nullptr and everything comes off the heap as before.
+#if defined(BOARD_PICOCALC)
+namespace c64 { void ciaTick(int cpuCycles); uint8_t nextRasterline(); }
+static unsigned char* a2LendC64Code(size_t n, const char* what)
+{
+  static uintptr_t next = 0, end = 0;
+  static bool probed = false;
+  if (!probed) {
+    probed = true;
+    uintptr_t lo = (uintptr_t)&c64::ciaTick & ~(uintptr_t)1;          // Thumb bit off
+    uintptr_t hi = (uintptr_t)&c64::nextRasterline & ~(uintptr_t)1;
+    if (lo >= 0x20000000u && hi < 0x20040000u && hi > lo && hi - lo <= 0x4000) {
+      next = (lo + 3) & ~(uintptr_t)3;
+      end  = hi;
+    }
+    sprintf(buf, "Apple II: C64 RAM code %s (%u bytes to lend)", end ? "lent" : "NOT where expected",
+            (unsigned)(end ? end - next : 0));
+    printLog(buf);
+  }
+  if (!end || end - next < n) return nullptr;
+  unsigned char* p = (unsigned char*)next;
+  next += (n + 3) & ~(size_t)3;
+  sprintf(buf, "Apple II: %s in idle C64 code RAM", what);
+  printLog(buf);
+  return p;
+}
+#endif
+
+// Heap unless the idle C64 code RAM can take it. Never passed to free().
+static unsigned char* a2AllocLent(size_t n, const char* what)
+{
+#if defined(BOARD_PICOCALC)
+  if (unsigned char* p = a2LendC64Code(n, what)) return p;
+#endif
+  return a2Alloc(n, what);
+}
 
 static unsigned char* a2AllocMb21()
 {
@@ -188,13 +235,13 @@ void memoryAlloc() {
                         // frees ~48K of heap so the render/joystick/disk tasks can allocate.
   // The language card, common to both machines.
   memoryBankSwitchedRAM1 = a2Alloc(0x2000, "bank-switched RAM 1");
-  memoryBankSwitchedRAM2_1 = a2Alloc(0x1000, "bank-switched RAM 2.1");
+  memoryBankSwitchedRAM2_1 = a2AllocLent(0x1000, "bank-switched RAM 2.1");
   memoryBankSwitchedRAM2_2 = a2Alloc(0x1000, "bank-switched RAM 2.2");
   if (!apple2MemAllocFailed && AppleIIe && !a2AllocIIeMap())
     apple2FallbackToIIplus("no room for the IIe map plus its ROM/disk/stack budget");
   if (!AppleIIe) a2AliasIIplusMap();
-  menuScreen = a2Alloc(0x546, "menu screen");
-  menuColor = a2Alloc(0x546, "menu color");
+  menuScreen = a2AllocLent(0x546, "menu screen");
+  menuColor = a2AllocLent(0x546, "menu color");
   showFreeMem();
   if (apple2MemAllocFailed) {
     printLog("Apple II: NOT starting the 6502 -- this board does not have enough RAM.");

@@ -33,6 +33,7 @@ void requestSplashOnNextBoot() { splashOnBootMagic = SPLASH_ON_BOOT_MAGIC; }
 RTC_NOINIT_ATTR static uint32_t sdManagerOnBootMagic;
 #define SDMGR_ON_BOOT_MAGIC 0x53444D47u
 static void requestSdManagerOnNextBoot() { sdManagerOnBootMagic = SDMGR_ON_BOOT_MAGIC; }
+void rebootToSdManager() { requestSdManagerOnNextBoot(); delay(50); ESP.restart(); }   // also: USB serial "@sdmgr"
 bool sdManagerBootRequested()
 {
   bool yes = (esp_reset_reason() == ESP_RST_SW) && sdManagerOnBootMagic == SDMGR_ON_BOOT_MAGIC;
@@ -155,8 +156,13 @@ static void hintClearBar() { tft.fillPanelRect(0, kHintTop, kHintW, kHintH, TFT_
 static void hintText(const char **keys, const char **joy)
 {
   const bool apple = (currentPlatform == PLATFORM_APPLE2);
+#if defined(BOARD_PICOCALC)   // no F6 key: Shift-F3 arrives as F8 (input_picocalc.cpp)
+  *keys = apple ? "Ctrl-F1 options   Ctrl-F3 reset   Ct-Sh-F1 systems"
+                : "Ctrl-F1 options   Ctrl-Shift-F1 systems";
+#else
   *keys = apple ? "Ctrl-F1 options   Ctrl-F3 reset   Ctrl-F6 systems"
                 : "Ctrl-F1 options   Ctrl-F6 systems";
+#endif
   switch (currentPlatform) {
     case PLATFORM_APPLE2: *joy = "Arrows joystick   Space/F4 btn0   F5 btn1";   break;
     case PLATFORM_C64:   *joy = "Arrows joystick   Space fire";                break;
@@ -165,6 +171,9 @@ static void hintText(const char **keys, const char **joy)
     case PLATFORM_MSX:   *joy = "Arrows joystick   Space trigger";             break;
     case PLATFORM_COLECO:*joy = "Arrows  Space/F4 L  X/F5 R  0-9 keypad  -=*  = #"; break;
     case PLATFORM_ZX:    *joy = "Shift=CAPS  Ctrl/Alt=SYMBOL  F12 reset"; break;
+#if defined(BOARD_PICOCALC)
+    case PLATFORM_SMS:   *joy = "Arrows  Space/F4 btn1  X/F5 btn2  Ctrl-F3 pause"; break;
+#endif
     default:             *joy = "Arrows joystick   Space fire";                break;
   }
 }
@@ -286,6 +295,7 @@ uint16_t last_x = 0;
 #define SPLASH_ROW_GAP 4
 #define SPLASH_COLS    6
 struct SplashSystem { const char *label; uint8_t platform; int8_t iie; const char *why; };
+#define SPLASH_SETUP 0xFF   // "platform" of the SETUP button: opens the general settings (optionsui.cpp)
 static const SplashSystem splashSystems[] = {
   { "II+",   PLATFORM_APPLE2,   0, "SOON"   },
   { "IIe",   PLATFORM_APPLE2,   1, "NO RAM" },   // greyed once memoryAlloc has found it does not fit
@@ -298,6 +308,7 @@ static const SplashSystem splashSystems[] = {
   { "COLECO", PLATFORM_COLECO, -1, "SOON"   },
   { "ZX48",  PLATFORM_ZX,      -1, "SOON"   },
   { "SD MGR", PLATFORM_SDMANAGER, -1, "N/A"  },   // not an emulator: the SD card file manager
+  { "SETUP", SPLASH_SETUP,          -1, ""     },   // not a system: the general settings (Ctrl-F1)
 };
 #define SPLASH_N     ((int)(sizeof(splashSystems) / sizeof(splashSystems[0])))
 #define SPLASH_PITCH (320 / SPLASH_COLS)   // 53px pitch,
@@ -334,6 +345,7 @@ static bool splashEnabled(int i)
   // a II+ and sets this; from then on the button is greyed "NO RAM" instead of lying.
   if (splashSystems[i].iie > 0 && apple2IIeUnavailable) return false;
   switch (splashSystems[i].platform) {
+    case SPLASH_SETUP:      return true;
     case PLATFORM_PCXT:     return BOARD_HAS_PCXT_CORE;
     case PLATFORM_MSX:      return BOARD_HAS_MSX_CORE;
     case PLATFORM_SMS:      return BOARD_HAS_SMS_CORE;
@@ -404,7 +416,11 @@ static void splashFinish()           // boot the current platform
 // on this render task (see splashKeyEvent above), so no locking against splashService().
 void splashOpen()
 {
-  if (splashActive) { splashFinish(); return; }       // the same key closes it again
+  if (splashActive) {                                 // the same key closes it again
+    optionsUiCloseGeneral();                          // (and the general settings over it)
+    splashFinish();
+    return;
+  }
   if (OptionsWindow) showHideOptionsWindow();         // one full-screen menu at a time
   paused = true;
   splashResumeCpu = true;
@@ -415,8 +431,12 @@ void splashOpen()
 }
 #endif
 
+// The general settings closed: paint the menu again, and restart its timeout.
+void splashRepaint() { splashDrawn = false; }
+
 static void splashSelect(int idx)
 {
+  if (splashSystems[idx].platform == SPLASH_SETUP) { optionsUiOpenGeneral(); return; }
   // Deselect the previously highlighted button and mark the tapped one, swap the subtitle for a
   // loading message, hold it for a second, then close the splash (or reboot if the system
   // changed, since setup() must re-init the new core / rebuild the Apple memory map).
@@ -462,7 +482,11 @@ static void splashService()
     tft.setSwapBytes(false);
     tft.setTextDatum(MC_DATUM);
     tft.setTextColor(tft.color565(150, 160, 175), TFT_BLACK);
+#if defined(BOARD_PICOCALC)
+    tft.drawString("SELECT SYSTEM    Ctrl-F1: SETUP", 160, SPLASH_SUB_Y, 2);
+#else
     tft.drawString("SELECT SYSTEM", 160, SPLASH_SUB_Y, 2);
+#endif
     for (int i = 0; i < SPLASH_N; i++) splashDrawBtn(i, splashEnabled(i));
     splashDrawn = true;
   }
@@ -615,7 +639,24 @@ void renderLoop(void *pvParameters)
     if (splashActive)
     {
       displaySetUiMode(true);
-      splashService();
+#if defined(BOARD_DESKTOP)
+      // Desktop debug: EMU_DBG_GENERAL opens the general settings over the boot menu (offline capture;
+      // "help" / "reset" go one page further).
+      static bool dbgGeneral = getenv("EMU_DBG_GENERAL") != nullptr;
+      if (dbgGeneral && splashDrawn) {
+        dbgGeneral = false;
+        optionsUiOpenGeneral();
+        const char *pg = getenv("EMU_DBG_GENERAL");
+        int moves = !strcmp(pg, "help") ? 3 : !strcmp(pg, "reset") ? 2 : !strcmp(pg, "roms") ? 0 : -1;
+        if (moves >= 0) { for (int i = 0; i < moves; i++) optionsUiKeyArrow(0, 1); optionsUiKeyEnter(false); }
+      }
+#endif
+      if (OptionsWindow) {             // the general settings, opened over the menu (Ctrl-F1 / SETUP)
+        optionsUiPoll();
+        optionsUiRender();
+      } else {
+        splashService();
+      }
       vTaskDelay(pdMS_TO_TICKS(15));
       continue;
     }
@@ -671,7 +712,7 @@ void renderLoop(void *pvParameters)
       continue;
     }
 
-    // ColecoVision startup overlay: no BIOS in /roms/coleco, or no cartridge picked yet. Touch is
+    // ColecoVision startup overlay: no BIOS in /roms, or no cartridge picked yet. Touch is
     // still polled so a tap opens SETTINGS (the cartridge browser).
     if (currentPlatform == PLATFORM_COLECO && colecoRenderLoadWarning())
     {
@@ -681,7 +722,7 @@ void renderLoop(void *pvParameters)
       continue;
     }
 
-    // ZX Spectrum startup overlay: no ROM in /roms/zxspectrum. (No tape is needed: it boots to BASIC.)
+    // ZX Spectrum startup overlay: no ROM in /roms. (No tape is needed: it boots to BASIC.)
     if (currentPlatform == PLATFORM_ZX && zxRenderLoadWarning())
     {
       oskPoll();
@@ -699,7 +740,7 @@ void renderLoop(void *pvParameters)
       continue;
     }
 
-    // Apple II startup overlay: held when the system ROMs are missing from /roms/apple2 on the SD card.
+    // Apple II startup overlay: held when the system ROMs are missing from /roms on the SD card.
     // Touch is polled so a tap opens SETTINGS (ROMS), which the overlay yields to.
     if (currentPlatform == PLATFORM_APPLE2 && apple2RenderLoadWarning())
     {

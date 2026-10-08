@@ -143,6 +143,10 @@ void keyboard_bit()
                   diskChanged = true;
                   showHideOptionsWindow();
                 }
+                else if (keyboard_data[2] == 0x66) // BACKSPACE: unmount the highlighted (loaded) image
+                {
+                  optionsUiKeyUnmount();
+                }
                 keymem = 0;
               }
                 if (keyboard_data[2] == 0x05) // F1

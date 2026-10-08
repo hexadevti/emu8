@@ -170,16 +170,14 @@ function Build-Desktop {
   $bwin = Join-Path $work 'desktop-build'
   Copy-Item (Join-Path $bwin 'emu8.exe') $pkg
   Get-ChildItem $bwin -Filter '*.dll' | Copy-Item -Destination $pkg
-  foreach ($d in 'roms\apple2', 'roms\c64', 'roms\coleco', 'roms\msx', 'roms\zxspectrum', 'roms\pcxt') {
-    New-Item -ItemType Directory -Force (Join-Path $pkg "sdcard\$d") | Out-Null
-  }
+  New-Item -ItemType Directory -Force (Join-Path $pkg 'sdcard\roms') | Out-Null
   @"
 emu8 v$Version -- Windows desktop build (SDL2)
 
 Run emu8.exe. The emulated SD card is the sdcard\ folder next to it: put disk/cartridge images
-there (any sub-folder), and copy the system ROMs from the source tree's roms/ folder
-(https://github.com/hexadevti/emu8/tree/main/roms) into sdcard\roms\ exactly as on a real card --
-the Apple II, C64, ColecoVision, ZX Spectrum and PC-XT cores need them. Set EMU_SD_DIR to use a different folder, and
+there (any sub-folder), and download the system ROMs listed under "ROM sources"
+(https://github.com/hexadevti/emu8#rom-sources) into sdcard\roms\ exactly as on a real card --
+the Apple II, C64, MSX, ColecoVision, ZX Spectrum and PC-XT cores need them. Set EMU_SD_DIR to use a different folder, and
 EMU_PLATFORM=<apple2|c64|nes|atari|msx|sms|coleco|zx|pcxt> to boot a system directly.
 
 Settings persist to eeprom.bin / imgui.ini next to the .exe.
@@ -227,7 +225,7 @@ serve it locally, e.g.   python -m http.server 5180 --directory web   then open 
 
 CLI (any OS, Python 3.8+):   pip install pyserial
   python emu8sd.py --port COM5 info
-  python emu8sd.py --port COM5 --fast put -r ./roms/msx /roms/msx
+  python emu8sd.py --port COM5 --fast put -r ./roms /roms
 
 Full docs: README.md; wire format: PROTOCOL.md.
 "@ | Set-Content -Encoding utf8 (Join-Path $pkg 'START-HERE.txt')
@@ -241,7 +239,7 @@ Full docs: README.md; wire format: PROTOCOL.md.
 # ---------------------------------------------------------------------------------------------
 $commit = (git -C $repo rev-parse HEAD).Trim()
 $short  = $commit.Substring(0, 7)
-$SDCARD = "**SD card:** FAT32. Copy the [``roms/``](https://github.com/hexadevti/emu8/tree/main/roms) folder from the source tree to the card root (the Apple II, C64, ColecoVision, ZX Spectrum and PC-XT cores load their system ROMs from ``/roms/<system>/``), then add your disk/cartridge images — see [microSD card preparation](https://github.com/hexadevti/emu8#microsd-card-preparation)."
+$SDCARD = "**SD card:** FAT32. Download the system ROMs listed under [ROM sources](https://github.com/hexadevti/emu8#rom-sources) into ``/roms/`` on the card (the Apple II, C64, MSX, ColecoVision, ZX Spectrum and PC-XT cores load their system ROMs from ``/roms/``), then add your disk/cartridge images — see [microSD card preparation](https://github.com/hexadevti/emu8#microsd-card-preparation)."
 $NOTES = @{
   cyd = @{ Title = "emu8 v$Version — ESP32 CYD"; Body = @"
 Firmware for the **ESP32 Cheap Yellow Display** (ESP32-2432S024 2.4″ / ESP32-2432S028 2.8″, ILI9341, no PSRAM).
@@ -290,7 +288,7 @@ $SDCARD
   desktop = @{ Title = "emu8 v$Version — Windows desktop"; Body = @"
 Portable **Windows** build of emu8 (SDL2 + Dear ImGui). The same emulator cores as the firmware, with the hardware swapped for a desktop window — mainly a development/debug target.
 
-Unzip anywhere and run ``emu8\emu8.exe``. The emulated SD card is the ``sdcard\`` folder next to the exe (override with ``EMU_SD_DIR``); copy the source tree's [``roms/``](https://github.com/hexadevti/emu8/tree/main/roms) folder into it as ``sdcard\roms\`` (the Apple II, C64, ColecoVision, ZX Spectrum and PC-XT cores load their system ROMs from there). ``F10`` opens the settings / file browser.
+Unzip anywhere and run ``emu8\emu8.exe``. The emulated SD card is the ``sdcard\`` folder next to the exe (override with ``EMU_SD_DIR``); download the system ROMs listed under [ROM sources](https://github.com/hexadevti/emu8#rom-sources) into ``sdcard\roms\`` (the Apple II, C64, ColecoVision, ZX Spectrum and PC-XT cores load their system ROMs from there). ``F10`` opens the settings / file browser.
 "@ }
   sdmanager = @{ Title = "emu8 SD Manager v$Version"; Body = @"
 Manage the board's **microSD card over USB serial** without removing it — browse, upload (drag & drop, folders), download (zip), rename, delete, reboot.
@@ -299,7 +297,7 @@ Manage the board's **microSD card over USB serial** without removing it — brow
 2. Pick a client:
    - **Windows app** (``emu8-sdmanager-v$Version-windows.exe``): portable, no install — run it and click **Connect**. Windows SmartScreen may warn because the exe is unsigned (*More info* → *Run anyway*).
    - From ``emu8-sdmanager-v$Version.zip``, the **Web app** (``web/``, Chrome / Edge / Opera): serve it on localhost, e.g. ``python -m http.server 5180 --directory web``, open http://localhost:5180 and click **Connect**. Installable as an app.
-   - Also in the zip, the **CLI** (``emu8sd.py``, Python 3.8+ with ``pyserial``): ``python emu8sd.py --port COM5 --fast put -r ./roms/msx /roms/msx``
+   - Also in the zip, the **CLI** (``emu8sd.py``, Python 3.8+ with ``pyserial``): ``python emu8sd.py --port COM5 --fast put -r ./roms /roms``
 
 Works with every emu8 board (CYD, JC4827W543, JC1060P470, PicoCalc). Protocol: ``PROTOCOL.md``.
 "@ }

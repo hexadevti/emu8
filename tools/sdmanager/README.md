@@ -73,8 +73,8 @@ pip install pyserial
 python tools/sdmanager/emu8sd.py --port COM5 info
 python tools/sdmanager/emu8sd.py --port COM5 --fast ls /roms
 python tools/sdmanager/emu8sd.py --port COM5 --fast put Karateka.dsk /
-python tools/sdmanager/emu8sd.py --port COM5 --fast put -r ./msx-roms /roms/msx
-python tools/sdmanager/emu8sd.py --port COM5 get /roms/msx ./backup
+python tools/sdmanager/emu8sd.py --port COM5 --fast put -r ./roms /roms
+python tools/sdmanager/emu8sd.py --port COM5 get /roms ./backup
 python tools/sdmanager/emu8sd.py --port COM5 mv /old.dsk /new.dsk
 python tools/sdmanager/emu8sd.py --port COM5 rm -r /games/old
 python tools/sdmanager/emu8sd.py --port COM5 reboot

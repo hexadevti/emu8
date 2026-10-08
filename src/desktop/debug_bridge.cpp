@@ -417,6 +417,22 @@ void dbgEjectSlot(int slot) {
   saveConfig();
 }
 
+// Unmount a loaded file on ANY platform (the shared mediaUnmount, same as the settings UNMOUNT).
+// The ImGui Load window runs with the CPU live, and a cartridge unmount frees memory the CPU reads,
+// so park it first: every core idles on `paused` (6502s per instruction, Z80s at the next frame).
+bool dbgMediaMounted(const char *path) { return mediaIsMounted(path); }
+bool dbgUnmount(const char *path) {
+  if (!mediaIsMounted(path)) return false;
+  std::string p = path;                          // path may be a selected*FileName that gets cleared
+  bool wasPaused = paused;
+  paused = true;
+  vTaskDelay(pdMS_TO_TICKS(60));                 // > one Z80 park tick (20 ms) + a frame in flight
+  bool ok = mediaUnmount(p.c_str());
+  paused = wasPaused;
+  if (ok) saveConfig();                          // not auto-loaded on the next boot
+  return ok;
+}
+
 // ================================ Apple II (6502) =================================================
 // Side-effect-free read: mirrors read8()'s RAM/ROM decode but NEVER touches the $C000-$C0FF
 // soft-switches or the $C100-$CFFF slot-ROM bank flags (which a memory viewer must not perturb).

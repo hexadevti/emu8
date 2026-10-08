@@ -42,7 +42,7 @@ static void loadWarnAdd(const char *path, const char *reason) {
 }
 
 static void freeCart() {
-  if (cartRom) { free(cartRom); cartRom = nullptr; }
+  if (cartRom) { uint8_t *p = cartRom; cartRom = nullptr; free(p); }   // unmap before freeing
   cartSize = 0; cartType = CART_RAW; cartBank = 0; cartRawMask = 0x0FFF; hasSC = false;
 }
 
@@ -126,7 +126,7 @@ bool atariLoadROM(const char *path) {
 static bool atariAccept(const std::string &n) {
   return endsWithCI(n, ".a26") || endsWithCI(n, ".bin");
 }
-static FileBrowser atariBrowser = { "Atari", &atariFiles, atariAccept, nullptr, ATARI_MAX_FILES, "/" };
+static FileBrowser atariBrowser = { "Atari", &atariFiles, atariAccept, nullptr, ATARI_MAX_FILES, "" };
 
 void loadAtariFilesSync()      { fbScan(atariBrowser); }
 void browseEnter(const char *path) { fbEnter(atariBrowser, path); }
@@ -155,3 +155,19 @@ bool atariLoadFirstRom() {
 }
 
 } // namespace atari
+
+// Standard media unmount (proto.h). Called with the CPU paused in the settings window: the cart is
+// pulled out and, when the CPU resumes, cpuLoop finds no ROM and idles on a black screen until the
+// browser loads another one.
+bool atariMediaMounted(const char *path) {
+  return path && *path && atari::cartRom && selectedAtariFileName == path;
+}
+
+void atariUnmount(const char *path) {
+  if (!atariMediaMounted(path)) return;
+  atari::freeCart();
+  sprintf(buf, "Atari: %s unmounted", path);           // log before the clear: path may BE the marker
+  printLog(buf);
+  selectedAtariFileName = "";                          // not auto-loaded on the next boot
+  atari::atariResetReq = true;
+}

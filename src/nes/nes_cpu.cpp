@@ -179,9 +179,21 @@ static inline __attribute__((always_inline)) void setflags() {
   if (opflags & FL_V) SR |= ((result ^ ((unsigned short)A)) & (result ^ value16) & 0x0080) >> 1;
 }
 
+// No cartridge: none at boot (nothing loadable on the SD root), or unmounted from the settings
+// window. Idle until the settings browser loads one instead of parking forever, so a ROM picked
+// there starts without a reboot. The picture goes black (the render task keeps re-pushing the
+// framebuffer on its timeout) and the APU is silenced; the pause is waited out too, so the new
+// cart is fully loaded and its banks mapped before the CPU touches it.
+static void idleWithoutCart() {
+  printLog("NES: no ROM loaded; CPU idle until one is picked in settings");
+  apuWrite(0x15, 0);                                  // disable every channel: no stuck tone
+  fbRendering = false;                                // the PPU is not drawing any more
+  if (framebuffer) memset(framebuffer, 0x0F, 256 * 240);   // master-palette $0F = black
+  while (running && (!prgMap[0] || paused)) delay(100);
+}
+
 void cpuLoop() {
-  if (!prgMap[0]) { printLog("NES: no ROM loaded; CPU idle"); while (running) delay(100); return; }
-  cpuReset();
+  if (prgMap[0]) cpuReset();          // else the no-cart idle below runs first and requests the reset
   lastPC = PC;
 
   // Frame pacing + FPS/MHz readout, gated on the frame counter changing (≤speed checks/sec) so it
@@ -208,6 +220,13 @@ void cpuLoop() {
 #if defined(BOARD_DESKTOP)
     g_dbgBreakArmed = true;                           // re-arm after passing the breakpoint check once
 #endif
+
+    if (!prgMap[0]) {                   // no cart at boot, or unmounted while paused
+      idleWithoutCart();
+      if (!running) return;
+      nesResetReq = true;               // start the newly loaded cart from a clean reset
+      fpsLastMs = millis(); fpsLastFrames = nesFrameCount;
+    }
 
     // A new ROM was loaded from the settings window -> reset CPU+PPU to start it cleanly.
     if (nesResetReq) { nesResetReq = false; ppuReset(); cpuReset(); lastPC = PC; nextFrameUs = micros(); }

@@ -351,11 +351,6 @@ static void msxApplyModifiers(bool shift, bool ctrl, bool alt)
   msxMatrix(6, 1, ctrl);    // CTRL  (row6,col1)
   msxMatrix(6, 2, alt);     // GRAPH (row6,col2) via Alt
 }
-static bool msxIsJoyKey(uint8_t kc)
-{
-  return kc == HID_KEY_ARROW_UP || kc == HID_KEY_ARROW_DOWN ||
-         kc == HID_KEY_ARROW_LEFT || kc == HID_KEY_ARROW_RIGHT || kc == HID_KEY_SPACE;
-}
 static void msxApplyJoystick(const uint8_t *keys)   // active-low: b0 up b1 down b2 left b3 right b4 trgA
 {
   uint8_t m = 0xFF;
@@ -521,6 +516,8 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
         case HID_KEY_ENTER:
         case HID_KEY_KEYPAD_ENTER: optionsUiKeyEnter(ctrl); break;
         case HID_KEY_ESCAPE:       if (!optionsUiKeyEscape()) showHideOptionsWindow(); break;
+        case HID_KEY_DELETE:
+        case HID_KEY_BACKSPACE:    optionsUiKeyUnmount(); break;   // file list: unmount the loaded entry
         case HID_KEY_F10:          showHideOptionsWindow(); break;
       }
       continue;   // menu swallows every key
@@ -532,7 +529,9 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
     }
     if (currentPlatform == PLATFORM_SMS) {
       if (kc == HID_KEY_F11) { smsPauseButton(); continue; }   // SMS PAUSE -> NMI
+#if !defined(BOARD_PICOCALC)   // the PicoCalc's bare F3 arrives as F12 and sits by F4/F5 (buttons)
       if (kc == HID_KEY_F12) { smsHardReset();   continue; }   // soft power-cycle
+#endif
     }
     if (currentPlatform == PLATFORM_PCXT && kc == HID_KEY_F12) { pcxtHardReset(); continue; }  // soft reboot
     if (currentPlatform == PLATFORM_COLECO && kc == HID_KEY_F12) { colecoHardReset(); continue; } // power-cycle
@@ -544,7 +543,9 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
       case PLATFORM_C64:   c64KeyDown(kc); break;   // every key types; the stick reads the arrows too
       case PLATFORM_NES:   nesKbBits |= nesBit(kc); nesSetController(nesKbBits); break;
       case PLATFORM_ATARI: if (atariKey(kc, true)) atariApply(); break;
-      case PLATFORM_MSX:   if (!(joystick && msxIsJoyKey(kc))) msxKeyDown(kc); break;  // arrows+Space = joystick when JOY on
+      // Arrows and Space are keyboard keys on a real MSX (the BIOS reads them as STICK(0)/STRIG(0)),
+      // so they always type; with JOY on they also drive port 1 (msxApplyJoystick).
+      case PLATFORM_MSX:   msxKeyDown(kc); break;
       case PLATFORM_PCXT:  pcxtKeyDown(kc, shift, ctrl, alt); break;                    // USB key -> XT make scancode
     }
   }
@@ -560,7 +561,7 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
       case PLATFORM_C64:   c64KeyUp(kc); break;
       case PLATFORM_NES:   nesKbBits &= ~nesBit(kc); nesSetController(nesKbBits); break;
       case PLATFORM_ATARI: if (atariKey(kc, false)) atariApply(); break;
-      case PLATFORM_MSX:   if (!(joystick && msxIsJoyKey(kc))) msxKeyUp(kc); break;
+      case PLATFORM_MSX:   msxKeyUp(kc); break;
       case PLATFORM_PCXT:  pcxtKeyUp(kc); break;   // USB key -> XT break scancode
       default: break;   // Apple keystrokes are edge-triggered (keymem); nothing to release
     }

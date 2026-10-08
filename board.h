@@ -374,11 +374,11 @@
 #define BOARD_HAS_PSRAM 1
 #endif
 
-// Keep the 16696-byte enhanced IIe ROM in flash (src/apple2/iie_rom_flash.cpp) instead of reading
-// it off the SD card into the heap. Only the PicoCalc needs this, and only because the IIe memory
-// map leaves it 25404 bytes to work with: paying 16696 of them for a ROM that is never written to
-// is what kept the IIe from booting there. The ESP32 boards have the heap for it and load the same
-// image from /roms/apple2/iie.bin as before, so their flash stays as it is.
+// Copy the 16K enhanced IIe ROM (/roms/Apple2e_Enhanced.rom) from the SD card into spare flash
+// (romflash_picocalc.cpp) instead of the heap. Only the PicoCalc needs this, and only because the IIe
+// memory map leaves it 25404 bytes to work with: paying 16K of them for a ROM that is never written
+// to is what kept the IIe from booting there. The ESP32 boards have the heap for it and read the
+// same file into RAM.
 #ifndef BOARD_A2_ROM_IN_FLASH
 #if defined(BOARD_PICOCALC)
 #define BOARD_A2_ROM_IN_FLASH 1

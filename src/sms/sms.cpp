@@ -42,7 +42,7 @@ static bool smsEndsCI(const std::string& s, const char* suf) {
 static bool smsAccept(const std::string &n) {
   return smsEndsCI(n, ".sms") || smsEndsCI(n, ".bin");
 }
-static FileBrowser smsBrowser = { "SMS", &smsFiles, smsAccept, nullptr, SMS_MAX_FILES, "/" };
+static FileBrowser smsBrowser = { "SMS", &smsFiles, smsAccept, nullptr, SMS_MAX_FILES, "" };
 
 void loadSmsFilesSync()      { fbScan(smsBrowser); }
 void smsBrowseEnter(const char *path) { fbEnter(smsBrowser, path); }
@@ -104,7 +104,7 @@ void smsLoop() {
   const uint32_t FRAME_US = 16687;
   uint32_t nextUs = micros();
   for (;;) {
-    if (OptionsWindow) { vTaskDelay(pdMS_TO_TICKS(20)); nextUs = micros(); continue; }
+    if (OptionsWindow || paused) { vTaskDelay(pdMS_TO_TICKS(20)); nextUs = micros(); continue; }
     if (smsResetReq)   { smsResetReq = false; sms::machineReset(); nextUs = micros(); }
     if (sms::romLen == 0) { vTaskDelay(pdMS_TO_TICKS(100)); continue; }   // no ROM -> nothing to run
 
@@ -266,6 +266,25 @@ bool smsLoadSelected(const char* path) {
   sprintf(buf, "SMS: %s (%dK) loaded%s", path, len / 1024, skip ? " [hdr stripped]" : "");
   printLog(buf);
   return true;
+}
+
+// Standard unmount (proto.h / src/shared/media.cpp). Called with the Z80 parked (settings open).
+// The cartridge is pulled out and the SMS resets when it resumes: with romLen 0 smsLoop idles and
+// smsRenderLoadWarning shows the same no-ROM screen as a cartless boot. smsLoadSelected() refills it.
+bool smsMediaMounted(const char *path) {
+  return path && *path && sms::romLen > 0 && selectedSmsFileName == path;
+}
+
+void smsUnmount(const char *path) {
+  if (!smsMediaMounted(path)) return;
+  smsCartLoadImage(nullptr, 0);                          // unmap first: the mapper reads open bus (0xFF)
+#if !BOARD_ROM_IN_FLASH
+  if (g_romBuf) { free(g_romBuf); g_romBuf = nullptr; }  // (flash image: nothing to free)
+#endif
+  sprintf(buf, "SMS: %s unmounted", path);              // log before the clear: path may BE the marker
+  printLog(buf);
+  selectedSmsFileName = "";                              // not auto-loaded on the next boot
+  smsResetReq = true;
 }
 
 void smsScanFiles() { loadSmsFilesSync(); }

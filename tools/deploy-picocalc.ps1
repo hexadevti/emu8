@@ -20,15 +20,21 @@
 # only leaves its "USB is connected" screen once the USB link is down (usb_msc_is_mounted() ->
 # tud_ready(), ui/lib/usb_msc/usb_msc.c). Pick the file in the menu.
 #
+# With -RomsDir, the system ROMs in that folder (e.g. sdcard\roms) are also copied into \roms on
+# the card, and the files the old per-system layout used (\roms\msx\cbios.rom, \roms\apple2\iie.bin,
+# ...) are deleted, since the firmware no longer reads them. Nothing else on the card is touched.
+#
 # Used by the "Deploy RP2040 (SD)" task in .vscode/tasks.json.
 param(
   [string]$Uf2       = "$PSScriptRoot\..\build-picocalc-rp2040\emu8.ino.uf2",
-  [string]$Name      = "emu8-dev.uf2",       # file name in the apps folder (what the menu lists)
+  [string]$Name      = "emu8.uf2",           # file name in the apps folder (what the menu lists)
   [string]$AppsDir   = "pico1-apps",         # pico2-apps for a Pico 2
   [string]$Port      = "",                   # emu8's USB serial port; found by USB id when empty
   [string]$LoaderUf2 = "$PSScriptRoot\.cache\uf2loader-v2.4.1\bootloader_pico.uf2",
   [string]$LoaderUrl = "https://github.com/pelrun/uf2loader/releases/download/v2.4.1/bootloader_pico.uf2",
-  [switch]$ReleaseOnly                       # copy nothing: just hand a mounted card back to the menu
+  [string]$RomsDir   = "",                  # also copy these system ROMs into \roms on the card
+  [int]$WaitSec      = 300,                 # how long to keep trying to reach the loader's drive
+  [switch]$ReleaseOnly                      # copy nothing: just hand a mounted card back to the menu
 )
 $ErrorActionPreference = "Stop"
 
@@ -103,57 +109,68 @@ if ($ReleaseOnly) { Release-Card; Write-Host "Done. The loader menu on the PicoC
 if (-not (Test-Path $Uf2)) { throw "UF2 not found: $Uf2 (build it first)" }
 $Uf2 = (Resolve-Path $Uf2).Path
 
-# --- 1 + 2: already there, or ask emu8 ------------------------------------------------------------
+# --- get to the loader's drive -------------------------------------------------------------------
+# One loop that watches for every state the Pico can be in, instead of one attempt at each in turn.
+# The old sequence gave up on the first surprise: a port held open by a serial monitor, a hung emu8
+# whose stale COM port Windows still lists, or a PicoCalc power-cycled after the script had
+# already moved past "ask emu8". Now whatever shows up while we wait is acted on:
+#   loader drive  -> done
+#   BOOTSEL drive -> flash the UF2 Loader onto it (it then boots straight into its menu)
+#   emu8's port   -> send "@uf2menu" (again every few seconds; retried if the port is busy)
+#   port that never reacts -> 1200-baud touch into BOOTSEL, once
+#   nothing       -> rescan USB now and then (a loader Windows "safely removed" earlier)
+function Flash-Loader($boot) {
+  if (-not (Test-Path $LoaderUf2)) {
+    Write-Host "Downloading $LoaderUrl"
+    New-Item -ItemType Directory -Force -Path (Split-Path $LoaderUf2) | Out-Null
+    Invoke-WebRequest -UseBasicParsing -Uri $LoaderUrl -OutFile $LoaderUf2
+  }
+  Write-Host "Flashing the UF2 Loader ($($boot.DriveLetter):)"
+  Copy-Item -LiteralPath $LoaderUf2 -Destination "$($boot.DriveLetter):\" -Force
+}
+
 $vol = Get-LoaderDrive
-if (-not $vol) {
-  Write-Host "Asking emu8 to reboot into the UF2 Loader menu..."
-  $end = (Get-Date).AddSeconds(15)
-  while (-not $vol -and (Get-Date) -lt $end) {
-    $p = Wait-For { Get-PicoPort } 3
-    if ($p) {
-      if (-not (Send-Serial $p 115200 "`n@uf2menu`n")) {
-        Write-Host "Can't open $p - is a serial monitor (or another deploy) holding it? Close it, or press Ctrl-Shift-Up."
-        break
-      }
-      # emu8 heard it if its port goes away; then the loader needs a few seconds to mount the card
-      if (Wait-For { -not (Get-PicoPort) } 3) { $vol = Wait-For { Get-LoaderDrive } 20; break }
-    }
-    $vol = Get-LoaderDrive
-  }
-}
-
-# --- 3: reflash the loader through BOOTSEL --------------------------------------------------------
-if (-not $vol) {
-  $p = Get-PicoPort
+$end = (Get-Date).AddSeconds($WaitSec)
+$portSince = $null; $lastAsk = [datetime]::MinValue; $lastScan = Get-Date; $touched = $false
+$saidBusy = $false; $saidHelp = $false; $t0 = Get-Date
+while (-not $vol -and (Get-Date) -lt $end) {
   $boot = Get-BootselDrive
-  if ($p -and -not $boot) {
-    Write-Host "No answer from emu8 on $p - resetting it into BOOTSEL to reflash the UF2 Loader..."
-    [void](Send-Serial $p 1200 $null)
-    $boot = Wait-For { Get-BootselDrive } 15
-  }
-  if ($boot) {
-    if (-not (Test-Path $LoaderUf2)) {
-      Write-Host "Downloading $LoaderUrl"
-      New-Item -ItemType Directory -Force -Path (Split-Path $LoaderUf2) | Out-Null
-      Invoke-WebRequest -UseBasicParsing -Uri $LoaderUrl -OutFile $LoaderUf2
-    }
-    Write-Host "Flashing the UF2 Loader ($($boot.DriveLetter):)"
-    Copy-Item -LiteralPath $LoaderUf2 -Destination "$($boot.DriveLetter):\" -Force
-    $vol = Wait-For { Get-LoaderDrive } 30
-  }
-}
+  if ($boot) { Flash-Loader $boot; $vol = Wait-For { Get-LoaderDrive } 30; continue }
 
-# --- 4: a loader menu Windows stopped looking at --------------------------------------------------
-if (-not $vol) {
-  Write-Host "Rescanning USB devices..."
-  [Uf2LoaderUsb]::Rescan()
-  $vol = Wait-For { Get-LoaderDrive } 10
+  $p = Get-PicoPort
+  if ($p) {
+    if (-not $portSince) { $portSince = Get-Date; Write-Host "emu8 is on $p - asking it to open the UF2 Loader menu..." }
+    if (((Get-Date) - $lastAsk).TotalSeconds -ge 4) {
+      $lastAsk = Get-Date
+      if (-not (Send-Serial $p 115200 "`n@uf2menu`n")) {
+        if (-not $saidBusy) { Write-Host "$p is busy (a serial monitor?) - close it; still retrying."; $saidBusy = $true }
+      } elseif (Wait-For { -not (Get-PicoPort) } 3) {
+        Write-Host "emu8 left - waiting for the loader to show the card..."
+        $vol = Wait-For { Get-LoaderDrive } 30
+        $portSince = $null
+        continue
+      }
+    }
+    # Listed but deaf for 15s: a hung emu8. The touch works while its USB stack still runs.
+    if (-not $touched -and ((Get-Date) - $portSince).TotalSeconds -ge 15) {
+      Write-Host "emu8 on $p does not answer - trying a reset into BOOTSEL..."
+      [void](Send-Serial $p 1200 $null)
+      $touched = $true
+    }
+  } else {
+    $portSince = $null
+  }
+
+  if (-not $saidHelp -and ((Get-Date) - $t0).TotalSeconds -ge 20) {
+    Write-Host "Still waiting. If the PicoCalc is frozen, switch it off and on (or press Ctrl-Shift-Up"
+    Write-Host "in emu8); it is picked up as soon as it comes back. Waiting up to $WaitSec s."
+    $saidHelp = $true
+  }
+  if (((Get-Date) - $lastScan).TotalSeconds -ge 10) { [Uf2LoaderUsb]::Rescan(); $lastScan = Get-Date }
+  Start-Sleep -Milliseconds 300
+  if (-not $vol) { $vol = Get-LoaderDrive }
 }
-if (-not $vol) {
-  Write-Host "Waiting for the loader's drive: press Ctrl-Shift-Up on the PicoCalc (or open the UF2 Loader menu)."
-  $vol = Wait-For { Get-LoaderDrive } 60
-}
-if (-not $vol) { throw "The PicoCalc's SD card never showed up as a drive (is the micro-USB cable connected?)" }
+if (-not $vol) { throw "The PicoCalc's SD card never showed up as a drive in $WaitSec s (is the micro-USB cable connected?)" }
 
 # --- copy and hand the card back ------------------------------------------------------------------
 $drive = "$($vol.DriveLetter):"
@@ -161,6 +178,33 @@ $destDir = "$drive\$AppsDir"
 if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir | Out-Null }
 Write-Host "Copying $Uf2 -> $destDir\$Name"
 Copy-Item -LiteralPath $Uf2 -Destination "$destDir\$Name" -Force
+# One name only: earlier deploys used emu8-dev.uf2, which left two emu8 entries in the menu.
+foreach ($stale in 'emu8-dev.uf2','emu8.ino.uf2') {
+  $path = "$destDir\$stale"
+  if ($stale -ne $Name -and (Test-Path -LiteralPath $path)) { Write-Host "Deleting old $path"; Remove-Item -LiteralPath $path -Force }
+}
+if ($RomsDir) {
+  $romDest = "$drive\roms"
+  if (-not (Test-Path $romDest)) { New-Item -ItemType Directory -Path $romDest | Out-Null }
+  Get-ChildItem -LiteralPath $RomsDir -File | ForEach-Object {
+    Write-Host "Copying $($_.Name) -> $romDest"
+    Copy-Item -LiteralPath $_.FullName -Destination $romDest -Force
+  }
+  # the pre-flat layout: system ROMs in per-system sub-folders under the old names
+  $old = 'apple2\iiplus.bin','apple2\iie.bin','apple2\diskii.bin','apple2\hd.bin','apple2\mouse.bin',
+         'c64\basic.bin','c64\kernal.bin','c64\chargen.bin',
+         'msx\cbios.rom','msx\diskrom.rom','msx\diskrom.bin','diskrom.rom','cbios_main_msx1.rom',
+         'coleco\coleco.rom','zxspectrum\spec48.rom','pcxt\bios.bin'
+  foreach ($f in $old) {
+    $path = "$romDest\$f"
+    if (Test-Path -LiteralPath $path) { Write-Host "Deleting old $path"; Remove-Item -LiteralPath $path -Force }
+  }
+  foreach ($d in 'apple2','c64','msx','coleco','zxspectrum','pcxt') {
+    $path = "$romDest\$d"
+    if ((Test-Path -LiteralPath $path) -and -not (Get-ChildItem -LiteralPath $path -Force)) { Remove-Item -LiteralPath $path -Force }
+  }
+  Write-Host "Card \roms now holds:"; Get-ChildItem -LiteralPath $romDest | ForEach-Object { Write-Host "  $($_.Name)" }
+}
 Write-VolumeCache -DriveLetter $vol.DriveLetter
 
 Release-Card

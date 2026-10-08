@@ -155,6 +155,8 @@ bool        dbgHasDriveSlots();
 bool        dbgLoadFileToSlot(const char *sdPath, int slot);
 const char *dbgMountedSlotPath(int slot);   // image currently set in slot (0=A:,1=C:), "" if none — for the browser markers
 void        dbgEjectSlot(int slot);         // eject/unmount the image in slot (0=A:,1=C:)
+bool        dbgMediaMounted(const char *sdPath);  // is this file the loaded cart/disk/tape/program? (all platforms)
+bool        dbgUnmount(const char *sdPath);       // unmount it (parks the CPU, saves config); false if not mounted
 
 // --- CPU identity + register file ---
 const char *dbgCpuName();    // e.g. "MOS 6502", or "(unsupported)" for not-yet-wired platforms

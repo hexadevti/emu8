@@ -60,6 +60,10 @@ void c64CartUnmount() {
   cartPath = "";
 }
 
+bool c64CartIsPath(const char *path) {
+  return c64::cartActive && path && cartPath.length() && strcmp(cartPath.c_str(), path) == 0;
+}
+
 // Stream every CHIP packet belonging to `bank` from the (already-open) SD image into the ROM
 // windows. The file handle stays open across bank switches so this is a quick seek+read.
 static void loadCartBank(int bank) {

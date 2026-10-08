@@ -21,6 +21,8 @@
 #define UF2LOADER_MAGIC   0xe98cc638u   // PICOCALC_BL_MAGIC, uf2loader common/bootloader/proginfo.h
 #define UF2LOADER_BOOT_SD 1u            // enum bootmode_e { BOOT_DEFAULT, BOOT_SD, ... }
 #define PICOCALC_LOADER_CMD "@uf2menu\n"
+#define PICOCALC_SDMGR_CMD  "@sdmgr\n"
+#define PICOCALC_RESET_CMD  "@reset\n"
 
 void picocalcRebootToLoaderMenu(const char *why)
 {
@@ -32,17 +34,36 @@ void picocalcRebootToLoaderMenu(const char *why)
   ESP.restart();                        // rp2040.restart(): watchdog_reboot(0, 0, ..), scratch 0-3 kept
 }
 
-static uint8_t s_cmdMatched = 0;
+static uint8_t s_menuMatched = 0, s_sdmMatched = 0, s_rstMatched = 0;
 
-// One byte of the serial stream. True if it continued the command (the caller should swallow it);
-// on the last byte this does not return.
+// Advance one command matcher by one byte; true if the byte continued it. A byte that breaks the
+// match is retried as a fresh start.
+static bool cmdStep(const char *cmd, uint8_t &matched, uint8_t c)
+{
+  if (c != (uint8_t)cmd[matched]) matched = 0;
+  if (c != (uint8_t)cmd[matched]) return false;
+  ++matched;
+  return true;
+}
+
+// One byte of the serial stream. True if it continued a command (the caller should swallow it);
+// on the last byte this does not return. Three commands:
+//   PICOCALC_LOADER_CMD: reboot into the UF2 Loader menu.
+//   PICOCALC_SDMGR_CMD:  reboot into SD Manager mode, so the PC can upload over sdserial
+//                        (tools/deploy-serial.py: no USB drive, nothing to eject).
+//   PICOCALC_RESET_CMD:  hard reset into the same system (like Ctrl-Shift-F3), so the PC can
+//                        watch a whole boot log without a hand on the keyboard.
 bool picocalcLoaderCmdFeed(uint8_t c)
 {
-  static const char cmd[] = PICOCALC_LOADER_CMD;
-  if (c != (uint8_t)cmd[s_cmdMatched]) s_cmdMatched = 0;   // broken off: retry as a fresh start
-  if (c != (uint8_t)cmd[s_cmdMatched]) return false;
-  if (!cmd[++s_cmdMatched]) picocalcRebootToLoaderMenu("USB serial asked for the UF2 Loader menu");
-  return true;
+  static const char menu[] = PICOCALC_LOADER_CMD, sdm[] = PICOCALC_SDMGR_CMD, rst[] = PICOCALC_RESET_CMD;
+  bool a = cmdStep(menu, s_menuMatched, c), b = cmdStep(sdm, s_sdmMatched, c), r = cmdStep(rst, s_rstMatched, c);
+  if (!rst[s_rstMatched]) { printLog("USB serial asked for a hard reset"); delay(50); ESP.restart(); }
+  if (!menu[s_menuMatched]) picocalcRebootToLoaderMenu("USB serial asked for the UF2 Loader menu");
+  if (!sdm[s_sdmMatched]) {
+    s_sdmMatched = 0;
+    if (currentPlatform != PLATFORM_SDMANAGER) { printLog("USB serial asked for the SD Manager"); rebootToSdManager(); }
+  }
+  return a || b || r;
 }
 
 // Called once per frame from picocalcPumpInput(). Other bytes are dropped so they can't block the

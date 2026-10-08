@@ -10,7 +10,7 @@
 // renderer never run at the same time, so they share this one buffer.
 static uint16_t *c64Scratch = nullptr;
 
-// Set when the SD card has no usable /roms/c64 ROMs: the 6510 is left halted (it would
+// Set when the SD card has no usable /roms C64 ROMs: the 6510 is left halted (it would
 // dereference the null ROM pointers) and c64Loop holds an error screen instead.
 static bool c64RomLoadFailed = false;
 // Set when the 64K RAM block could not be allocated. Also halts the 6510 (via c64RomLoadFailed):
@@ -53,9 +53,9 @@ void c64Setup() {
     printLog(buf);
     return;
   }
-  if (!c64LoadRoms()) {                            // BASIC/KERNAL/CHARGEN from /roms/c64 on the SD
+  if (!c64LoadRoms()) {                            // BASIC/KERNAL/CHARGEN from /roms on the SD
     c64RomLoadFailed = true;                       // halt: c64Loop holds the error screen
-    printLog("C64: ROMs missing on SD (/roms/c64) - put basic.bin/kernal.bin/chargen.bin there");
+    printLog("C64: ROMs missing on SD - put VICE's basic-901226-01.bin/kernal-901227-03.bin/chargen-901225-01.bin in /roms");
     return;                                        // skip VIC/CIA; do NOT run the 6510 on null ROMs
   }
   c64::vicSetup(c64::ram, charset_rom);            // framebuffer (best-effort)
@@ -74,7 +74,7 @@ void c64Setup() {
   printLog(buf);
 }
 
-// renderLoop hook (src/shared/video.cpp): held while the SD card is missing the /roms/c64 system
+// renderLoop hook (src/shared/video.cpp): held while the SD card is missing the /roms C64 system
 // ROMs -- there is nothing to run. Yields to SETTINGS (ROMS can point at other files) and redraws
 // once each time it closes.
 bool c64RenderLoadWarning() {
@@ -88,15 +88,19 @@ bool c64RenderLoadWarning() {
     tft.setTextColor(tft.color565(220, 40, 40), TFT_BLACK); tft.drawString("C64: NOT ENOUGH MEMORY", 8, 8, 2);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.drawString("No 64K block free for the C64's RAM.", 8, 40, 1);
+#if defined(BOARD_PICOCALC)
+    tft.drawString("Ctrl-Shift-F1: pick another system.", 8, 56, 1);
+#else
     tft.drawString("Ctrl-F6: pick another system.", 8, 56, 1);
+#endif
     tft.setTextDatum(MC_DATUM);
     drawn = true;
     return true;
   }
   tft.setTextColor(tft.color565(220, 40, 40), TFT_BLACK); tft.drawString("C64: ROMs NOT FOUND", 8, 8, 2);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawString("Put basic.bin, kernal.bin, chargen.bin", 8, 40, 1);
-  tft.drawString("in /roms/c64 on the SD card, or pick", 8, 56, 1);
+  tft.drawString("Put basic-901226-01.bin, kernal-901227-03", 8, 40, 1);
+  tft.drawString(".bin, chargen-901225-01.bin in /roms, or pick", 8, 56, 1);
   tft.drawString("other files in SETTINGS (Ctrl-F1) > ROMS.", 8, 72, 1);
   tft.setTextDatum(MC_DATUM);
   drawn = true;
@@ -175,7 +179,6 @@ static void c64DumpFrame() {
   Serial.write(hdr, sizeof(hdr));
   Serial.write(c64::fbTop, 32000);
   Serial.write(c64::fbBot, 32000);
-  Serial.write(&c64::vicLineRegs[0][0], 800);
   Serial.flush();
   if (--c64DumpLeft == 0) sdSerialActive = false;
 }

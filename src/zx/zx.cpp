@@ -36,6 +36,7 @@ static uint8_t*  g_tapeBuf = nullptr;   // resident tape image; freed on reload
 static volatile bool zxResetReq = false;
 static volatile bool zxLoopRunning = false;
 static volatile bool zxParked = false;  // the loop is idling in the settings branch (safe to load)
+static bool     zxSnapIn = false;       // selectedZxFileName is a snapshot that is running in RAM
 static uint16_t zxPal[16];              // RGB565: 0-7 normal, 8-15 BRIGHT
 static bool     zxPalColor = true;
 
@@ -56,16 +57,11 @@ static void zxBuildPalette(bool color) {
 }
 
 // ---- ROM (16K, loaded from the SD card) -----------------------------------------------------------
-static const char* const ROM_NAMES[] = { "/roms/zxspectrum/spec48.rom", "/roms/zxspectrum/48.rom",
-                                         "/roms/zxspectrum/zx48.rom", "/roms/zxspectrum/spectrum.rom",
-                                         "/roms/zx/spec48.rom", "/roms/zx/48.rom", "/spec48.rom", "/48.rom" };
-
 static bool loadRomFromSD() {
-  // A ROM picked on the settings ROMS page goes first; the usual names are the fallback.
-  char picked[ROMSEL_SLOT_LEN] = "";
-  if (const char* o = romOverride(ROMSEL_ZX_ROM)) strcpy(picked, o);
-  const char* names[1 + sizeof(ROM_NAMES) / sizeof(ROM_NAMES[0])] = { picked };
-  for (size_t i = 0; i < sizeof(ROM_NAMES) / sizeof(ROM_NAMES[0]); i++) names[i + 1] = ROM_NAMES[i];
+  // Exactly one file: the ROM picked on the settings ROMS page, else /roms/48.rom.
+  char picked[ROMSEL_SLOT_LEN];
+  strcpy(picked, romPath(ROMSEL_ZX_ROM));
+  const char* names[] = { picked };
   for (const char* nm : names) {
     if (!*nm) continue;
     File f = FSTYPE.open(nm, FILE_READ);
@@ -90,7 +86,7 @@ static bool loadRomFromSD() {
 #endif
   }
   zx::romLen = 0;
-  printLog("ZX: NO ROM - put spec48.rom (16K) in /roms/zxspectrum on the SD card");
+  printLog("ZX: NO ROM - put 48.rom (16K) in /roms on the SD card");
   return false;
 }
 
@@ -99,7 +95,7 @@ static bool loadRomFromSD() {
 static bool zxAccept(const std::string &n) {
   return zxEndsCI(n, ".sna") || zxEndsCI(n, ".z80") || zxEndsCI(n, ".tap") || zxEndsCI(n, ".tzx");
 }
-static FileBrowser zxBrowser = { "ZX", &zxFiles, zxAccept, nullptr, ZX_MAX_FILES, "/" };
+static FileBrowser zxBrowser = { "ZX", &zxFiles, zxAccept, nullptr, ZX_MAX_FILES, "" };
 
 void loadZxFilesSync()   { fbScan(zxBrowser); }
 void zxBrowseEnter(const char *path) { fbEnter(zxBrowser, path); }
@@ -154,7 +150,7 @@ void zxLoop() {
   const uint32_t FRAME_US = 19968;
   uint32_t nextUs = micros();
   for (;;) {
-    if (OptionsWindow) { zxParked = true; vTaskDelay(pdMS_TO_TICKS(20)); nextUs = micros(); continue; }
+    if (OptionsWindow || paused) { zxParked = true; vTaskDelay(pdMS_TO_TICKS(20)); nextUs = micros(); continue; }
     zxParked = false;
     if (zxResetReq)   { zxResetReq = false; zx::machineReset(); nextUs = micros(); }
     if (zx::romLen == 0) { vTaskDelay(pdMS_TO_TICKS(100)); continue; }   // no ROM -> nothing to run
@@ -449,13 +445,44 @@ bool zxLoadSelected(const char* path) {
   if (!ok) {
     sprintf(buf, "ZX: failed to load %s", path); printLog(buf);
     zx::machineReset();                                   // never leave a half-written snapshot running
+    zxSnapIn = false;
     return false;
   }
   zx::frameReady = false;
+  zxSnapIn = sna || z80;
   selectedZxFileName = path;
   sprintf(buf, "ZX: %s loaded", path);
   printLog(buf);
   return true;
+}
+
+// ---- standard media unmount (proto.h) ----
+// A tape is in while it has blocks indexed (a snapshot load ejects it); a snapshot while it is the
+// last thing loaded. Either way selectedZxFileName names it.
+bool zxMediaMounted(const char* path) {
+  if (!path || !*path || selectedZxFileName != path) return false;
+  return zx::tapeCount > 0 || zxSnapIn;
+}
+
+// Tape: eject live -- the program keeps running (LD-BYTES just finds no more blocks). Snapshot: the
+// program is the RAM, so pull it by resetting to the (C) 1982 screen when the CPU resumes.
+void zxUnmount(const char* path) {
+  if (!zxMediaMounted(path)) return;
+  if (zx::tapeCount > 0) {
+    zx::tapeCount = 0; zx::tapePos = 0;                   // the LD-BYTES trap stops seeing the tape
+#if !BOARD_ROM_IN_FLASH
+    if (zxWaitParked() && g_tapeBuf) {                    // tapeTrap runs on the CPU task: free only when parked
+      zx::tapeData = nullptr; free(g_tapeBuf); g_tapeBuf = nullptr;
+    }                                                     // else the next tape load frees it
+#endif
+    sprintf(buf, "ZX: tape %s ejected", path);
+  } else {
+    zxSnapIn = false;
+    zxResetReq = true;                                    // zxLoop resets once the settings window closes
+    sprintf(buf, "ZX: snapshot %s unloaded, resetting", path);
+  }
+  printLog(buf);
+  selectedZxFileName = "";
 }
 
 // ---- startup overlay: no ROM ----
@@ -471,7 +498,7 @@ bool zxRenderLoadWarning() {
     tft.drawString("ZX SPECTRUM: NO ROM FOUND", 8, 8, 2);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.drawString("Put the 16K Spectrum 48K ROM on the SD card", 8, 40, 1);
-    tft.drawString("as /roms/zxspectrum/spec48.rom and restart,", 8, 56, 1);
+    tft.drawString("as /roms/48.rom and restart,", 8, 56, 1);
     tft.drawString("or pick one in SETTINGS (Ctrl-F1) > ROMS.", 8, 72, 1);
     tft.setTextDatum(MC_DATUM);
     drawn = true;

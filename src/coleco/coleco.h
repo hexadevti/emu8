@@ -9,7 +9,7 @@
 // decode, the two-mode controllers (joystick / 12-key keypad) and the VDP interrupt, which on this
 // machine is wired to the Z80 NMI rather than INT.
 //
-// The 8K BIOS (coleco.rom) is copyrighted and not shipped: it is loaded from /roms/coleco on the SD
+// The 8K BIOS (coleco.rom) is copyrighted and not shipped: it is loaded from /roms/coleco.rom on the SD
 // card. Like msx.h / sms.h this header is free of Arduino/board headers so the SAME core compiles
 // into host/coleco_host.cpp (g++, off-device) and into the board build.
 

@@ -13,10 +13,10 @@ plus the experimental **PC-XT** target that is still in development:
 | **Commodore 64** | 6510 | Playable (VIC-II + SID + CIA); `.crt` cartridge support is partial | `.prg` `.d64` `.crt` |
 | **NES** | 2A03 (6502) | Playable; mappers 0–4 | `.nes` (iNES) |
 | **Atari 2600** | 6507 (6502) | Playable | `.a26` `.bin` (2K/4K/8K/16K/32K) |
-| **MSX1** | Z80 | Playable (TMS9918 VDP + AY-3-8910 PSG); BIOS from SD or embedded C-BIOS | `.rom` `.mx1` `.dsk` |
+| **MSX1** | Z80 | Playable (TMS9918 VDP + AY-3-8910 PSG); HotBit 1.2 BIOS + Disk BASIC from SD | `.rom` `.mx1` `.dsk` |
 | **ZX Spectrum 48K** | Z80 | Playable (ULA screen + per-line border, beeper, Kempston); instant tape loading through a ROM trap (no turbo loaders); ROM from SD | `.sna` `.z80` `.tap` `.tzx` |
 | **Sega Master System** | Z80 | Playable (Mode 4 VDP + SN76489 PSG); Sega mapper + line interrupts; boots cartridges directly (no BIOS) | `.sms` `.bin` |
-| **PC-XT** | Intel 8086 | **In development** — fabgl-based IBM PC-XT: BIOS POST, CGA text/graphics, PC speaker; mounts floppy (A:) and hard-disk (C:) images and boots DOS. BIOS from `/roms/pcxt/bios.bin` | `.img` `.ima` `.dsk` `.vhd` `.hdd` |
+| **PC-XT** | Intel 8086 | **In development** — fabgl-based IBM PC-XT: BIOS POST, CGA text/graphics, PC speaker; mounts floppy (A:) and hard-disk (C:) images and boots DOS. BIOS from `/roms/pcxt_bios.bin` | `.img` `.ima` `.dsk` `.vhd` `.hdd` |
 
 > Derived from [hexadevti/Apple2Esp32](https://github.com/hexadevti/Apple2Esp32). The original was a
 > single-system Apple II emulator; emu8 generalises the renderer, input, audio and SD layers into a
@@ -121,7 +121,7 @@ to some components).
 - **ProDOS hard disk** (block device) — large `.hdv` / `.po` / `.2mg` volumes.
 - Video: LoRes, HiRes, text 40/80-column, page 1/2, mixed/split, colour or mono.
 - Speaker, analog joystick/paddles, AppleMouse-style mouse plumbing.
-- Built-in **6502 debugger** (step / breakpoint / stack trace). System ROMs load from `/roms/apple2/` on the SD card (see [`roms/`](roms/)).
+- Built-in **6502 debugger** (step / breakpoint / stack trace). System ROMs load from `/roms/` on the SD card (see [ROM sources](#rom-sources)).
 
 ### Commodore 64
 
@@ -150,8 +150,9 @@ to some components).
 
 - **Z80** CPU (shared with the SMS core), **TMS9918** VDP, **AY-3-8910** PSG and the **8255 PPI**;
   64 KB work RAM in slot 3.
-- Loads `.rom` / `.mx1` cartridges and `.dsk` floppies. BIOS is read from an `MSXBIOS.ROM` on the SD
-  card, or falls back to the **embedded C-BIOS** (no Disk BASIC in that case).
+- Loads `.rom` / `.mx1` cartridges and `.dsk` floppies. The BIOS (with MSX BASIC) is the Sharp Epcom
+  HotBit 1.2, read from `/roms/hotbit12.rom` on the SD card; `.dsk` images use the Disk BASIC ROM at
+  `/roms/hb3600_disk.rom`.
 - USB keyboard / on-screen keyboard for typing, joystick/gamepad on controller port 1.
 
 ### Sega Master System
@@ -167,7 +168,7 @@ to some components).
 - **Z80** at 3.5 MHz (69888 T-states per 50 Hz frame), **ULA** screen with FLASH and a border colour
   per scanline (loading stripes show), the 1-bit **beeper** and a **Kempston** joystick on port `0x1F`.
   Memory contention and the floating bus are not emulated.
-- Needs the 16 KB Sinclair ROM on the SD card at `/roms/zxspectrum/spec48.rom` (or `48.rom`).
+- Needs the 16 KB Sinclair ROM on the SD card at `/roms/48.rom`.
 - Loads `.sna` and `.z80` (v1/v2/v3, 48K) snapshots. `.tap` / `.tzx` tapes are "inserted" and
   `LOAD ""` is typed for you; the ROM's LD-BYTES routine is trapped so each block loads instantly.
   Custom/turbo loaders that bypass the ROM routine do not load.
@@ -181,7 +182,7 @@ to some components).
   **CGA** text/graphics and the **PC speaker**; 1 MB main RAM.
 - Mounts disk images as **A:** (floppy) or **C:** (hard disk) — `.img` / `.ima` / `.dsk` / `.vhd` /
   `.hdd` — and boots **MS-DOS**. Files are auto-routed to A:/C: by size. BIOS loads from
-  `/roms/pcxt/bios.bin` on the SD card.
+  `/roms/pcxt_bios.bin` on the SD card.
 - USB keyboard → XT scancodes; gamepad → arrow/enter injection.
 
 ---
@@ -333,8 +334,8 @@ arduino-cli upload -p COM5 --fqbn esp32:esp32:esp32s3:PSRAM=opi,PartitionScheme=
 With pelrun's [UF2 Loader](https://github.com/pelrun/uf2loader) (**v2.4.1+**) installed, a build goes
 onto the SD card instead of over the loader, with no cable unplugged: the **Deploy RP2040 (SD)** task
 ([`tools/deploy-picocalc.ps1`](tools/deploy-picocalc.ps1)) sends emu8 a reboot-into-the-menu request
-over its USB serial port, copies the `.uf2` to `pico1-apps\emu8-dev.uf2` on the SD card the loader
-exposes as a USB drive, and hands the card back to the menu -- pick **emu8-dev.uf2** there. If emu8
+over its USB serial port, copies the `.uf2` to `pico1-apps\emu8.uf2` on the SD card the loader
+exposes as a USB drive, and hands the card back to the menu -- pick **emu8.uf2** there. If emu8
 does not answer, it reboots the Pico into BOOTSEL and reflashes the loader, whose menu then opens by
 itself. **Build & Deploy RP2040 (SD)** builds first. The Pico's micro-USB must be connected to the PC.
 
@@ -380,22 +381,48 @@ on the device). Full setup, toolchain and status notes live in
 ## microSD card preparation
 
 1. Format a microSD card as **FAT32**.
-2. Copy this repo's [`roms/`](roms/) folder to the card root. The Apple II, C64, ColecoVision, ZX Spectrum
-   and PC-XT cores load their system ROMs from `/roms/<system>/`.
+2. Make a `/roms/` folder on the card and download the system ROMs into it from [ROM sources](#rom-sources).
+   Every core loads its system ROMs from `/roms/`, under the names the files are published with upstream,
+   so downloads are copied there as is. The settings menu's ROMS page can point any of them at another file, or at none.
 3. Copy your images to the card root, mixing systems freely:
    - Apple: `.dsk` / `.do` / `.po` / `.hdv` / `.2mg`
    - C64: `.prg` / `.d64` / `.crt`
    - NES: `.nes`
    - Atari 2600: `.a26` / `.bin`
-   - MSX1: `.rom` / `.mx1` / `.dsk` (plus an `MSXBIOS.ROM`, or it falls back to the embedded C-BIOS)
+   - MSX1: `.rom` / `.mx1` / `.dsk` (plus `/roms/hotbit12.rom`, and `/roms/hb3600_disk.rom` for disks)
    - Sega Master System: `.sms` / `.bin`
-   - ZX Spectrum 48K: `.sna` / `.z80` / `.tap` / `.tzx` (plus the ROM at `/roms/zxspectrum/spec48.rom`)
-   - PC-XT: `.img` / `.ima` / `.dsk` / `.vhd` / `.hdd` (plus the BIOS at `/roms/pcxt/bios.bin`)
+   - ZX Spectrum 48K: `.sna` / `.z80` / `.tap` / `.tzx` (plus the ROM at `/roms/48.rom`)
+   - PC-XT: `.img` / `.ima` / `.dsk` / `.vhd` / `.hdd` (plus the BIOS at `/roms/pcxt_bios.bin`)
 4. Insert the card, power on, pick a platform on the splash, then choose an image from its on-screen
    file browser.
 
 Sample Apple II disks live in [`data/`](data/) (DOS 3.3, ProDOS 2.4.2, Lode Runner, Karateka,
 Ghostbusters); copy them to the SD root. A few C64 test files are in [`resources/`](resources/).
+
+### ROM sources
+
+The system ROMs each core loads from `/roms/` on the SD card. They are copyrighted by their original owners,
+so this repo does not include them: the **Download** links go straight
+to each file, already under the name emu8 expects (the PC-XT BIOS is published only as a C array).
+
+| Download | What it is |
+|---|---|
+| [Apple2_Plus.rom](https://raw.githubusercontent.com/AppleWin/AppleWin/master/resource/Apple2_Plus.rom) (AppleWin) | Apple II+ Applesoft/Autostart Monitor ROM, 12 KB |
+| [Apple2e_Enhanced.rom](https://raw.githubusercontent.com/AppleWin/AppleWin/master/resource/Apple2e_Enhanced.rom) (AppleWin) | Enhanced Apple IIe ROM (342-0304-A + 342-0303-A) |
+| [DISK2.rom](https://raw.githubusercontent.com/AppleWin/AppleWin/master/resource/DISK2.rom) (AppleWin) | Disk II 16-sector boot PROM (P5, 341-0027) |
+| [HDDRVR.BIN](https://raw.githubusercontent.com/AppleWin/AppleWin/master/firmware/HDD/HDDRVR.BIN) (AppleWin) | ProDOS block-device (hard disk) slot firmware |
+| [MouseInterface.rom](https://raw.githubusercontent.com/AppleWin/AppleWin/master/resource/MouseInterface.rom) (AppleWin) | Apple Mouse Interface card ROM (the emulator uses its first 256 bytes, the slot page) |
+| [basic-901226-01.bin](https://raw.githubusercontent.com/VICE-Team/svn-mirror/main/vice/data/C64/basic-901226-01.bin) (VICE) | Commodore 64 BASIC V2 (901226-01) |
+| [kernal-901227-03.bin](https://raw.githubusercontent.com/VICE-Team/svn-mirror/main/vice/data/C64/kernal-901227-03.bin) (VICE) | Commodore 64 KERNAL rev. 3 (901227-03) |
+| [chargen-901225-01.bin](https://raw.githubusercontent.com/VICE-Team/svn-mirror/main/vice/data/C64/chargen-901225-01.bin) (VICE) | Commodore 64 character ROM (901225-01) |
+| [coleco.rom](https://raw.githubusercontent.com/PIBSAS/RetroPieBios/master/BIOS/Machines/COL%20-%20ColecoVision/coleco.rom) (RetroPieBios) | ColecoVision BIOS (1982) |
+| [hotbit12.rom](https://raw.githubusercontent.com/matheusjgsantos/blueMSX/main/blueMSX/Make/blueMSXlite/linux-sdl/Machines/MSX%20-%20Sharp%20Epcom%20HotBit%201.2/hotbit12.rom) (blueMSX machine set) | MSX1 BIOS + MSX BASIC, Sharp Epcom HotBit 1.2 (Brazil), 32 KB |
+| [hb3600_disk.rom](https://download.file-hunter.com/System%20ROMs/extensions/hb3600_disk.rom) (File-Hunter) | MSX Disk BASIC 1.1, Brazilian Epcom version ("DSK-BASIC V1.1 (C) 1987 por EPCOM") for the HB3600-style WD2793 controller the emulator implements |
+| [biosrom.h](https://raw.githubusercontent.com/fdivitto/FabGL/master/examples/VGA/PCEmulator/biosrom.h) (FabGL PCEmulator; a C byte array, not a binary — convert it to `pcxt_bios.bin`) | PC-XT BIOS, "8086tiny plus 2.34" |
+| [48.rom](https://sourceforge.net/p/fuse-emulator/fuse/ci/master/tree/roms/48.rom?format=raw) (Fuse emulator) | Sinclair ZX Spectrum 48K ROM (© 1982 Sinclair Research / Amstrad) |
+
+Amstrad have kindly given their permission for the redistribution of their copyrighted ZX Spectrum ROM,
+but retain that copyright ([World of Spectrum](https://worldofspectrum.net/permits/)).
 
 ---
 
@@ -418,7 +445,7 @@ protocol:
 - **Windows app**, [`tools/sdmanager/desktop/`](tools/sdmanager/desktop/): the web app packaged with Electron as a
   portable `.exe` (on the `sdmanager-v*` release, or `npm run dist` there).
 - **CLI**, [`tools/sdmanager/emu8sd.py`](tools/sdmanager/emu8sd.py) (Python + pyserial):
-  `emu8sd.py --port COM5 --fast put -r ./roms/msx /roms/msx`.
+  `emu8sd.py --port COM5 --fast put -r ./roms /roms`.
 
 Close any other serial monitor first. See [`tools/sdmanager/README.md`](tools/sdmanager/README.md)
 for details and [`PROTOCOL.md`](tools/sdmanager/PROTOCOL.md) for the wire format.

@@ -50,3 +50,8 @@ sdcard/
 
 # Release builds (tools/release.ps1)
 dist/
+
+# System ROMs are copyrighted: never commit them. Download them (README "ROM sources") into
+# sdcard/roms/ for the desktop build, or into /roms/ on the SD card.
+roms/
+*.rom

@@ -49,13 +49,22 @@ const char translatePOTrack[] = {0x00, 0x08, 0x01, 0x09, 0x02, 0x0A, 0x03, 0x0b,
 const ushort secoffset[] = {0, 0x700, 0xe00, 0x600, 0xd00, 0x500, 0xc00, 0x400, 0xb00, 0x300, 0xa00, 0x200, 0x900, 0x100, 0x800, 0xf00};
 
 volatile bool trackPendingSave = false;
+
+// "/" (or "") is the "no disk" value of selectedDiskFileName: the EEPROM default, setDiskFile()'s
+// fallback and what apple2Unmount() leaves. Never open it -- on the SD card "/" is the root DIRECTORY.
+static bool a2DiskInserted() { return selectedDiskFileName.length() > 0 && selectedDiskFileName != "/"; }
+
 void diskSetup()
 {
   if (diskAttached)
   {
     initializedHdDisk = false;
     printLog("DiskII Setup...");
-    xTaskCreate(loadDiskAsync, "loadDiskAsync", 4096, NULL, 2, NULL);
+    // Synchronous, like every other system's boot scan. A task here ran the listing on one core
+    // while getDiskFileInfo() below walked the card on the other, and on the PicoCalc the two
+    // deadlocked for good on the boot screen.
+    loadDiskFilesSync();
+    listFiles(false);
 #if defined(BOARD_PICOCALC)
     // sdFreeBytes() returns 0 on this board by design (see the note in sd.cpp): the only
     // route to a free-space figure here walks the entire FAT, ~25s on a 32GB card over SPI.
@@ -66,30 +75,26 @@ void diskSetup()
     printLog(buf);
 #endif
     getDiskFileInfo(FSTYPE);
-    phaseBuffer = std::queue<uint8_t>();
-    xTaskCreate(saveTrackAsync, "saveTrackAsync", 4096, NULL, 1, NULL);
+    phaseBuffer = std::queue<uint8_t>();   // late saves: apple2LateSavePoll(), from cpuLoop()
   }
 }
 
-void saveTrackAsync(void *pvParameters)
+// Late save: write a dirty track back once the drive motor has been off for ~60ms. Polled from
+// cpuLoop() every 16K instructions instead of running as its own task: that task (plus an identical
+// copy HDSetup started) held 4-8K of heap for good, which is what the PicoCalc's IIe map needs.
+// Running on the 6502's own thread also means it can no longer race the disk emulation.
+void apple2LateSavePoll()
 {
-  int count = 0;
-  while (running)
-  {
-    if (trackPendingSave && !DriveMotorON_OFF)
-    {
-      if (count > 5)
-      {
-        Serial.println("Late Save.");
-        saveImage(FSTYPE, diskTrack);
-        getTrack(FSTYPE, diskTrack, true);
-        trackPendingSave = false;
-        count = 0;
-      }
-      count++;
-    }
-    vTaskDelay(pdMS_TO_TICKS(10));
-  }
+  static uint32_t idleSince = 0;
+  if (!trackPendingSave || DriveMotorON_OFF) { idleSince = 0; return; }
+  uint32_t now = millis();
+  if (idleSince == 0) { idleSince = now ? now : 1; return; }
+  if (now - idleSince < 60) return;
+  Serial.println("Late Save.");
+  saveImage(FSTYPE, diskTrack);
+  getTrack(FSTYPE, diskTrack, true);
+  trackPendingSave = false;
+  idleSince = 0;
 }
 
 void addPhase(uint8_t phase)
@@ -175,14 +180,25 @@ void getDiskFileInfo(fs::FS &fs)
 {
   
   Serial.printf("selectedDiskFileName = %s\n", selectedDiskFileName.c_str());
+  if (!a2DiskInserted())
+  {
+    printLog("DiskII: drive empty");
+    getTrack(FSTYPE, 0, true);   // loads the empty-drive track (see getTrack)
+    return;
+  }
   busTake();               // fs.exists() is a directory walk; serialise it like every other FS access
   bool found = fs.exists(selectedDiskFileName.c_str());
   busGive();
   if (!found)
   {
-    Serial.println("File not found");
+    // Not on this card (a saved pick from another card, a deleted file): an empty drive, not a
+    // disk read out of nothing -- that left stale nibbles and a made-up DOS/ProDOS order behind.
+    snprintf(buf, sizeof(buf), "DiskII: %s not found, drive empty", selectedDiskFileName.c_str());
+    printLog(buf);
     shownFile = 0;
-
+    selectedDiskFileName = "/";
+    getTrack(FSTYPE, 0, true);
+    return;
   }
   // File file = fs.open(selectedDiskFileName.c_str());
   // size_t len = file.size();
@@ -202,6 +218,15 @@ void getDiskFileInfo(fs::FS &fs)
 
 void getTrack(fs::FS &fs, int track, bool force)
 {
+  if (!a2DiskInserted())
+  {
+    // Empty drive (door open): no sector ever passes under the head. $FF nibbles never match the
+    // D5 AA 96 prologue, so RWTS / ProDOS time out with an I/O error and the boot ROM keeps searching.
+    memset(trackRawData, 0, trackRawSize);
+    memset(trackEncodedData, 0xff, trackEncodedSize);
+    if (track >= 0) diskTrack = track;   // the head still moves; a later mount reads from here
+    return;
+  }
   if (track != diskTrack || force)
   {
     busTake();   // hold the shared HSPI bus for the whole open+seek+read (touch must wait)
@@ -235,6 +260,7 @@ void saveImage(fs::FS &fs, int track)
 {
   sprintf(buf, "Saving Track %0d", track);
   Serial.println(buf);
+  if (!a2DiskInserted()) return;   // written with the drive empty: nothing to save it to
   int positionToWrite = getOffset(track, 0);
 
   busTake();   // hold the shared HSPI bus for the whole open+seek+write
@@ -308,14 +334,61 @@ void setDiskFile()
 // it as a disk swap and reads the new image on its next drive access.
 void apple2InsertDisk(const char *path)
 {
+  std::string p = path;          // path may be selectedDiskFileName.c_str() itself
   bool wasPaused = paused;
   paused = true;                 // freeze the CPU while we re-point + re-read the image
-  selectedDiskFileName = path;
+  selectedDiskFileName = p.c_str();
   getDiskFileInfo(FSTYPE);       // re-detect volume + DOS/ProDOS order for the new image
   pointer = 0;
   trackChanged = true;
   diskChanged = true;
   paused = wasPaused;
+}
+
+void apple2HdEject();   // hd.cpp
+
+// Standard media unmount (proto.h). Mounted = the floppy in the attached Disk II, or the image on the
+// attached HD card. "/" is the "none" marker, so it never matches.
+bool apple2MediaMounted(const char *path)
+{
+  if (!path || !*path || strcmp(path, "/") == 0) return false;
+  return (diskAttached && selectedDiskFileName == path) || (hdAttached && selectedHdFileName == path);
+}
+
+// Eject live, no reset (CPU is paused by the settings window). Floppy: flush a pending track write
+// to the old image, then the drive reads empty (see getTrack). HD: the card reports an I/O error.
+// The marker goes back to "/", so saveConfig() stores no auto-load and a later mount works as usual.
+void apple2Unmount(const char *path)
+{
+  if (!apple2MediaMounted(path)) return;
+  std::string p = path;               // path may BE selected*FileName.c_str(), which we overwrite
+  path = p.c_str();
+  if (diskAttached && selectedDiskFileName == path)
+  {
+    if (trackPendingSave)
+    {
+      saveImage(FSTYPE, diskTrack);   // real hardware: the data was already on the disk
+      trackPendingSave = false;
+    }
+    busTake();                        // apple2LateSavePoll reads the name under the bus lock
+    selectedDiskFileName = "/";
+    trackPendingSave = false;
+    busGive();
+    outputSectorData.clear();         // a half-written sector is lost with the disk
+    lastTrack = -1;
+    lastSec = -1;
+    getTrack(FSTYPE, diskTrack, true);   // empty-drive track: no stale nibbles
+    pointer = 0;
+    diskChanged = true;
+    snprintf(buf, sizeof(buf), "DiskII: ejected %s", path);
+    printLog(buf);
+  }
+  if (hdAttached && selectedHdFileName == path)
+  {
+    apple2HdEject();
+    snprintf(buf, sizeof(buf), "HD: detached %s", path);
+    printLog(buf);
+  }
 }
 
 // SD image browser. Subdirectories are walked too (fbScan lists them with a trailing "/" and
@@ -326,20 +399,13 @@ static bool diskAccept(const std::string &name) {
     if ((int)name.find(diskFileExtensions[j].c_str()) > 0) return true;
   return false;
 }
-static FileBrowser diskBrowser = { "DiskII", &diskFiles, diskAccept, nullptr, 250, "/" };
+static FileBrowser diskBrowser = { "DiskII", &diskFiles, diskAccept, nullptr, 250, "" };
 
 // Rescan the current browse directory into diskFiles. Synchronous so it can be called
 // directly (e.g. from the Settings device toggle) without racing the renderer.
 void loadDiskFilesSync()      { fbScan(diskBrowser); }
 void diskBrowseEnter(const char *path) { fbEnter(diskBrowser, path); }
 void diskBrowseUp()           { fbUp(diskBrowser); }
-
-void loadDiskAsync(void *pvParameters)
-{
-  loadDiskFilesSync();
-  listFiles(false); // Refresh the file list
-  vTaskDelete(NULL); // Self-deletion
-}
 
 int getOffset(int track, int sector)
 {

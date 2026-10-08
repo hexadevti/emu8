@@ -897,6 +897,8 @@ static void buildLoadBrowser()
       ImGui::BeginDisabled(!hasA); if (ImGui::SmallButton("Eject A:")) dbgEjectSlot(0); ImGui::EndDisabled();
       ImGui::SameLine(); ImGui::BeginDisabled(!hasC); if (ImGui::SmallButton("Eject C:")) dbgEjectSlot(1); ImGui::EndDisabled();
       ImGui::TextDisabled("Tip: load A: first, then C: (C: re-POSTs and boots A: if it's bootable).");
+    } else {
+      ImGui::TextDisabled("Loaded file is green -- right-click it to unmount.");
     }
     static char filter[64] = "";
     ImGui::SetNextItemWidth(-1.0f);
@@ -951,20 +953,29 @@ static void buildLoadBrowser()
         if (!y.empty() && y[0] == '/') y.erase(0, 1);
         return lc(x) == lc(y);
       };
-      // then the loadable files, click to mount. PC platforms show which drive (A:/C:) each is set to.
+      // then the loadable files, click to mount. PC platforms show which drive (A:/C:) each is set to;
+      // the others mark the loaded cartridge/disk/tape/program (the shared mediaIsMounted).
       for (auto &name : files) {
         std::string sd = "/" + (rel.empty() ? name : rel + "/" + name);
         bool inA = dbgHasDriveSlots() && pathEq(sd, dbgMountedSlotPath(0));
         bool inC = dbgHasDriveSlots() && pathEq(sd, dbgMountedSlotPath(1));
-        std::string label = std::string(inA ? "[A:] " : inC ? "[C:] " : "") + name;
-        if (inA || inC) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 1.0f, 0.5f, 1.0f));  // mounted = green
+        // the core keeps the name as it was loaded: with the leading "/" (browser) or without (older config)
+        const char *mnt = nullptr;
+        if (!dbgHasDriveSlots()) {
+          if (dbgMediaMounted(sd.c_str()))            mnt = sd.c_str();
+          else if (dbgMediaMounted(sd.c_str() + 1))   mnt = sd.c_str() + 1;
+        }
+        bool green = inA || inC || mnt;
+        std::string label = std::string(inA ? "[A:] " : inC ? "[C:] " : mnt ? "[*] " : "") + name;
+        if (green) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 1.0f, 0.5f, 1.0f));  // mounted = green
         ImGui::PushID(sd.c_str());
         bool clicked = ImGui::Selectable(label.c_str());
-        if (inA || inC) ImGui::PopStyleColor();
-        if (inA || inC) {                                   // right-click a mounted image -> eject it
+        if (green) ImGui::PopStyleColor();
+        if (green) {                                        // right-click a mounted image -> eject it
           if (ImGui::BeginPopupContextItem()) {
             if (inA && ImGui::MenuItem("Eject from A:")) dbgEjectSlot(0);
             if (inC && ImGui::MenuItem("Eject from C:")) dbgEjectSlot(1);
+            if (mnt && ImGui::MenuItem("Unmount")) dbgUnmount(mnt);
             ImGui::EndPopup();
           }
         }

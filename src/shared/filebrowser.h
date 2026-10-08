@@ -24,7 +24,8 @@ struct FileBrowser {
   bool (*accept)(const std::string &name);    // filter on the BARE name; nullptr accepts every file
   bool (*verify)(const char *fullPath);       // optional content check, or nullptr -- see below
   int   maxEntries;                           // cap, so a huge folder cannot exhaust the heap
-  String dir;                                 // current directory: "/" or "/a/b" (never a trailing /)
+  String dir;                                 // current directory: "/" or "/a/b" (never a trailing /);
+                                              // "" = not scanned yet, starts in appsBaseDir()
 };
 
 // Rescan b.dir into *b.out. Directories are listed first, then files, each sorted

@@ -27,12 +27,17 @@ std::vector<std::string> fileExtensions = { ".hdv", ".po", ".2mg" };
 File hdFile;
 ushort lastBlock = -1;
 
+// "/" (or "") is the "no image" value of selectedHdFileName (EEPROM default, getHdFileInfo()'s
+// fallback, apple2HdEject()). Never open it -- on the SD card "/" is the root DIRECTORY.
+static bool a2HdInserted() { return selectedHdFileName.length() > 0 && selectedHdFileName != "/"; }
+
 void HDSetup()
 {
   if (hdAttached) {
     initializedHdDisk = true;
     printLog("HD Setup...");
-    xTaskCreate(loadHdAsync, "loadHdAsync", 4096, NULL, 2, NULL);
+    loadHdFilesSync();   // synchronous: see diskSetup() in disk.cpp
+    listFiles(false);
 #if defined(BOARD_PICOCALC)
     // sdFreeBytes() returns 0 on this board by design (see the note in sd.cpp): the only
     // route to a free-space figure here walks the entire FAT, ~25s on a 32GB card over SPI.
@@ -43,7 +48,6 @@ void HDSetup()
     printLog(buf);
 #endif
     getHdFileInfo(FSTYPE);
-    xTaskCreate(getBlockAsync, "getBlockAsync", 4096, NULL, 1, NULL);
   }
 }
 
@@ -53,7 +57,7 @@ static bool hdAccept(const std::string &name) {
     if ((int)name.find(fileExtensions[j].c_str()) > 0) return true;
   return false;
 }
-static FileBrowser hdBrowser = { "HD", &hdFiles, hdAccept, nullptr, 250, "/" };
+static FileBrowser hdBrowser = { "HD", &hdFiles, hdAccept, nullptr, 250, "" };
 
 // Rescan the current browse directory into hdFiles. Synchronous so it can be called
 // directly (e.g. from the Settings device toggle) without racing the renderer.
@@ -61,32 +65,7 @@ void loadHdFilesSync()      { fbScan(hdBrowser); }
 void hdBrowseEnter(const char *path) { fbEnter(hdBrowser, path); }
 void hdBrowseUp()           { fbUp(hdBrowser); }
 
-void loadHdAsync(void *pvParameters)
-{
-  loadHdFilesSync();
-  listFiles(false); // Refresh the file list
-  vTaskDelete(NULL); // Self-deletion
-}
 
-
-void getBlockAsync(void *pvParameters) {
-  int count = 0;
-  while (running)
-  {
-    if (trackPendingSave && !DriveMotorON_OFF) {
-      if (count > 5) {
-        Serial.println("Late Save.");
-        saveImage(FSTYPE, diskTrack);
-        getTrack(FSTYPE, diskTrack, true);
-        trackPendingSave = false;
-        count = 0;
-      }
-      count++;
-    }
-    delay(10);
-  }
-  
-}
 
 void loadHD() 
 {
@@ -159,15 +138,20 @@ void getHdFileInfo(fs::FS &fs)
   {
     selectedHdFileName = "/";
   }
-  File file = fs.open(selectedHdFileName.c_str(), "r");
-  size_t len = file.size();
-  hdDiskImageSize = len;
-  if (len % 512 > 0)
+  hdDiskImageSize = 0;   // no image: the card reports 0 blocks
+  fileHeaderSize = 0;
+  if (a2HdInserted())
   {
-    fileHeaderSize = len - floor(len / 512) * 512;
-    printLog("File Header Size: ");Serial.println(fileHeaderSize);
+    File file = fs.open(selectedHdFileName.c_str(), "r");
+    size_t len = file.size();
+    hdDiskImageSize = len;
+    if (len % 512 > 0)
+    {
+      fileHeaderSize = len - floor(len / 512) * 512;
+      printLog("File Header Size: ");Serial.println(fileHeaderSize);
+    }
+    file.close();
   }
-  file.close();
   busGive();
 }
 
@@ -214,6 +198,7 @@ void setHdFile()
   else {
     selectedHdFileName = hdFiles[shownFile].c_str();
     closeHdFile();   // the cached handle points at the OLD image -- drop it before anything reads
+    getHdFileInfo(FSTYPE);   // size + header of the NEW image (0 blocks after an apple2HdEject)
   }
   paused = false;
 
@@ -221,6 +206,8 @@ void setHdFile()
 
 char loadBlock(unsigned short address, unsigned short block)
 {
+  if (!a2HdInserted())
+    return 0x27;   // no image attached: I/O error (b0 set), nothing written to memory
   diskLed(LOW);
 
   getBlock(FSTYPE, block);
@@ -283,6 +270,18 @@ void closeHdFile()
   busTake();
   if (hdFile) hdFile.close();
   lastBlock = (ushort)-1;
+  busGive();
+}
+
+// apple2Unmount() (disk.cpp): detach the image live. Handle closed, 0 blocks, and loadBlock()
+// returns an I/O error until setHdFile() attaches another one.
+void apple2HdEject()
+{
+  closeHdFile();
+  busTake();
+  selectedHdFileName = "/";
+  hdDiskImageSize = 0;
+  fileHeaderSize = 0;
   busGive();
 }
 

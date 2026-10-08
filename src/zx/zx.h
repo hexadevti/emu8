@@ -10,7 +10,7 @@
 //     LD-BYTES routine (no real-time tape signal; turbo loaders are not supported)
 // Memory contention and the floating bus are not emulated.
 //
-// The 16K ROM (spec48.rom / 48.rom) is loaded from /roms/zxspectrum on the SD card. Like coleco.h this
+// The 16K ROM (spec48.rom / 48.rom) is loaded from /roms/48.rom on the SD card. Like coleco.h this
 // header is free of Arduino/board headers; zx.cpp is the device glue.
 
 #pragma once

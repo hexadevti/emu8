@@ -82,7 +82,7 @@ static void c64QueueRun() {
 static bool c64Loadable(const std::string &n) {
   return endsWithCI(n, ".prg") || endsWithCI(n, ".d64") || endsWithCI(n, ".crt");
 }
-static FileBrowser c64Browser = { "C64", &c64Files, nullptr, nullptr, C64_MAX_FILES, "/" };
+static FileBrowser c64Browser = { "C64", &c64Files, nullptr, nullptr, C64_MAX_FILES, "" };
 
 // C64F_* code per c64Files entry, rebuilt after every scan (same order, same length).
 static std::vector<uint16_t> c64FileCodes;
@@ -172,6 +172,10 @@ void c64BrowseUp()           { fbUp(c64Browser); c64ProbeFiles(); }
 // ---------------------------------------------------------------------------
 // .prg loader
 // ---------------------------------------------------------------------------
+// The .prg last loaded into RAM ("" = none), for c64MediaMounted / c64Unmount. A fixed buffer for
+// the same reason as d64Path below: this is written from the READY trap on the CPU core.
+static char prgPath[256] = "";
+
 bool c64LoadPRG(const char *path)
 {
   if (!c64::ram) return false;
@@ -190,6 +194,8 @@ bool c64LoadPRG(const char *path)
   uint16_t end = (uint16_t)a;
 
   if (addr == 0x0801) { c64FixBasicVars(end); c64QueueRun(); }   // BASIC program
+  strncpy(prgPath, path, sizeof(prgPath) - 1);
+  prgPath[sizeof(prgPath) - 1] = 0;
   snprintf(buf, sizeof(buf), "C64: loaded %.100s @ $%04X..$%04X%s", path, addr, end,
           addr == 0x0801 ? " (RUN)" : "");
   printLog(buf);
@@ -419,6 +425,7 @@ bool c64D64LoadDirectory(uint16_t altAddr, uint16_t *endAddr)
 // ---------------------------------------------------------------------------
 bool c64LoadSelected(const char *path)
 {
+  prgPath[0] = 0;                                 // whatever it loads replaces the old program
   if (pathEndsCI(path, ".crt"))
     return c64LoadCRT(path);                      // mounts + requests a reset into the cart
 
@@ -451,15 +458,55 @@ bool c64LoadSelected(const char *path)
 // machine. A .crt is unchanged -- it mounts and autostarts through its own reset.
 bool c64LoadAndRun(const char *path)
 {
-  if (pathEndsCI(path, ".crt")) return c64LoadCRT(path);
+  if (pathEndsCI(path, ".crt")) {
+    if (!c64LoadCRT(path)) return false;
+    prgPath[0] = 0;                    // the cart's reset takes the old program with it
+    return true;
+  }
 
   // Unmount before the reset, not after: with a cart still mapped the KERNAL would autostart it
   // instead of booting to BASIC, and the deferred load would never see its READY prompt.
   c64CartUnmount();
+  prgPath[0] = 0;                      // the reset clears the old program
   selectedC64FileName = path;          // what the trap (and AUTOLOAD) will load
   c64AutoloadPending  = true;          // cpuLoop loads it once the KERNAL reaches $A480 (READY)
   c64::c64ResetReq    = true;
   snprintf(buf, sizeof(buf), "C64: reset, then load %.100s at READY", path);
   printLog(buf);
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// Standard media unmount (proto.h). What is "in": the mounted .d64, the attached .crt, the .prg
+// last loaded into RAM, or an image still queued for the READY trap (c64LoadAndRun / boot
+// autoload). A .d64 and a .crt can both be in at once, so each is checked on its own.
+// ---------------------------------------------------------------------------
+static bool c64AutoloadIs(const char *path) {
+  return c64AutoloadPending && strcmp(selectedC64FileName.c_str(), path) == 0;
+}
+
+bool c64MediaMounted(const char *path)
+{
+  if (!path || !*path) return false;
+  return c64AutoloadIs(path) || strcmp(d64Path, path) == 0 || strcmp(prgPath, path) == 0 ||
+         c64CartIsPath(path);
+}
+
+// Called with the CPU paused (settings window open). A .d64 ejects live: the running program
+// keeps going and LOAD from device 8 falls through to the ROM (DEVICE NOT PRESENT). A .crt or
+// .prg lives in the machine, so it is pulled and the KERNAL resets to BASIC when the CPU resumes.
+void c64Unmount(const char *path)
+{
+  if (!c64MediaMounted(path)) return;
+  // Cancel a queued load first: the READY trap reads selectedC64FileName, cleared below. A reset
+  // already requested by c64LoadAndRun still happens and just lands on an empty READY prompt.
+  if (c64AutoloadIs(path)) c64AutoloadPending = false;
+  bool reset = false;
+  if (strcmp(d64Path, path) == 0) d64Path[0] = 0;   // no buffers: each LOAD opens the image itself
+  if (c64CartIsPath(path)) { c64CartUnmount(); reset = true; }
+  if (strcmp(prgPath, path) == 0) { prgPath[0] = 0; reset = true; }
+  if (reset) c64::c64ResetReq = true;
+  if (strcmp(selectedC64FileName.c_str(), path) == 0) selectedC64FileName = "";   // no AUTOLOAD next boot
+  snprintf(buf, sizeof(buf), "C64: unmounted %.100s%s", path, reset ? " -> reset to BASIC" : "");
+  printLog(buf);
 }

@@ -66,7 +66,7 @@ backend), F11/F12 are platform reset/menu keys (see `src/shared/usbkeyboard.cpp`
 ## Status
 
 - **BUILDS & RUNS** (MinGW-w64 i686, g++ 16, SDL2 2.32): `emu8.exe` = PE32 (32-bit). Smoke-tested
-  booting **Apple II** (embedded ROM) and **MSX1** (embedded C-BIOS) to `Ready.` — SDL window, PSG
+  booting **Apple II** and **MSX1** (system ROMs from `sdcard/roms/`) to their BASIC prompt — SDL window, PSG
   audio, USB-style keyboard, host SD dir, and a persistent `eeprom.bin` all working.
 - **Done:** board branch, `emu.h` hook, full Arduino/ESP/FreeRTOS shim (+ `dirent.h` over `<io.h>`),
   FS/SD + EEPROM shims, `hal.cpp`, `sd_host.cpp`, and all SDL backends (`display_sdl`, `audio_sdl`,

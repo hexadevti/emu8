@@ -46,7 +46,7 @@ using fabgl::i8086;
 
 
 // The PC-XT BIOS (8086tiny, GPLv3) used to be embedded here via #include "biosrom.h". It now lives on
-// the SD card at /roms/pcxt/bios.bin and is loaded once into a buffer by ensureBiosLoaded() - read
+// the SD card at /roms/pcxt_bios.bin and is loaded once into a buffer by ensureBiosLoaded() - read
 // through pcxtReadBiosRom() in pcxt.cpp, which has the Arduino SD API (this fabgl TU does not include
 // emu.h). biosrom/biosromLen are used by BIOS::init (memcpy into guest RAM) + pcBiosFont8x8 (CP437 scan).
 uint8_t *pcxtReadBiosRom(size_t *outLen);   // src/pcxt/pcxt.cpp
@@ -104,7 +104,7 @@ void BIOS::init(Machine * machine)
   m_mouse     = m_i8042->mouse();
   m_MC146818  = m_machine->getMC146818();
 
-	// copy bios (from /roms/pcxt/bios.bin; pcxtReadBiosRom already logs if it's missing)
+	// copy bios (from /roms/pcxt_bios.bin; pcxtReadBiosRom already logs if it's missing)
 #if PCXT_PAGED_MEM
   // PicoCalc: no RAM to spare for a second copy -- read the image straight into the guest BIOS pages
   // (one contiguous block, see pcxtSetup) and let biosrom point at it for pcBiosFont8x8(). The top

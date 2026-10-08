@@ -3,7 +3,7 @@
 
 Used by the "ROMs off flash -> onto SD" refactor: every platform that still
 embeds a ROM as a `const unsigned char foo[] = { 0x.., ... };` array gets that
-array dumped to a binary so it can live on the SD card under /roms/<platform>/.
+array dumped to a binary so it can live on the SD card under /roms/.
 
 Usage:
     python tools/extract_rom.py <source-file> <symbol> <out.bin> [--expect N]

@@ -35,6 +35,7 @@
 #if BOARD_ROM_IN_FLASH
 
 #include <hardware/flash.h>
+#include <tusb.h>
 
 extern "C" uint8_t _FS_start;
 extern "C" uint8_t __flash_binary_end;
@@ -47,6 +48,21 @@ static uintptr_t alignUp(uintptr_t v) { return (v + kSector - 1) & ~(uintptr_t)(
 static uintptr_t biosBase()           { return (uintptr_t)&_FS_start - kBiosWindow; }
 static uintptr_t diskBase()           { return biosBase() - kDiskWindow; }
 static uintptr_t firmwareEnd()        { return alignUp((uintptr_t)&__flash_binary_end); }
+
+// A flash write masks interrupts for ~50 ms per sector. Right after a reboot the PC is still
+// enumerating the USB device, and a stall there fails it for good ("Device Descriptor Request
+// Failed", code 43: no COM port until the hub is reset). Switching systems rewrites the shared
+// BIOS window (Apple IIe, C64 and MSX all use it), so let enumeration finish first: until the
+// device is configured, or 4 s into the boot when no PC is attached.
+static void waitUsbSettled()
+{
+  static bool done = false;
+  if (done) return;
+  done = true;
+  if (millis() > 4000) return;
+  while (!tud_mounted() && millis() < 4000) delay(10);
+  if (tud_mounted()) delay(300);   // the host's first requests after SET_CONFIGURATION (CDC setup)
+}
 
 uint32_t romFlashCapacity(RomFlashWindow w)
 {
@@ -83,6 +99,8 @@ const uint8_t *romFlashLoad(RomFlashWindow w, File &f, uint32_t len, uint8_t *st
 
     const uint8_t *dst = (const uint8_t *)(base + off);
     if (memcmp(dst, chunk, kSector) == 0) continue;            // already there: no erase, no wear
+    waitUsbSettled();
+    ampDmaPause(true);                                         // else it plays RAM past its buffer
 
 #ifndef __FREERTOS
     noInterrupts();
@@ -94,6 +112,7 @@ const uint8_t *romFlashLoad(RomFlashWindow w, File &f, uint32_t len, uint8_t *st
 #ifndef __FREERTOS
     interrupts();
 #endif
+    ampDmaPause(false);
     written++;
   }
   if (!staging) free(chunk);

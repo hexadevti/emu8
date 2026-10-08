@@ -43,16 +43,17 @@
 // the emulated machine and cannot be hit by accident mid-game:
 //   Ctrl-F1                  -> HID_KEY_F10  open / close the settings menu
 //   Ctrl-F3                  -> HID_KEY_F11  CPU reset (Apple II); PAUSE/NMI on SMS
-//   Ctrl-F6 / Ctrl-Shift-F3  -> the system selection menu (reboots only if another system is picked)
-//   Ctrl-Shift-F1            -> reboot the Pico itself (see the note at the handler)
+//   Ctrl-Shift-F1            -> the system selection menu (reboots only if another system is picked)
+//   Ctrl-Shift-F3            -> hard reset: reboot straight back into the running system, no menu
+// The keyboard sends Shift-F1..F5 as F6..F10, so these two arrive as Ctrl-F6 and Ctrl-F8; the
+// unshifted-code-plus-Shift forms are matched too, in case a keyboard firmware sends those.
 //   Ctrl-Shift-Up            -> reboot into the UF2 Loader menu (loader_picocalc.cpp)
 // Bare keys pass through:
 //   F1, F2 -> HID_KEY_F1, HID_KEY_F2
-//   F3     -> HID_KEY_F12    hard reset (SMS / PC-XT) -- unchanged
+//   F3     -> HID_KEY_F12    Atari reset switch; reset on PC-XT / Coleco / ZX (not SMS: next to its buttons)
 //   F4, F5 -> HID_KEY_F4, HID_KEY_F5   Apple II paddle buttons 0 and 1; MSX matrix keys;
 //                                      SMS buttons 1 (start) and 2
-// F6..F10 are translated too in case a unit's firmware emits them; the stock PicoCalc keyboard
-// only sends F1..F5, which is why Ctrl-Shift-F3 exists as an alias for Ctrl-F6.
+// F6..F10 (= Shift-F1..F5) are translated too, for the machines that use them.
 // usbkeyboard.cpp is untouched; the remap happens here at translation time.
 
 #include "../../emu.h"
@@ -164,7 +165,7 @@ static HidKey pcToHid(uint8_t code)
     // handled in handleEvent() before this is reached, so these are the bare-key meanings.
     case PCK_F1:        return { HID_KEY_F1,          false };
     case PCK_F2:        return { HID_KEY_F2,          false };
-    case PCK_F3:        return { HID_KEY_F12,         false };   // SMS / PC-XT hard reset
+    case PCK_F3:        return { HID_KEY_F12,         false };   // reset on Atari / PC-XT / Coleco / ZX
     case PCK_F4:        return { HID_KEY_F4,          false };   // Apple II button 0 (open-apple)
     case PCK_F5:        return { HID_KEY_F5,          false };   // Apple II button 1 (solid-apple)
     case PCK_F6:        return { HID_KEY_F6,          false };
@@ -275,32 +276,33 @@ static void handleEvent(uint8_t state, uint8_t code)
   // Only on the PRESSED edge, never on HOLD: the STM32 auto-repeats held keys, and a repeating
   // menu toggle would flicker the window open and shut.
   if (state == PCK_STATE_PRESSED && g_ctrlHeld) {
-    // Ctrl-Shift-F1 -> reboot the Pico itself. This board needs its own way back to a clean
-    // boot: the Pico is powered from its own USB, so the PicoCalc's power switch never resets
-    // it, and a firmware that came up against a dead mainboard has no other route out.
-    if (code == PCK_F1 && g_shiftHeld) {
-      printLog("Ctrl-Shift-F1: rebooting");
+    // Ctrl-Shift-F3 (arrives as F8) -> hard reset of whatever runs: settings saved, then a plain
+    // reboot, which comes back up in the same system (only requestSplashOnNextBoot() shows the
+    // system menu). Also the way back to a clean boot: the Pico is powered from its own USB, so
+    // the PicoCalc's power switch never resets it.
+    if (code == PCK_F8 || (code == PCK_F3 && g_shiftHeld)) {
+      printLog("Ctrl-Shift-F3: hard reset");
+      if (currentPlatform != PLATFORM_SDMANAGER) saveConfig();
       delay(50);
       ESP.restart();
     }
     // Ctrl-Shift-Up -> the UF2 Loader's SD menu, to pick another app (loader_picocalc.cpp). The
     // keyboard sends Shift-Up as Page Up, the same way Shift-F1..F5 arrive as F6..F10.
     if (code == PCK_PAGE_UP || (code == PCK_UP && g_shiftHeld)) picocalcRebootToLoaderMenu("Ctrl-Shift-Up: rebooting to the UF2 Loader menu");
-    if (code == PCK_F1) { tapHid(HID_KEY_F10); return; }              // settings menu
 
-    // Ctrl-F6 -> the system selection menu, drawn over the paused emulator (splashOpen in
+    // Ctrl-Shift-F1 (arrives as F6) -> the system selection menu, drawn over the paused emulator (splashOpen in
     // src/shared/video.cpp). No reboot to get there: the board only restarts if a different
     // system is picked; Esc, the timeout, or the running system resume where it left off.
     // Pressing it again while the menu is up closes it.
-    if (code == PCK_F6 || (code == PCK_F3 && g_shiftHeld)) {
-      printLog("Ctrl-F6: system menu");
+    if (code == PCK_F6 || (code == PCK_F1 && g_shiftHeld)) {
+      printLog("Ctrl-Shift-F1: system menu");
       splashOpen();
       return;
     }
 
-    // CPU reset moved here when Ctrl-F8 (now Ctrl-F6) became the system menu. This MUST stay below
-    // the branch above, which claims Ctrl-Shift-F3 for the system menu: the two share a key and
-    // are told apart only by shift, so testing the unshifted form first would swallow both.
+    // Settings and CPU reset. These MUST stay below the Shift branches above: Ctrl-F1/Ctrl-Shift-F1 and
+    // Ctrl-F3/Ctrl-Shift-F3 may share a key code, told apart only by shift.
+    if (code == PCK_F1) { tapHid(HID_KEY_F10); return; }              // settings menu
     if (code == PCK_F3) { tapHid(HID_KEY_F11); return; }              // CPU reset
   }
 
@@ -308,7 +310,7 @@ static void handleEvent(uint8_t state, uint8_t code)
   // board cannot produce. Swallow left/right/Enter while it is up and post them as nav events
   // instead -- swallowing matters because the keys would otherwise reach the core underneath
   // (an Enter would land in Applesoft the moment the splash closed).
-  if (splashActive) {
+  if (splashActive && !OptionsWindow) {             // (the general settings over it take keys as usual)
     if (!down) return;                              // releases are meaningless to the splash
     switch (code) {
       case PCK_LEFT:  splashKeyEvent = SPLASH_KEY_LEFT;   return;

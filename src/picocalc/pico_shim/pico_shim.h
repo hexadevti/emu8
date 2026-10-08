@@ -201,7 +201,7 @@ public:
   uint32_t getCycleCount() { return rp2040.getCycleCount(); }
   uint32_t getFreeHeap()   { return (uint32_t)rp2040.getFreeHeap(); }
   uint32_t getCpuFreqMHz() { return (uint32_t)(F_CPU / 1000000UL); }
-  void     restart()       { rp2040.restart(); }
+  void     restart();      // pico_shim.cpp: detaches from USB first
 };
 extern PicoEspClass ESP;    // the single instance lives in pico_shim.cpp
 

@@ -7,8 +7,8 @@ Same protocol as the web app in web/; see PROTOCOL.md.
   emu8sd.py --port COM5 info
   emu8sd.py --port /dev/ttyUSB0 --fast ls /roms
   emu8sd.py --port COM5 put Karateka.dsk /                 # into a folder
-  emu8sd.py --port COM5 put -r ./roms/msx /roms            # a whole folder
-  emu8sd.py --port COM5 get /roms/msx .                    # folders download recursively
+  emu8sd.py --port COM5 put -r ./roms /roms                # a whole folder
+  emu8sd.py --port COM5 get /roms .                        # folders download recursively
   emu8sd.py --port COM5 mkdir /games/nes
   emu8sd.py --port COM5 mv /old.dsk /new.dsk
   emu8sd.py --port COM5 rm -r /games/old

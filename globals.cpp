@@ -108,7 +108,7 @@ String selectedAtariFileName; // currently-loaded Atari 2600 ROM (for the settin
 String selectedMsxFileName;   // currently-loaded MSX1 .rom cartridge (for the settings file browser)
 bool msxFast = false;         // MSX: NORMAL (paced to 3.58 MHz) by default; true = FAST (uncapped)
 float msxMeasuredMhz = 0.0f;  // MSX: measured uncapped Z80 speed from the boot benchmark
-bool msxDiskRom = false;      // MSX: AUTO (disk ROM only with a .dsk) by default; true = always installed
+uint8_t msxDiskRom = MSX_DISKROM_AUTO;   // MSX DISK ROM setting (emu.h)
 String selectedSmsFileName;   // currently-loaded SMS .sms/.bin ROM (for the settings file browser)
 bool smsFast = false;         // SMS: NORMAL (paced to 3.58 MHz) by default; true = FAST (uncapped)
 float smsMeasuredMhz = 0.0f;  // SMS: measured uncapped Z80 speed from the boot benchmark

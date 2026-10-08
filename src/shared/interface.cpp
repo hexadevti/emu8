@@ -316,6 +316,12 @@ void colorDemo() {
 }
 
 void showHideOptionsWindow() {
+  // Over the system menu the same key opens the GENERAL settings instead (ROM / apps folder,
+  // reset, help): no system is chosen there yet, so nothing is paused or resumed.
+  if (splashActive) {
+    if (OptionsWindow) optionsUiCloseGeneral(); else optionsUiOpenGeneral();
+    return;
+  }
   OptionsWindow = !OptionsWindow;
   // Pause BEFORE optionsUiOpen(): its first-open file scan reads the SD card, and the C64's LOAD
   // trap must not be starting a disk read on the other core meanwhile.

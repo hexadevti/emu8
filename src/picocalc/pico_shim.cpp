@@ -8,6 +8,7 @@
 #if defined(BOARD_PICOCALC)
 
 #include "pico_shim/pico_shim.h"
+#include <tusb.h>
 
 extern "C" {
 
@@ -71,6 +72,18 @@ esp_reset_reason_t esp_reset_reason(void) {
 // The one instance of the ESP-compatibility forwarder declared in pico_shim.h. It holds no
 // state -- every method forwards straight to arduino-pico's rp2040 object.
 PicoEspClass ESP;
+
+// A watchdog reboot drops the USB pull-up for only a few microseconds, too short for the host to
+// see the device leave. Windows then talks to the rebooted board as if it were the old one, and
+// the port ends up "Device Descriptor Request Failed" (code 43), with no COM port until the hub
+// is reset. So detach first, and stay detached long enough for the hub to register the unplug.
+void PicoEspClass::restart()
+{
+  Serial.flush();
+  tud_disconnect();
+  delay(300);
+  rp2040.restart();
+}
 
 // The EEPROM object every caller actually reaches, via the `#define EEPROM picoEEPROM` in
 // pico_shim.h. The library's own EEPROMClass global is left untouched and unused.

@@ -20,13 +20,13 @@
 #define C64_HOT_DATA
 #endif
 
-// C64 ROM images — loaded at boot from /roms/c64/*.bin on the SD card into PSRAM buffers
+// C64 ROM images — loaded at boot from /roms on the SD card into PSRAM buffers
 // (c64rom.cpp); pointers, not arrays, and null until c64LoadRoms() has run.
 extern const unsigned char *basic_rom;
 extern const unsigned char *kernal_rom;
 extern const unsigned char *charset_rom;
 
-// Load BASIC/KERNAL/CHARGEN from the SD card (/roms/c64). Returns false if any is missing or
+// Load BASIC/KERNAL/CHARGEN from the SD card (/roms). Returns false if any is missing or
 // the wrong size — the caller must show an error and must NOT run the 6510 on the null pointers.
 bool c64LoadRoms();
 
@@ -55,7 +55,6 @@ enum { VIC_FB_FREE, VIC_FB_WRITING, VIC_FB_DONE };   // framebuffer handoff, VIC
 extern volatile uint8_t vicFbState;
 extern volatile uint8_t vicLinesDone;
 extern volatile uint32_t vicFrameNo, vicDrawnFrameNo;   // TEMP debug (serial fb dump)
-extern uint8_t vicLineRegs[200][4];
 extern bool vicCollPolled;       // the program has read $D01E/$D01F since reset (see c64_vic.cpp)
 extern uint16_t vicmem, bitmapstart, screenmemstart, rasterline;
 extern uint8_t syncd020;
@@ -129,3 +128,4 @@ void kbSetJoystickPort(uint8_t port, uint8_t mask);   // route joystick to port 
 void c64Setup();
 void c64Loop();
 void c64RenderFrame();
+bool c64CartIsPath(const char *path);   // (c64_crt.cpp) is this .crt the mounted cartridge?

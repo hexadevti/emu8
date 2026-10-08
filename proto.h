@@ -80,6 +80,10 @@ void IRAM_ATTR speakerToggle();
 void ampBegin(int sampleRate);
 void ampWriteDac8(const uint16_t *dacBuf, int n);   // 8-bit DAC (value in high byte) -> 16-bit amp
 void ampWriteMono(const int16_t *mono, int n);      // 16-bit signed mono -> amp (Apple speaker)
+#if defined(BOARD_PICOCALC)
+void ampMute(bool on);        // silence while a cartridge loads (audio_picocalc.cpp)
+void ampDmaPause(bool pause); // stop the audio DMA around a flash write (romflash_picocalc.cpp)
+#endif
 
 // keyboardPs2.cpp
 unsigned char keyboard_read();
@@ -131,15 +135,25 @@ void optionsUiMarkDirty();
 // romsel.cpp - user-picked system ROMs, saved in EEPROM (see RomSlot in emu.h)
 const RomSlotInfo &romSlotInfo(int slot);
 bool romSlotVisible(int slot);            // belongs to the running platform / Apple model
-const char *romOverride(int slot);        // saved pick, or nullptr (static buffer)
-const char *romPath(int slot);            // saved pick, else the default path (static buffer)
+const char *romOverride(int slot);        // saved pick, "" = no ROM, or nullptr (static buffer)
+const char *romPath(int slot);            // saved pick, else the default path; "" = no ROM (static buffer)
 bool romSetOverride(int slot, const char *path);   // nullptr/"" = back to default; commits
+const char *romDefaultPath(int slot);     // the slot's upstream name inside romBaseDir() (static buffer)
+const char *romBaseDir();                 // general settings: folder of the default ROM names ("/roms")
+const char *appsBaseDir();                // general settings: where every file browser starts ("/")
+bool setRomBaseDir(const char *dir);      // nullptr = back to the default; commits
+bool setAppsBaseDir(const char *dir);
+void romSelEraseAll();                    // EEPROM reset: every ROM pick and both base folders
+void eepromFactoryReset();                // eprom.cpp: wipe all saved settings (reboot afterwards)
+void optionsUiOpenGeneral();              // optionsui.cpp: general settings, over the system menu
+void optionsUiCloseGeneral();
 void uiDirScanProgress(int count);    // draw a "Loading…" bar while a directory is scanned (+yield)
 
 // video.cpp
 void videoSetup();
 void requestSplashOnNextBoot();       // arrange for the boot splash to show after the next reboot
 extern bool splashActive;             // true until the boot splash times out or is dismissed
+void rebootToSdManager();            // video.cpp: restart into SD Manager mode (one boot)
 bool sdManagerBootRequested();        // this boot is the SD Manager one the splash asked for (consumes it)
 #if defined(BOARD_PICOCALC)
 // Keyboard-driven splash navigation: the PicoCalc has no touch panel, so input_picocalc.cpp
@@ -154,6 +168,7 @@ bool sdManagerBootRequested();        // this boot is the SD Manager one the spl
 extern volatile int8_t splashKeyEvent;
 void splashOpen();                     // Ctrl-F6: the system menu over the running emulator, no reboot
 #endif
+void splashRepaint();                  // redraw the system menu (general settings closed over it)
 #if BOARD_ROM_IN_FLASH
 // romflash_picocalc.cpp: copy a ROM image (MSX BIOS, MSX or SMS cartridge) from an open SD file into a fixed window of spare flash
 // and return its XIP address (nullptr on failure). Unchanged sectors are not rewritten.
@@ -183,17 +198,14 @@ unsigned char pull8();
 void cpuLoop();
 void setflags();
 
-// apple2_roms.cpp - system ROMs loaded from /roms/apple2 on the SD card (no longer embedded)
+// apple2_roms.cpp - system ROMs loaded from /roms on the SD card (no longer embedded)
 bool apple2LoadRoms();            // load all 5 ROMs; false if any is missing or the wrong size
-bool apple2EnsureHdRom();         // load just /roms/apple2/hd.bin; cached
+bool apple2EnsureHdRom();         // load just the HD card ROM (/roms/HDDRVR.BIN); cached
 bool apple2RenderLoadWarning();   // renderLoop hook: draw the "ROMs not found" screen while halted
 extern bool apple2RomLoadFailed;  // set when apple2LoadRoms() failed -> the 6502 stays halted
 extern bool apple2MemAllocFailed; // set when memoryAlloc() ran out of heap -> same halt, other message
 extern bool apple2IIeUnavailable; // set when the IIe map did not fit and II+ was substituted
 void apple2FallbackToIIplus(const char* why);  // hand the IIe map back and come up as a II+
-#if BOARD_A2_ROM_IN_FLASH
-extern const unsigned char apple2IIeRomFlash[16696];  // iie.bin, in flash (src/apple2/iie_rom_flash.cpp)
-#endif
 
 // memory.cpp
 void memoryAlloc();
@@ -210,7 +222,7 @@ void writeSoftSwitches(ushort address, char value);
 
 // disk.cpp
 void diskSetup();
-void saveTrackAsync(void *pvParameters);
+void apple2LateSavePoll();
 void addPhase(uint8_t phase);
 bool identifyDosProdos();
 void getDiskFileInfo(fs::FS &fs);
@@ -224,7 +236,6 @@ void apple2InsertDisk(const char *path);   // hot-swap the floppy by path (no re
 void loadDiskFilesSync();
 void diskBrowseEnter(const char *path); // navigate into a subdirectory and rescan
 void diskBrowseUp();              // navigate to the parent directory and rescan
-void loadDiskAsync(void *pvParameters);
 int getOffset(int track, int sector);
 int getSectorOffset(int sector);
 void trackRawDataEncode(int track);
@@ -240,8 +251,6 @@ void HDSetup();
 void loadHdFilesSync();
 void hdBrowseEnter(const char *path); // navigate into a subdirectory and rescan
 void hdBrowseUp();                // navigate to the parent directory and rescan
-void loadHdAsync(void *pvParameters);
-void getBlockAsync(void *pvParameters);
 void loadHD();
 char HDSoftSwitchesRead(ushort address);
 void HDSoftSwitchesWrite(ushort address, char value);
@@ -385,6 +394,22 @@ void loadPcxtFilesSync();                  // scan SD root -> pcFiles (disk brow
 void pcxtBrowseEnter(const char *path); // navigate into a subdirectory and rescan
 void pcxtBrowseUp();              // navigate to the parent directory and rescan
 
+// Standard media unmount -- one API for every machine (src/shared/media.cpp). The settings browser
+// and the desktop Load window only call mediaIsMounted / mediaUnmount; each core supplies the
+// <core>MediaMounted / <core>Unmount pair behind them. Unmount is called with the CPU paused (the
+// settings window is open); it clears the core's selected*FileName marker when that names the
+// file, so it is not auto-loaded on the next boot. A disk / tape ejects live; a cartridge, program
+// or snapshot is pulled out and the machine resets when it resumes (a console then runs empty).
+bool mediaIsMounted(const char *path);      // is this SD file loaded/mounted in the running machine?
+bool mediaUnmount(const char *path);        // unmount/eject it; false (no-op) if it is not mounted
+bool apple2MediaMounted(const char *path);  void apple2Unmount(const char *path);   // floppy / HD
+bool c64MediaMounted(const char *path);     void c64Unmount(const char *path);      // .prg / .d64 / .crt
+bool nesMediaMounted(const char *path);     void nesUnmount(const char *path);      // .nes cartridge
+bool atariMediaMounted(const char *path);   void atariUnmount(const char *path);    // .a26/.bin cartridge
+bool smsMediaMounted(const char *path);     void smsUnmount(const char *path);      // .sms/.bin cartridge
+bool colecoMediaMounted(const char *path);  void colecoUnmount(const char *path);   // .col/.rom cartridge
+bool zxMediaMounted(const char *path);      void zxUnmount(const char *path);       // snapshot / tape
+
 
 // SID sound (src/c64/c64_sid.cpp)
 void sidSetup();                       // init the 3-voice synth + I2S DAC output task
@@ -441,6 +466,7 @@ void optionsUiActivate();
 // Keyboard menu navigation (separate from the joystick trio above -- see optionsui.cpp).
 void optionsUiKeyArrow(int dx, int dy);   // -1 = left/up, +1 = right/down
 void optionsUiKeyEnter(bool ctrl = false);   // ctrl: file list -> mount AND reboot
+void optionsUiKeyUnmount();               // Del/Backspace: file list -> unmount the highlighted loaded entry
 bool optionsUiKeyEscape();                // false = nothing was open, caller closes the window
 
 // --- Globals defined inside a platform .cpp (declared here for cross-file access).

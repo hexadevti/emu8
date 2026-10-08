@@ -21,11 +21,33 @@
 
 #if defined(BOARD_PICOCALC)
 
+// ampFixSilence() below has to reach PWMAudio's buffer manager, which the library keeps private.
+#define private public
 #include <PWMAudio.h>
+#undef private
+#include <hardware/dma.h>
+#include <hardware/pwm.h>
 
 // Stereo: PWMAudio uses AUDIO_PWM_L_PIN and AUDIO_PWM_L_PIN+1, which is AUDIO_PWM_R_PIN here.
 static PWMAudio dac(AUDIO_PWM_L_PIN, /*stereo=*/true);
 static bool     dacStarted = false;
+
+// The PWM level of a 0 sample, both channels in one word: what the DMA writes to the CC register.
+static uint32_t ampMidWord = 0;
+
+// PWMAudio fills the silence buffer it loops on underflow with a raw 0x80008000, but its samples
+// are scaled to the PWM wrap (write(): sample * _pwmScale >> 16), and at 200 MHz the wrap is ~9070
+// at 22 kHz. So its "silence" sits past the wrap -- the pin held high -- and every underflow (a
+// load stalling the cores, the menu opening) jumps the speaker from mid-scale to full: a pop.
+// Refill it with the scaled mid-scale level. Only the one-time begin() ever writes that buffer.
+static void ampFixSilence()
+{
+  const uint32_t mid = (0x8000u * dac._pwmScale) >> 16;
+  ampMidWord = mid | (mid << 16);
+  AudioBufferManager *arb = dac._arb;
+  if (!arb || !arb->_silence) return;
+  for (size_t i = 0; i < arb->_wordsPerBuffer; i++) arb->_silence->buff[i] = ampMidWord;
+}
 
 // 8 buffers x 128 words: the same depth as the I2S path's dma_buf_count/dma_buf_len, so the
 // amount of slack a core sees before write() blocks is unchanged (~23 ms at 44.1 kHz).
@@ -34,8 +56,10 @@ void ampBegin(int sampleRate)
   if (dacStarted) return;                    // idempotent: only one core makes sound at a time
   dac.setBuffers(8, 128);
   if (!dac.begin((long)sampleRate)) { printLog("audio: PWMAudio begin failed"); return; }
+  ampFixSilence();
   dacStarted = true;
-  sprintf(buf, "audio: PWM stereo on GPIO%d/%d @ %dHz", AUDIO_PWM_L_PIN, AUDIO_PWM_R_PIN, sampleRate);
+  sprintf(buf, "audio: PWM stereo on GPIO%d/%d @ %dHz, wrap %u", AUDIO_PWM_L_PIN, AUDIO_PWM_R_PIN, sampleRate,
+          (unsigned)dac._pwmScale);
   printLog(buf);
 }
 
@@ -55,8 +79,57 @@ void ampBegin(int sampleRate)
 // Stereo ordering note: in stereo mode the first write only latches the sample into PWMAudio's
 // hold word and always succeeds; the second is the one that needs a free buffer, and on refusal
 // it leaves the hold word intact, so retrying it is safe.
+// Loading a cartridge stalls everything: SD reads, and flash writes that mask interrupts on both
+// cores (romflash_picocalc.cpp). The DMA ring meanwhile replays whatever it held, and the reset
+// that follows glitches the sound chip -- a burst of noise on every load. ampMute(true) makes the
+// cores' samples silence and waits for the ring to hold only that; ampMute(false) keeps silence a
+// little longer, past the reset.
+static volatile bool     ampMuted     = false;
+static volatile uint32_t ampMuteUntil = 0;
+
+void ampMute(bool on)
+{
+  if (on) {
+    ampMuted = true;
+    if (dacStarted) delay(40);              // the ring holds ~23ms: let it drain to silence
+  } else {
+    ampMuteUntil = millis() + 400;
+    ampMuted = false;
+  }
+}
+
+// A flash write (romflash_picocalc.cpp) masks interrupts for ~50 ms per sector. PWMAudio's two DMA
+// channels chain into each other and rely on their IRQ to point the next one back at a buffer;
+// without it a re-triggered channel keeps reading on past the end of its buffer, into whatever RAM
+// follows -- loud noise for as long as the load lasts, whatever the cores write. So stop both
+// channels (clear EN: a pause, the transfer resumes where it stopped) around each write. The PWM
+// holds its last level meanwhile, which is silent. Pause before the interrupts go off, resume
+// after they are back, so a completion IRQ raised in between is served before the DMA runs on.
+static uint32_t ampDmaPaused = 0;   // bit per channel
+
+void ampDmaPause(bool pause)
+{
+  if (!dacStarted) return;
+  if (pause) {
+    const uint slice = pwm_gpio_to_slice_num(AUDIO_PWM_L_PIN);
+    const uint32_t cc = PWM_BASE + PWM_CH0_CC_OFFSET + slice * 20;
+    for (uint ch = 0; ch < NUM_DMA_CHANNELS; ch++)
+      if (dma_hw->ch[ch].write_addr == cc && (dma_hw->ch[ch].al1_ctrl & DMA_CH0_CTRL_TRIG_EN_BITS)) {
+        hw_clear_bits(&dma_hw->ch[ch].al1_ctrl, DMA_CH0_CTRL_TRIG_EN_BITS);
+        ampDmaPaused |= 1u << ch;
+      }
+    if (ampDmaPaused) pwm_hw->slice[slice].cc = ampMidWord;   // hold mid-scale, not the last sample
+  } else {
+    for (uint ch = 0; ch < NUM_DMA_CHANNELS; ch++)
+      if (ampDmaPaused & (1u << ch)) hw_set_bits(&dma_hw->ch[ch].al1_ctrl, DMA_CH0_CTRL_TRIG_EN_BITS);
+    ampDmaPaused = 0;
+  }
+}
+
 static inline void dacPutMono(int16_t s)
 {
+  if (ampMuted || (int32_t)(ampMuteUntil - millis()) > 0) s = 0;
+
   // The give-up path is checked BEFORE the frame is started, never between the two channels.
   // Bailing out after channel 0 used to leave PWMAudio's hold word latched, so the next call's
   // "first" write became the second half of the abandoned frame -- L and R swapped permanently,

@@ -251,8 +251,8 @@ IRAM_ATTR void cpuLoop() {
       static uint32_t mLast = 0;
       mInstr++;
       mCyc += opCycles;
-      if ((mInstr & 0x3FFFF) == 0)
-      {
+      if ((mInstr & 0x3FFF) == 0 && (apple2LateSavePoll(), (mInstr & 0x3FFFF) == 0))
+      { // ^ late disk save, ~every 50ms at 1 MHz (disk.cpp); nested so the hot path tests once
         uint32_t now = millis();
         if (mLast != 0)
         {
