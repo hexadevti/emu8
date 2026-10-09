@@ -246,7 +246,12 @@
       // This task exists so the RP2040 can still be built and flashed (for bring-up of the panel,
       // keyboard and SD, all of which work) and so the size report is reproducible.
       // FQBN differences from the Pico 2 task: board rpipico, no arch menu (RP2040 is ARM only),
-      // 2MB flash, and freq=200.
+      // 2MB flash, and freq=250.
+      //
+      // freq=250 (overclock, was 200): +25% on every interpreter AND the panel link, which runs at
+      // clk_peri/4 (board.h LCD_SPI_HZ) = 62.5MHz -- the push to the panel is what caps the Z80
+      // machines' frame rate. VREG stays at the 1.15V the core already sets above 133MHz. If a unit
+      // is unstable here, go back to freq=200; nothing else needs to change (LCD_SPI_HZ follows F_CPU).
       //
       // freq=200 (was 133, the RP2040 stock clock) buys BOTH halves of the frame budget at once:
       //   * the 6502 interpreter is purely CPU-bound here -- it paces against real microseconds
@@ -266,7 +271,7 @@
       "args": [
         "compile",
         "--fqbn",
-        "rp2040:rp2040:rpipico:os=freertos,freq=200,flash=2097152_65536,usbstack=picosdk,opt=Optimize2,exceptions=Enabled",
+        "rp2040:rp2040:rpipico:os=freertos,freq=250,flash=2097152_65536,usbstack=picosdk,opt=Optimize2,exceptions=Enabled",
         "--verbose",
         "--build-property",
         "compiler.cpp.extra_flags=-DBOARD_PICOCALC -I${workspaceFolder}/src/picocalc/pico_shim",

@@ -44,6 +44,7 @@ void frameDone(const char* tag, int bandsSent) {
   const uint32_t now = millis();
   if (statFrames == 0 && statMs == 0) statMs = now;
   statFrames++; statBands += (uint32_t)bandsSent;
+  fpsFrameShown();
   if (now - statMs >= 5000) {
     char line[80];                                   // not the global buf: the Z80 core logs too
     snprintf(line, sizeof(line), "%s: panel fps=%u.%u bands/frame=%u", tag,

@@ -249,6 +249,9 @@ void sidWrite(uint8_t reg, uint8_t val) {
 }
 
 unsigned char sidRead(uint8_t reg) {
+  // POTX/POTY with nothing on the paddle lines read $FF. They used to read 0 -- which is what a
+  // 3-button joystick's buttons 2 and 3 pull them to, so programs that check those saw both held.
+  if (reg == 0x19 || reg == 0x1a) return 0xff;
   if (reg == 0x1b) return (uint8_t)(voice[2].out >> 4);     // OSC3: top 8 bits of voice 3's waveform
   if (reg == 0x1c) return (uint8_t)(voice[2].env >> 16);    // ENV3
   return 0;

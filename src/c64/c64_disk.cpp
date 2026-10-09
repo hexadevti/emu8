@@ -176,6 +176,10 @@ void c64BrowseUp()           { fbUp(c64Browser); c64ProbeFiles(); }
 // the same reason as d64Path below: this is written from the READY trap on the CPU core.
 static char prgPath[256] = "";
 
+// Whether the next READY-trap load also RUNs: c64LoadAndRun (and the boot autoload) say yes,
+// c64Mount says no -- a .prg is then just LOADed, as if typed. Consumed by c64LoadSelected.
+static bool autoloadRun = true;
+
 bool c64LoadPRG(const char *path)
 {
   if (!c64::ram) return false;
@@ -193,11 +197,13 @@ bool c64LoadPRG(const char *path)
   uint32_t a = addr + (uint32_t)got;
   uint16_t end = (uint16_t)a;
 
-  if (addr == 0x0801) { c64FixBasicVars(end); c64QueueRun(); }   // BASIC program
+  const bool run = autoloadRun && addr == 0x0801;
+  if (addr == 0x0801) c64FixBasicVars(end);        // BASIC program: RUN / LIST work on it
+  if (run) c64QueueRun();
   strncpy(prgPath, path, sizeof(prgPath) - 1);
   prgPath[sizeof(prgPath) - 1] = 0;
   snprintf(buf, sizeof(buf), "C64: loaded %.100s @ $%04X..$%04X%s", path, addr, end,
-          addr == 0x0801 ? " (RUN)" : "");
+          run ? " (RUN)" : "");
   printLog(buf);
   return true;
 }
@@ -430,6 +436,11 @@ bool c64LoadSelected(const char *path)
     return c64LoadCRT(path);                      // mounts + requests a reset into the cart
 
   c64CartUnmount();                               // a .prg/.d64 needs normal BASIC/RAM mapping
+  if (!autoloadRun) {                             // c64Mount: LOAD only, no RUN
+    autoloadRun = true;
+    if (pathEndsCI(path, ".d64")) { c64MountD64(path); return true; }
+    return c64LoadPRG(path);
+  }
   if (pathEndsCI(path, ".d64")) {
     c64MountD64(path);
     const uint8_t star[1] = { '*' };
@@ -469,10 +480,29 @@ bool c64LoadAndRun(const char *path)
   c64CartUnmount();
   prgPath[0] = 0;                      // the reset clears the old program
   selectedC64FileName = path;          // what the trap (and AUTOLOAD) will load
+  autoloadRun         = true;
   c64AutoloadPending  = true;          // cpuLoop loads it once the KERNAL reaches $A480 (READY)
   c64::c64ResetReq    = true;
   snprintf(buf, sizeof(buf), "C64: reset, then load %.100s at READY", path);
   printLog(buf);
+  return true;
+}
+
+// Mount without running (the file list's Enter; Ctrl-Enter is c64LoadAndRun). A .d64 goes into
+// drive 8 live -- whatever runs keeps running, and LOAD"$",8 / LOAD"*",8 then read it. A .prg is
+// LOADed at a clean READY prompt (reset first, for the reasons above) without the RUN. A .crt
+// has no such thing: a cartridge starts itself on reset, so it mounts and runs either way.
+bool c64Mount(const char *path)
+{
+  if (pathEndsCI(path, ".crt")) return c64LoadAndRun(path);
+  if (pathEndsCI(path, ".d64")) {
+    c64MountD64(path);
+    snprintf(buf, sizeof(buf), "d64: mounted %.100s in drive 8", path);
+    printLog(buf);
+    return true;
+  }
+  if (!c64LoadAndRun(path)) return false;
+  autoloadRun = false;                 // the trap LOADs it, without RUN
   return true;
 }
 

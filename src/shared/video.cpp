@@ -1,6 +1,9 @@
 #include "../../emu.h"
 
-#include "bootlogo.h"   // embedded boot-splash logo (RGB565)
+#include "bootlogo.h"
+#if defined(BOARD_PICOCALC)
+#include "dirty_bands.h"
+#endif   // embedded boot-splash logo (RGB565)
 #include <esp_system.h>          // esp_reset_reason()
 #include <esp_attr.h>            // RTC_NOINIT_ATTR
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
@@ -593,6 +596,58 @@ static void renderHeartbeat()
 }
 #endif
 
+// Panel frame rate for the settings title ("60 fps"): every core calls fpsFrameShown() once per
+// picture it pushes. Averaged over ~1 s; a gap (settings open, paused, loading) restarts the window
+// instead of dragging the average down, so the title shows the rate from just before the menu.
+float emuFps = 0.0f;
+void fpsFrameShown()
+{
+  static uint32_t t0 = 0, last = 0, n = 0;
+  const uint32_t now = millis();
+  if (now - last > 500) { t0 = now; n = 0; }
+  last = now;
+  n++;
+  if (now - t0 >= 1000) { emuFps = (float)n * 1000.0f / (float)(now - t0); t0 = now; n = 0; }
+}
+
+#if defined(BOARD_PICOCALC)
+// Apple II dirty bands. The raster below decodes every pixel of all 192 lines each pass, which on
+// the M0+ is ~50ms -- the panel ran at ~18fps even when nothing on screen moved. A band is one
+// text row (b, l) = the 8 scanlines the loop draws per iteration; this hashes exactly the bytes
+// that band's decoder will read, so an unchanged band is skipped and only changed ones are pushed.
+// Hashing content (not addresses) also keeps page-flipping games cheap: the two pages are mostly
+// the same picture, so most bands hash equal across a flip.
+static bool appleForceFull = true;   // next raster pass redraws every band (set after a wipe/menu)
+static int  appleBands = 0;          // bands pushed this pass, for the 5s "Apple: panel fps" log
+static uint32_t appleHashRow(uint32_t h, const unsigned char *p)
+{
+  for (int i = 0; i < 0x28; i++) h = (h ^ p[i]) * 16777619u;
+  return h;
+}
+static uint32_t appleBandHash(int b, int l, bool gfx, uint16_t textPage, uint16_t graphicsPage)
+{
+  const uint16_t row = (uint16_t)(b * 0x28 + l * 0x80);
+  uint32_t h = 2166136261u;
+  if (gfx && LoRes_HiRes) {
+    h = appleHashRow(h ^ 1, ram + textPage + row);
+  } else if (gfx && DHiResOn_Off) {
+    for (int block = 0; block < 8; block++) {
+      h = appleHashRow(h ^ 2, auxram + (uint16_t)(0x2000 + row + block * 0x400));
+      h = appleHashRow(h, ram + (uint16_t)(0x2000 + row + block * 0x400));
+    }
+  } else if (gfx) {
+    for (int block = 0; block < 8; block++)
+      h = appleHashRow(h ^ 3, ram + (uint16_t)(graphicsPage + row + block * 0x400));
+  } else if (Cols40_80) {
+    h = appleHashRow(h ^ 4, ram + textPage + row);
+  } else {
+    h = appleHashRow(h ^ 5, auxram + (uint16_t)(0x400 + row));
+    h = appleHashRow(h, ram + (uint16_t)(0x400 + row));
+  }
+  return h;
+}
+#endif
+
 void renderLoop(void *pvParameters)
 {
 #if defined(BOARD_PICOCALC)
@@ -777,6 +832,7 @@ void renderLoop(void *pvParameters)
       displaySetVideoRect(20, 200);      // VIC-II screen is 200 lines (logical y 20..220); fill-screen scales that
       displaySetVideoFill(0, 320, true); // fill-screen stretches the full-width 320x200 picture to 100% (no aspect/bars)
       c64RenderFrame();                  // text screen (top 14 rows when the OSK is open)
+      fpsFrameShown();
       if (oskActive()) { displaySetUiMode(true); oskRender(); }  // keyboard owns the bottom (UI)
       Vertical_blankingOn_Off = true;
       vTaskDelay(pdMS_TO_TICKS(10));
@@ -920,6 +976,7 @@ void renderLoop(void *pvParameters)
       if (clearScr) { clearScr = false; pcxtForceRedraw(); }   // the PicoCalc renderer wipes the panel itself
 #endif
       bool drew = pcxtRenderFrame();
+      if (drew) fpsFrameShown();
       if (oskActive()) { displaySetUiMode(true); oskRender(); drew = true; }
 #if BOARD_DISPLAY_GFX
       if (!drew) tft.setBypassCanvas(true);   // nothing changed -> no flush this round (free the bus)
@@ -1000,8 +1057,9 @@ void renderLoop(void *pvParameters)
     }
 #endif
     tft.startWrite();
-    
-    
+#if defined(BOARD_PICOCALC)
+    appleBands = 0;
+#endif
 
     int x = margin_x;
     int y = margin_y;
@@ -1054,9 +1112,15 @@ void renderLoop(void *pvParameters)
       tft.writeColor(colors[0], (uint32_t)320 * 240);
 #endif
       clearScr = false;
+#if defined(BOARD_PICOCALC)
+      appleForceFull = true;
+#endif
     }
     else if (OptionsWindow || DebugWindow) 
     {
+#if defined(BOARD_PICOCALC)
+      appleForceFull = true;
+#endif
       y=0;
       for (int v = 0; v < 30; v++)
       {
@@ -1082,10 +1146,53 @@ void renderLoop(void *pvParameters)
     }
     else
     {
+#if defined(BOARD_PICOCALC)
+      // Dirty bands (see appleBandHash). Anything that changes how bytes become pixels -- mode
+      // switches, colour, FILL, the II+ flash phase -- forces a full frame, and so does a periodic
+      // refresh (every 60th pass, ~1s) so nothing drawn over the raster by other code can stick.
+      static uint32_t bandSig[24];
+      static uint32_t modeSig = 0;
+      static uint8_t  refresh = 0;
+      uint32_t ms = 2166136261u;
+      const uint32_t modeBits[] = { Graphics_Text, DisplayFull_Split, LoRes_HiRes, DHiResOn_Off,
+                                    Cols40_80, AppleIIe, videoColor, appleFill,
+                                    (uint32_t)(!AppleIIe && inversed), (uint32_t)rasterH,
+                                    (uint32_t)margin_y };
+      for (uint32_t v : modeBits) ms = (ms ^ v) * 16777619u;
+      const bool fullFrame = appleForceFull || ms != modeSig || ++refresh >= 60;
+      if (fullFrame) refresh = 0;
+      modeSig = ms;
+      appleForceFull = false;
+      const int winX = (AppleIIe && !Cols40_80 && !DHiResOn_Off) || appleFill ? 0 : margin_x;
+      const int winW = (AppleIIe && !Cols40_80 && !DHiResOn_Off) || appleFill ? 320 : 280;
+      const int rasterEnd = margin_y + rasterH;
+      bool skipped = false;
+#endif
       for (int b = 0; b < 3; b++)
       {
         for (int l = 0; l < 8; l++)
         {
+#if defined(BOARD_PICOCALC)
+          {
+            const bool gfx = (Graphics_Text && DisplayFull_Split) || (Graphics_Text && !DisplayFull_Split && (b < 2 || (b == 2 && l < 4)));
+            if (gfx && !LoRes_HiRes && !DHiResOn_Off) graphicsPage = Page1_Page2 ? 0x2000 : 0x4000;
+            const uint32_t h = appleBandHash(b, l, gfx, textPage, graphicsPage);
+            if (!fullFrame && h == bandSig[b * 8 + l]) {
+              // Advance the line bookkeeping exactly as drawing the band's 8 lines would.
+              y += 8;
+              last_y = (uint16_t)floor(coef192 * (float)y);
+              skipped = true;
+              continue;
+            }
+            bandSig[b * 8 + l] = h;
+            appleBands++;
+            if (skipped) {                 // resume the stream at this band's first panel row
+              tft.setAddrWindow(winX, last_y, winW, rasterEnd - last_y);
+              tft.startWrite();
+              skipped = false;
+            }
+          }
+#endif
           if ((Graphics_Text && DisplayFull_Split) || (Graphics_Text && !DisplayFull_Split && (b < 2 || (b == 2 && l < 4))))
           {
             if (LoRes_HiRes)
@@ -1497,6 +1604,11 @@ void renderLoop(void *pvParameters)
     unsigned long endTime2 = millis();
     tft.endWrite();
 #if defined(BOARD_PICOCALC)
+    dband::frameDone("Apple", appleBands);   // counts the frame (fpsFrameShown) and logs every 5s
+#else
+    fpsFrameShown();
+#endif
+#if defined(BOARD_PICOCALC)
     // Disk II drive light. It sits in the bottom letterbox bar, BELOW the 320x240 emulated
     // screen, which is the one piece of panel the Apple raster does not own -- so it can never
     // land on top of the picture, and the clear-screen path above (which writes exactly
@@ -1522,15 +1634,32 @@ void renderLoop(void *pvParameters)
     if (oskActive()) { displaySetUiMode(true); oskRender(); }
     Vertical_blankingOn_Off = true;
     unsigned long endTime3 = millis();
+#if defined(BOARD_PICOCALC)
+    // Pace to ~60 passes/s (the real Apple's refresh). With dirty bands an unchanged screen costs
+    // almost nothing, so a fixed nap would spin; a full redraw still gets only a 1ms yield.
+    {
+      const unsigned long el = millis() - startTime;
+      vTaskDelay(pdMS_TO_TICKS(el < 16 ? 16 - el : 1));
+    }
+#else
     vTaskDelay(pdMS_TO_TICKS(5));
+#endif
     unsigned long endTime4 = millis();
     tft.invertDisplay(true);
+#if defined(BOARD_PICOCALC)
+    // II+ FLASH text by time, not by pass count: the pass rate now varies from ~18 to 60/s.
+    {
+      static unsigned long lastFlip = 0;
+      if (millis() - lastFlip >= 400) { inversed = !inversed; lastFlip = millis(); }
+    }
+#else
     flashCount++;
     if (flashCount > 7)
     {
       inversed = !inversed;
       flashCount = 0;
     }
+#endif
     unsigned long endTime5 = millis();
     // Calculate and print the duration
     unsigned long duration1 = endTime1 - startTime;

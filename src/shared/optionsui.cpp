@@ -19,26 +19,30 @@
 // switches the display to full-panel mode (tft.setFullPanel) and spends the extra 80 rows on a
 // taller grid and, mostly, on more and taller file rows drawn in the larger list font (font 3).
 // Order differs from the touch boards: the file list comes first (it is what the menu is opened
-// for), then its MOUNT / REBOOT buttons, then the option grid and VOLUME. The keyboard arrows
+// for), then its MOUNT / REBOOT buttons, then the option grid. There is no VOLUME row: the board
+// has its own hardware volume control, so the app volume is pinned at maximum (optionsUiOpen) and
+// its 23 rows went to one more file row and taller grid cards. The keyboard arrows
 // (ouiNextFocus, further down) move by these positions, so Up/Down walk the page top to bottom.
+#define OUI_HAS_VOLUME 0
 #define OUI_SCR_H     320
 #define OUI_TITLE_H   28
 #define OUI_FB_TOP    30          // file browser header
 #define OUI_FB_HDR_H  16
 #define OUI_FB_LIST   46          // file rows
 #define OUI_FB_ROWH   17
-#define OUI_FB_ROWS   8
+#define OUI_FB_ROWS   9
 #define OUI_FB_FONT   3           // display_picocalc.cpp: FreeSans at 4/5, between fonts 1 and 2
-#define OUI_ACT_TOP   186         // action buttons (or the key hints while the list is focused)
+#define OUI_ACT_TOP   203         // action buttons (or the key hints while the list is focused)
 #define OUI_ACT_H     30
-#define OUI_TG_TOP    220         // toggle grid: 4 columns x 2 rows
+#define OUI_TG_TOP    237         // toggle grid: 4 columns x 2 rows, down to the bottom edge
 #define OUI_TG_W      80
-#define OUI_TG_H      38
-#define OUI_VOL_TOP   297
-#define OUI_VOL_H     22
+#define OUI_TG_H      41
+#define OUI_VOL_TOP   0           // unused (OUI_HAS_VOLUME 0)
+#define OUI_VOL_H     0
 #define OUI_HELP_ROWH 15
 #else
 // ---- Layout (320 x 240) ----
+#define OUI_HAS_VOLUME 1
 #define OUI_SCR_H     240
 #define OUI_TITLE_H   26
 #define OUI_TG_TOP    28          // toggle grid: 4 columns x 2 rows
@@ -445,6 +449,7 @@ static void ouiDrawToggles()
 
 static void ouiDrawVolume()
 {
+  if (!OUI_HAS_VOLUME) return;
   if (!ouiChanged(ouiSigVol, 16u + (uint32_t)volume * 4u + (uint32_t)ouiFocusState(OUI_FOC_VOL))) return;
   tft.fillRect(0, OUI_VOL_TOP, 320, OUI_VOL_H, OUI_BG);
   int level = volume / 0x10;
@@ -622,11 +627,13 @@ static void ouiDrawFileHints()
   // What Enter (inside the list) and Ctrl-Enter do -- mirrors optionsUiKeyEnter / ouiMount.
   const char *enterAct = dir               ? "open folder"
                        : ouiIsPcxt()       ? "mount A:"
+                       : ouiIsC64()        ? "mount"
                        : (ouiIsC64() || ouiIsNES() || ouiIsAtari() || ouiIsMsx() || ouiIsSms() || ouiIsColeco() || ouiIsZx())
                                            ? "load & run" : "mount";
   const char *ctrlAct  = dir               ? NULL
                        : ouiIsPcxt()       ? "mount C:"
                        : ouiMsxDsk()       ? (ouiMsxDskCur() ? "unmount" : "mount")
+                       : ouiIsC64()        ? "mount & run"
                        : (currentPlatform == PLATFORM_APPLE2) ? "mount + reboot" : NULL;
   const bool delAct = !dir && ouiCurMounted();   // Del: unmount the highlighted (loaded) entry
 
@@ -698,6 +705,7 @@ static void ouiDrawActions()
   ouiActBtn(214, 102, "REBOOT", OUI_REBOOT, OUI_TXT, OUI_FOC_REBOOT);
 }
 
+static int ouiRomTextW(const char *s, int font);
 static void ouiDrawTitle()
 {
   const char *title = ouiIsC64() ? "COMMODORE 64"
@@ -709,19 +717,23 @@ static void ouiDrawTitle()
                : ouiIsZx() ? "ZX SPECTRUM 48K"
                : ouiIsPcxt() ? "PC-XT"
                : AppleIIe ? "APPLE IIe" : "APPLE II+";
-  // Every CPU speed readout lives here, right-aligned before the close button (Atari has none).
-  char mhz[20] = "";
+  // Every CPU speed readout lives here, right-aligned before the close button, followed by the
+  // panel frame rate (fpsFrameShown() in video.cpp). Atari has no CPU readout, only the fps.
+  char mhz[32] = "";
+  int  n = 0;
   if (currentPlatform == PLATFORM_APPLE2)       // live, measured in cpuLoop
-    snprintf(mhz, sizeof(mhz), "6502  %.2f MHz", appleMeasuredMhz);
+    n = snprintf(mhz, sizeof(mhz), "6502 %.2fMHz", appleMeasuredMhz);
   else if (ouiIsC64())                          // live, measured in cpuLoop
-    snprintf(mhz, sizeof(mhz), "6510  %.2f MHz", c64MeasuredMhz);
+    n = snprintf(mhz, sizeof(mhz), "6510 %.2fMHz", c64MeasuredMhz);
   else if (ouiIsNES())                          // derived from fps x cycles-per-frame
-    snprintf(mhz, sizeof(mhz), "2A03  %.2f MHz", nesMeasuredMhz);
-  else if (ouiIsMsx() || ouiIsSms() || ouiIsColeco() || ouiIsZx())   // uncapped Z80, boot benchmark
-    snprintf(mhz, sizeof(mhz), "Z80  %.2f MHz", ouiIsMsx() ? msxMeasuredMhz : ouiIsSms() ? smsMeasuredMhz
+    n = snprintf(mhz, sizeof(mhz), "2A03 %.2fMHz", nesMeasuredMhz);
+  else if (ouiIsMsx() || ouiIsSms() || ouiIsColeco() || ouiIsZx())   // live, speedmeter.h
+    n = snprintf(mhz, sizeof(mhz), "Z80 %.2fMHz", ouiIsMsx() ? msxMeasuredMhz : ouiIsSms() ? smsMeasuredMhz
                                               : ouiIsZx() ? zxMeasuredMhz : colecoMeasuredMhz);
-  else if (ouiIsPcxt())                         // 8086-equivalent, boot benchmark
-    snprintf(mhz, sizeof(mhz), "8086  %.2f MHz", pcMeasuredMhz);
+  else if (ouiIsPcxt())                         // 8086-equivalent, live, speedmeter.h
+    n = snprintf(mhz, sizeof(mhz), "8086 %.2fMHz", pcMeasuredMhz);
+  if (n < 0 || n >= (int)sizeof(mhz)) n = (int)strlen(mhz);
+  snprintf(mhz + n, sizeof(mhz) - n, "%s%dfps", n ? "  " : "", (int)(emuFps + 0.5f));
   if (!ouiChanged(ouiSigTitle, ouiHash(mhz, ouiHash(title)))) return;
 
   tft.fillRect(0, 0, 320, OUI_TITLE_H, OUI_TITLE);
@@ -730,9 +742,13 @@ static void ouiDrawTitle()
   tft.drawString(title, 10, OUI_TITLE_H / 2, 2);
   int cw = OUI_TITLE_H, cx = 320 - cw;
   if (mhz[0]) {
+    // Too wide for the gap after the title (long names like "ZX SPECTRUM 48K")? Drop the CPU name.
+    const char *speed = mhz;
+    const int room = cx - 8 - (10 + ouiRomTextW(title, 2) + 10);
+    if (ouiRomTextW(speed, 1) > room && strchr(mhz, ' ') && strstr(mhz, "MHz")) speed = strchr(mhz, ' ') + 1;
     tft.setTextDatum(MR_DATUM);
     tft.setTextColor(OUI_TXT, OUI_TITLE);
-    tft.drawString(mhz, cx - 8, OUI_TITLE_H / 2, 1);
+    tft.drawString(speed, cx - 8, OUI_TITLE_H / 2, 1);
   }
   tft.fillRect(cx, 0, cw, OUI_TITLE_H, OUI_RED);
   tft.setTextDatum(MC_DATUM);
@@ -858,6 +874,8 @@ static void ouiDrawHelp()
     ouiHelpRow(y, "Keys",      "C64 layout");
     ouiHelpRow(y, "Arrows",    "Cursor (JOY off)");
     ouiHelpRow(y, "Arr+Space", "Joystick (JOY on)");
+    ouiHelpRow(y, "Enter",      "Files: mount");
+    ouiHelpRow(y, "Ctrl-Enter", "Files: mount + run");
 #if !defined(BOARD_PICOCALC)   // no gamepad port on this board; see the note at the Apple section
     ouiHelpHdr(y, "C64  -  GAMEPAD");
     ouiHelpRow(y, "D-pad", "Stick");
@@ -1690,7 +1708,9 @@ struct OuiLoadMute {
 #endif
 };
 
-static void ouiMount()
+// `run` matters only on the C64: false = mount (Enter in the list), true = mount & run (Ctrl-Enter,
+// the LOAD & RUN button). The other loaders always start what they load.
+static void ouiMount(bool run = true)
 {
   std::vector<std::string> &files = ouiFiles();
   // Nothing listed (a failed scan): Enter still goes up a level. At the root that is a no-op.
@@ -1700,10 +1720,11 @@ static void ouiMount()
   // row means navigate, never mount. Checked once here instead of in each per-core branch.
   if (ouiIsDir(files[shownFile])) { ouiBrowse(files[shownFile]); return; }
   OuiLoadMute mute;
-  if (ouiIsC64()) {                       // C64: load the highlighted image (.prg/.d64/.crt) + run
+  if (ouiIsC64()) {                       // C64: mount, or mount & run, the highlighted .prg/.d64/.crt
     if (shownFile >= files.size()) return;
     if (ouiEntryProblem(shownFile)) { optionsUiDirty = true; return; }   // greyed: reason is in the header
-    if (!c64LoadAndRun(files[shownFile].c_str())) {
+    const char *path = files[shownFile].c_str();
+    if (!(run ? c64LoadAndRun(path) : c64Mount(path))) {
       // Only a .crt fails here (a .prg/.d64 loads later, at READY). Grey it out with the reason
       // and stay open. If it had already pulled the previous cart out, the machine resets to
       // BASIC when the window closes (see c64LoadCRT).
@@ -1842,6 +1863,7 @@ static bool ouiFocusable(int f)
     return f <= 4;                                                                // C64, Apple II
   }
   if (f == OUI_FOC_MNTREBOOT) return !ouiActTwoButtons();
+  if (f == OUI_FOC_VOL) return OUI_HAS_VOLUME;
   return true;
 }
 
@@ -1947,7 +1969,7 @@ static bool ouiFocusRect(int f, int &x, int &y, int &w, int &h)
     x = (f % 4) * OUI_TG_W; y = OUI_TG_TOP + (f / 4) * OUI_TG_H; w = OUI_TG_W; h = OUI_TG_H;
     return true;
   }
-  if (f == OUI_FOC_VOL)   { x = 0; y = OUI_VOL_TOP; w = 320; h = OUI_VOL_H; return true; }
+  if (f == OUI_FOC_VOL)   { if (!OUI_HAS_VOLUME) return false; x = 0; y = OUI_VOL_TOP; w = 320; h = OUI_VOL_H; return true; }
   if (f == OUI_FOC_FILES) { x = 0; y = OUI_FB_LIST; w = 320; h = OUI_FB_ROWS * OUI_FB_ROWH; return true; }
   y = OUI_ACT_TOP; h = OUI_ACT_H;
   if (ouiActTwoButtons()) {               // LOAD & RUN (6..126) | REBOOT (132..314)
@@ -2050,7 +2072,7 @@ void optionsUiKeyEnter(bool ctrl)
     if (ouiIsPcxt()) ouiPcMountC();
     else if (currentPlatform == PLATFORM_APPLE2) ouiMountReboot();
     else if (ouiMsxDsk()) ouiMsxMount(false);   // MSX .dsk: live MOUNT / UNMOUNT
-    else ouiMount();      // C64/NES/Atari/MSX/SMS: no reboot variant, Ctrl-Enter = LOAD & RUN
+    else ouiMount(true);  // C64/NES/Atari/MSX/SMS: no reboot variant, Ctrl-Enter = LOAD & RUN
     return;
   }
 
@@ -2059,7 +2081,7 @@ void optionsUiKeyEnter(bool ctrl)
   if (f == OUI_FOC_VOL || f == OUI_FOC_FILES) {
     if (!ouiEditing) { ouiEditing = true; optionsUiDirty = true; return; }
     if (f == OUI_FOC_VOL) { ouiEditing = false; optionsUiDirty = true; return; }   // done
-    ouiMount();       // file list: a directory row navigates, a file row mounts (and closes)
+    ouiMount(false);  // file list: a directory row navigates, a file row mounts (and closes)
     return;
   }
   optionsUiActivate();   // toggles flip, action buttons fire -- no mode to enter
@@ -2109,7 +2131,7 @@ static void ouiHandleTap(int16_t x, int16_t y)
   }
 
   // volume +/-
-  if (y >= OUI_VOL_TOP && y < OUI_VOL_TOP + OUI_VOL_H) {
+  if (OUI_HAS_VOLUME && y >= OUI_VOL_TOP && y < OUI_VOL_TOP + OUI_VOL_H) {
     if (x >= 120 && x < 148) { if (volume > 0) { volume -= 0x10; if (volume > 0xf0) volume = 0; } optionsUiDirty = true; return; }
     if (x >= 288 && x < 316) { if (volume < 0xf0) volume += 0x10; optionsUiDirty = true; return; }
   }
@@ -2185,6 +2207,10 @@ void optionsUiOpen()
     }
     optionsUiSyncSelection();
   }
+#if !OUI_HAS_VOLUME
+  volume = 0xf0;                 // the board's own volume knob does the job; keep the app at max
+  if (optionsUiFocus == OUI_FOC_VOL) optionsUiFocus = OUI_FOC_FILES;
+#endif
   if (optionsUiFocus != OUI_FOC_VOL && optionsUiFocus != OUI_FOC_FILES) ouiEditing = false;
   ouiHelpOpen          = false;  // always open on the settings page, not the help overlay
   ouiRomClose();                 // ...nor the ROMS page

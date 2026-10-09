@@ -12,6 +12,7 @@
 #include "zx.h"
 #include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
 #include "../shared/dirty_bands.h"     // PicoCalc: push only the bands that changed
+#include "../shared/speedmeter.h"     // live Z80 MHz for the settings title
 
 // ---- buffers --------------------------------------------------------------------------------------
 // Everything lives in sharedBigBuf, on every board: the 48K RAM first (so no heap at all for it),
@@ -150,13 +151,15 @@ void zxLoop() {
 
   const uint32_t FRAME_US = 19968;
   uint32_t nextUs = micros();
+  SpeedMeter meter; meter.restart(zx::cpu.cycles);
   for (;;) {
-    if (OptionsWindow || paused) { zxParked = true; vTaskDelay(pdMS_TO_TICKS(20)); nextUs = micros(); continue; }
+    if (OptionsWindow || paused) { zxParked = true; vTaskDelay(pdMS_TO_TICKS(20)); nextUs = micros(); meter.restart(zx::cpu.cycles); continue; }
     zxParked = false;
-    if (zxResetReq)   { zxResetReq = false; zx::machineReset(); nextUs = micros(); }
+    if (zxResetReq)   { zxResetReq = false; zx::machineReset(); nextUs = micros(); meter.restart(zx::cpu.cycles); }
     if (zx::romLen == 0) { vTaskDelay(pdMS_TO_TICKS(100)); continue; }   // no ROM -> nothing to run
 
     zx::runFrame();
+    meter.tick(zx::cpu.cycles, zxMeasuredMhz);
 
     if (zxFast) {
 #if defined(BOARD_DESKTOP)
@@ -321,6 +324,7 @@ void zxRenderFrame() {
   }
   tft.setSwapBytes(false);
 #endif
+  fpsFrameShown();
   zx::frameReady = false;
 }
 

@@ -203,6 +203,7 @@ void nesRenderFrame() {
   nes::fbPushing  = false;
   nes::fbReadLine = NES_H;   // idle: never hold the PPU up
   nes::nesPushCount++;
+  fpsFrameShown();
 }
 
 // Controller bits from the joystick task -> NES controller 1 shift register.

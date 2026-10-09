@@ -101,29 +101,45 @@ void ampMute(bool on)
 // A flash write (romflash_picocalc.cpp) masks interrupts for ~50 ms per sector. PWMAudio's two DMA
 // channels chain into each other and rely on their IRQ to point the next one back at a buffer;
 // without it a re-triggered channel keeps reading on past the end of its buffer, into whatever RAM
-// follows -- loud noise for as long as the load lasts, whatever the cores write. So stop both
-// channels (clear EN: a pause, the transfer resumes where it stopped) around each write. The PWM
-// holds its last level meanwhile, which is silent. Pause before the interrupts go off, resume
-// after they are back, so a completion IRQ raised in between is served before the DMA runs on.
-static uint32_t ampDmaPaused = 0;   // bit per channel
+// follows -- loud noise for as long as the load lasts, whatever the cores write. So hold the
+// DMA around each write by stopping its pacing timer (X = 0: no more DREQs): both channels freeze
+// exactly where they are, the busy one mid-buffer, and carry on when the rate is put back.
+//
+// It used to clear each channel's EN bit instead, one channel after the other. If the busy channel
+// finished its buffer between the two clears, its chain trigger hit a channel that was already
+// disabled -- and a disabled channel ignores triggers. Both ended up idle with nothing left to
+// start either one: the C64's sound died for good, on some random cartridge load.
+// Pause before the interrupts go off, resume after they are back.
+static bool     ampDmaPaused = false;
+static uint32_t ampPacerSave = 0;
 
 void ampDmaPause(bool pause)
 {
-  if (!dacStarted) return;
+  if (!dacStarted || dac._pacer < 0) return;
   if (pause) {
+    if (ampDmaPaused) return;
+    ampPacerSave = dma_hw->timer[dac._pacer];
+    dma_hw->timer[dac._pacer] = ampPacerSave & 0xFFFFu;    // X (bits 31:16) = 0: rate 0
+    ampDmaPaused = true;
     const uint slice = pwm_gpio_to_slice_num(AUDIO_PWM_L_PIN);
-    const uint32_t cc = PWM_BASE + PWM_CH0_CC_OFFSET + slice * 20;
-    for (uint ch = 0; ch < NUM_DMA_CHANNELS; ch++)
-      if (dma_hw->ch[ch].write_addr == cc && (dma_hw->ch[ch].al1_ctrl & DMA_CH0_CTRL_TRIG_EN_BITS)) {
-        hw_clear_bits(&dma_hw->ch[ch].al1_ctrl, DMA_CH0_CTRL_TRIG_EN_BITS);
-        ampDmaPaused |= 1u << ch;
-      }
-    if (ampDmaPaused) pwm_hw->slice[slice].cc = ampMidWord;   // hold mid-scale, not the last sample
-  } else {
-    for (uint ch = 0; ch < NUM_DMA_CHANNELS; ch++)
-      if (ampDmaPaused & (1u << ch)) hw_set_bits(&dma_hw->ch[ch].al1_ctrl, DMA_CH0_CTRL_TRIG_EN_BITS);
-    ampDmaPaused = 0;
+    pwm_hw->slice[slice].cc = ampMidWord;                  // hold mid-scale, not the last sample
+  } else if (ampDmaPaused) {
+    dma_hw->timer[dac._pacer] = ampPacerSave;
+    ampDmaPaused = false;
   }
+}
+
+// Last line of defence: if the ring has stopped draining and neither of PWMAudio's channels is
+// running (a chain trigger lost some other way), start the first one again. Its IRQ re-arms the
+// pair from there, so the sound comes back instead of staying off until a reboot.
+static void ampKickIfStalled()
+{
+  AudioBufferManager *arb = dac._arb;
+  if (!arb || ampDmaPaused) return;
+  const int a = arb->_channelDMA[0], b = arb->_channelDMA[1];
+  if (a < 0 || b < 0 || dma_channel_is_busy(a) || dma_channel_is_busy(b)) return;
+  dma_channel_start(a);
+  printLog("audio: DMA ring stalled, restarted");
 }
 
 static inline void dacPutMono(int16_t s)
@@ -139,8 +155,11 @@ static inline void dacPutMono(int16_t s)
     vTaskDelay(1);                           // 1 tick = 1ms; the ring holds ~23ms, so no underrun
     if (++naps > 100) return;                // DMA stopped dead: drop the frame rather than hang
   }
-  while (!dac.write(s, /*sync=*/false))      // channel 1: this is the one that needs a free buffer
+  naps = 0;
+  while (!dac.write(s, /*sync=*/false)) {    // channel 1: this is the one that needs a free buffer
     vTaskDelay(1);                           // no bail-out here -- the frame is already committed
+    if (++naps % 30 == 0) ampKickIfStalled();   // a buffer frees every ~6ms; 30ms means stuck
+  }
 }
 
 // `n` samples in the cores' DAC format: an 8-bit level in the HIGH byte, i.e. unsigned and

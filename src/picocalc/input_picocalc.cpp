@@ -560,6 +560,14 @@ void picocalcPumpInput()
     return;                             // nothing to poll until then
   }
 
+  // A 10 kHz I2C round trip costs a few ms of the render core every pass, which capped the panel
+  // around 42 fps. The keyboard FIFO buffers events, so polling at most every 10 ms (100 Hz) loses
+  // nothing a human can type, and passes in between skip the bus entirely.
+  static uint32_t lastPoll = 0;
+  const uint32_t now = millis();
+  if (now - lastPoll < 10) return;
+  lastPoll = now;
+
   uint8_t state, code;
   if (!readFifo(&state, &code)) {selectFifoReg();return; }
   handleEvent(state, code);

@@ -17,6 +17,7 @@
 #include "../sms/sms.h"              // SN76489 (reset from machineReset)
 #include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
 #include "../shared/dirty_bands.h"     // PicoCalc: push only the bands that changed
+#include "../shared/speedmeter.h"     // live Z80 MHz for the settings title
 
 static uint16_t* colScratch = nullptr;   // per-frame RGB565 conversion band (non-PicoCalc path)
 #if !BOARD_ROM_IN_FLASH
@@ -144,12 +145,14 @@ void colecoLoop() {
 
   const uint32_t FRAME_US = 16687;
   uint32_t nextUs = micros();
+  SpeedMeter meter; meter.restart(coleco::cpu.cycles);
   for (;;) {
-    if (OptionsWindow || paused) { vTaskDelay(pdMS_TO_TICKS(20)); nextUs = micros(); continue; }
-    if (colResetReq)   { colResetReq = false; coleco::machineReset(); nextUs = micros(); }
+    if (OptionsWindow || paused) { vTaskDelay(pdMS_TO_TICKS(20)); nextUs = micros(); meter.restart(coleco::cpu.cycles); continue; }
+    if (colResetReq)   { colResetReq = false; coleco::machineReset(); nextUs = micros(); meter.restart(coleco::cpu.cycles); }
     if (coleco::biosLen == 0) { vTaskDelay(pdMS_TO_TICKS(100)); continue; }   // no BIOS -> nothing to run
 
     coleco::runFrame();
+    meter.tick(coleco::cpu.cycles, colecoMeasuredMhz);
 
     if (colecoFast) {
 #if defined(BOARD_DESKTOP)
@@ -239,6 +242,7 @@ void colecoRenderFrame() {
   }
   tft.setSwapBytes(false);
 #endif
+  fpsFrameShown();
   coleco::frameReady = false;
 }
 

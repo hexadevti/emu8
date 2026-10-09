@@ -122,10 +122,12 @@
 // reachable rates are quantised and asking for 50MHz at the wrong sysclk silently gives less:
 //   RP2350 at the stock 150MHz -> only 75 / 37.5 / 25 are reachable, so 50 becomes 37.5
 //   RP2040 at the stock 133MHz -> 50 becomes 133/4 = 33.25
-// BOTH build tasks therefore select freq=200, where clk_peri/4 is exactly 50MHz (the rate proven
-// on this panel) -- see .vscode/tasks.json. If the ribbon shows artifacts, halve THIS constant
-// rather than lowering the sysclk; the 6502 interpreter is CPU-bound and wants the clock.
-#define LCD_SPI_HZ        50000000
+// The panel therefore runs at exactly clk_peri/4: the RP2350 build selects freq=200 (50MHz, the
+// rate first proven on this panel) and the RP2040 build freq=250 (62.5MHz) -- see .vscode/tasks.json.
+// A fixed 50MHz would round DOWN to 250/6 = 41.7MHz on the RP2040. The panel push is the frame-rate
+// bottleneck for the Z80 machines, so it gets the full quarter. If the ribbon shows artifacts, use
+// F_CPU / 6 here rather than lowering the sysclk; the interpreters are CPU-bound and want the clock.
+#define LCD_SPI_HZ        (F_CPU / 4)
 
 // --- keyboard: STM32F103 on i2c1, 10kHz (its firmware is slow; faster clocks drop bytes) ---
 #define KBD_I2C_SDA_PIN   6

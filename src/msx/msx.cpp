@@ -20,6 +20,7 @@
 #include "msx_diskrom.h"
 #include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
 #include "../shared/dirty_bands.h"     // PicoCalc: push only the bands that changed
+#include "../shared/speedmeter.h"     // live Z80 MHz for the settings title
 
 // ---- per-frame RGB565 conversion band (malloc'd on the MSX path only, like nesScratch) ----------
 static uint16_t* msxScratch = nullptr;
@@ -204,12 +205,14 @@ void msxLoop() {
 
   const uint32_t FRAME_US = 16687;
   uint32_t nextUs = micros();
+  SpeedMeter meter; meter.restart(msx::cpu.cycles);
   for (;;) {
-    if (OptionsWindow) { vTaskDelay(pdMS_TO_TICKS(20)); nextUs = micros(); continue; }  // paused in settings
-    if (msxResetReq)   { msxResetReq = false; msx::machineReset(); nextUs = micros(); }
+    if (OptionsWindow) { vTaskDelay(pdMS_TO_TICKS(20)); nextUs = micros(); meter.restart(msx::cpu.cycles); continue; }  // paused in settings
+    if (msxResetReq)   { msxResetReq = false; msx::machineReset(); nextUs = micros(); meter.restart(msx::cpu.cycles); }
     if (msx::biosLen == 0) { vTaskDelay(pdMS_TO_TICKS(100)); continue; }                 // no BIOS -> nothing to run
 
     msx::runFrame();
+    meter.tick(msx::cpu.cycles, msxMeasuredMhz);
     msxDiskFlush(4);                                   // drain a few dirty disk sectors to SD per frame
 
     if (msxFast) {
@@ -312,6 +315,7 @@ void msxRenderFrame() {
   }
   tft.setSwapBytes(false);
 #endif
+  fpsFrameShown();
   msx::frameReady = false;     // done reading the framebuffer; core 1 may render the next frame
 }
 

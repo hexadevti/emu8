@@ -433,6 +433,7 @@ void c64BrowseUp();                   // navigate to the parent directory and re
 bool c64LoadPRG(const char *path);    // load a .prg into the running C64 (autorun if BASIC)
 bool c64LoadSelected(const char *path); // menu dispatch: .prg loads&runs, .d64 mounts+runs "*"
 bool c64LoadAndRun(const char *path);   // same, but resets first and loads at the BASIC prompt
+bool c64Mount(const char *path);        // mount only: .d64 into drive 8 live, .prg LOADed (no RUN)
 void c64MountD64(const char *path);   // mount a .d64 as the virtual drive (device 8)
 bool c64DiskMounted();                // is a .d64 currently mounted?
 // Why a C64 browser entry cannot be loaded. A uint16_t code: the reason in the low byte, and for

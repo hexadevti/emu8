@@ -128,8 +128,13 @@ static void appleApplyJoystick(const uint8_t *keys)
 // Map a HID keycode to a CIA1 matrix position in this codebase's (col,row) convention
 // (the same one the touch keyboard feeds to c64KeyMatrix(row, col, down)). col < 0 = unmapped.
 struct C64Pos { int8_t col, row; };
+static C64Pos c64FKey(uint8_t kc, bool *shifted);
+
 static C64Pos c64Map(uint8_t kc)
 {
+  bool fShift;
+  const C64Pos f = c64FKey(kc, &fShift);
+  if (f.col >= 0) return f;
   switch (kc) {
     // letters
     case HID_KEY_A: return {1,2}; case HID_KEY_B: return {3,4}; case HID_KEY_C: return {2,4};
@@ -171,6 +176,34 @@ static C64Pos c64Map(uint8_t kc)
     case HID_KEY_ARROW_UP:     return {0,7};
   }
   return {-1, -1};
+}
+
+// Function keys, number for number: the key labelled Fn types the C64's Fn. The C64 has four keys
+// (F1/F3/F5/F7 in column 0, rows 4/5/6/3); F2/F4/F6/F8 are those with SHIFT, so `shifted` says
+// whether the C64 SHIFT line goes on (even) or must stay off (odd) -- the PicoCalc's Shift-F2 is the
+// C64's F7, with the physical SHIFT still down. The PicoCalc's bare F3 arrives as F12 and
+// Shift-F1..F3 as F6..F8 (input_picocalc.cpp); its Shift-F4/F5 (F9/F10) have no C64 key.
+static C64Pos c64FKey(uint8_t kc, bool *shifted)
+{
+  int n;
+  switch (kc) {
+    case HID_KEY_F1: n = 1; break;
+    case HID_KEY_F2: n = 2; break;
+#if defined(BOARD_PICOCALC)
+    case HID_KEY_F12: n = 3; break;
+#else
+    case HID_KEY_F3: n = 3; break;
+#endif
+    case HID_KEY_F4: n = 4; break;
+    case HID_KEY_F5: n = 5; break;
+    case HID_KEY_F6: n = 6; break;
+    case HID_KEY_F7: n = 7; break;
+    case HID_KEY_F8: n = 8; break;
+    default: *shifted = false; return {-1, -1};
+  }
+  static const int8_t row[4] = {4, 5, 6, 3};   // F1/2, F3/4, F5/6, F7/8
+  *shifted = !(n & 1);
+  return {0, row[(n - 1) / 2]};
 }
 
 static void c64KeyDown(uint8_t kc)
@@ -224,6 +257,11 @@ static void c64ApplyModifiers(bool shift, bool ctrl, bool alt, const uint8_t *ke
   // Cursor LEFT/UP are SHIFT+CRSR on the C64, so a held LEFT or UP also asserts SHIFT. The arrows
   // are cursor keys in every mode now, so this applies whether or not the stick is reading them.
   wantShift = wantShift || kbContains(keys, HID_KEY_ARROW_LEFT) || kbContains(keys, HID_KEY_ARROW_UP);
+  // A held function key decides SHIFT outright: on for F2/F4/F6/F8, off for F1/F3/F5/F7 (c64FKey).
+  for (int i = 0; i < 6; i++) {
+    bool fShift;
+    if (keys[i] && c64FKey(keys[i], &fShift).col >= 0) wantShift = fShift;
+  }
   c64KeyMatrix(7, 1, wantShift);  // left SHIFT  (col1,row7)
   c64KeyMatrix(2, 7, ctrl);       // CTRL        (col7,row2)
   c64KeyMatrix(5, 7, alt);        // Commodore   (col7,row5)

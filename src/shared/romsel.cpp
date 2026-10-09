@@ -64,6 +64,7 @@ static bool romSelWrite(int off, const uint8_t *data, int len)
   memcpy(img, sec, n);
   memcpy(img + off, data, len);
   const uint32_t at = (uint32_t)((uintptr_t)sec - XIP_BASE);
+  ampDmaPause(true);                                                 // as in romflash_picocalc.cpp
 #ifndef __FREERTOS
   noInterrupts();
 #endif
@@ -74,6 +75,7 @@ static bool romSelWrite(int off, const uint8_t *data, int len)
 #ifndef __FREERTOS
   interrupts();
 #endif
+  ampDmaPause(false);
   free(img);
   return memcmp(sec + off, data, len) == 0;
 }
@@ -82,6 +84,7 @@ static bool romSelWrite(int off, const uint8_t *data, int len)
 void romSelEraseAll()
 {
   const uint32_t at = (uint32_t)((uintptr_t)romSelSector() - XIP_BASE);
+  ampDmaPause(true);
 #ifndef __FREERTOS
   noInterrupts();
 #endif
@@ -91,6 +94,7 @@ void romSelEraseAll()
 #ifndef __FREERTOS
   interrupts();
 #endif
+  ampDmaPause(false);
 }
 #else
 static uint8_t romSelRead(int off) { return EEPROM.read(RomSelEEPROMaddress + off); }

@@ -300,7 +300,7 @@ extern String selectedNesFileName;   // NES: currently-loaded ROM (settings file
 extern String selectedAtariFileName; // Atari: currently-loaded ROM (settings file browser marker)
 extern String selectedMsxFileName;   // MSX: currently-loaded .rom cartridge (settings file browser marker)
 extern bool msxFast;                 // MSX: true = run uncapped (FAST), false = pace to real 3.58 MHz
-extern float msxMeasuredMhz;         // MSX: measured uncapped Z80 speed (one-time boot benchmark)
+extern float msxMeasuredMhz;         // MSX: live measured Z80 speed (speedmeter.h)
 // MSX DISK ROM setting: whether the disk-interface ROM (Disk BASIC) sits in slot 2. A mounted .dsk
 // always gets it, whatever the setting -- the drive cannot work without it.
 enum { MSX_DISKROM_AUTO = 0,          // in, except beside a cartridge
@@ -309,19 +309,21 @@ enum { MSX_DISKROM_AUTO = 0,          // in, except beside a cartridge
 extern uint8_t msxDiskRom;
 extern String selectedSmsFileName;   // SMS: currently-loaded .sms/.bin ROM (settings file browser marker)
 extern bool smsFast;                 // SMS: true = run uncapped (FAST), false = pace to real 3.58 MHz
-extern float smsMeasuredMhz;         // SMS: measured uncapped Z80 speed (one-time boot benchmark)
+extern float smsMeasuredMhz;         // SMS: live measured Z80 speed (speedmeter.h)
 extern String selectedColecoFileName;// Coleco: currently-loaded .col/.rom cartridge (settings file browser marker)
 extern bool colecoFast;              // Coleco: true = run uncapped (FAST), false = pace to real 3.58 MHz
-extern float colecoMeasuredMhz;      // Coleco: measured uncapped Z80 speed (one-time boot benchmark)
+extern float colecoMeasuredMhz;      // Coleco: live measured Z80 speed (speedmeter.h)
 extern String selectedZxFileName;    // ZX Spectrum: currently-loaded snapshot / tape (settings file browser marker)
 extern bool zxFast;                  // ZX Spectrum: true = run uncapped (FAST), false = pace to real 3.5 MHz
-extern float zxMeasuredMhz;          // ZX Spectrum: measured uncapped Z80 speed (one-time boot benchmark)
+extern float zxMeasuredMhz;          // ZX Spectrum: live measured Z80 speed (speedmeter.h)
 extern String selectedPcFileName;    // PCXT: A: floppy image (settings file browser marker)
 extern String selectedPcHdFileName;  // PCXT: C: hard-disk image (auto-mounted on boot)
 extern bool pcFast;                  // PCXT: reserved (8086 always runs uncapped for now)
-extern float pcMeasuredMhz;          // PCXT: measured 8086 equivalent speed (one-time boot benchmark)
+extern float pcMeasuredMhz;          // PCXT: live measured 8086 equivalent speed (speedmeter.h)
 extern float c64MeasuredMhz;         // C64: live measured 6510 speed (updated in cpuLoop)
 extern float appleMeasuredMhz;       // Apple II: live measured 6502 speed (updated in cpuLoop)
+extern float emuFps;                 // pictures shown on the panel per second (settings title bar)
+void fpsFrameShown();                // render task: call once per emulator picture pushed to the panel
 extern float appleClockMhz;          // Apple II: target clock when throttled (1.0 = stock 1 MHz)
 extern volatile int  g_pcSpkFreq;    // PCXT PC-speaker: PIT ch2 frequency (Hz), read by the audio ISR
 extern volatile bool g_pcSpkOn;      // PCXT PC-speaker: gate+data enabled (port 0x61), read by the audio ISR

@@ -55,7 +55,7 @@ $PICO_BOARDS = @(
   @{ Tag = 'rp2350'; Name = 'Pico 2 (RP2350)'
      Fqbn = 'rp2040:rp2040:rpipico2:arch=arm,os=freertos,freq=200,flash=4194304_65536,usbstack=picosdk,opt=Optimize2,exceptions=Enabled' }
   @{ Tag = 'rp2040'; Name = 'Pico (RP2040)'
-     Fqbn = 'rp2040:rp2040:rpipico:os=freertos,freq=200,flash=2097152_65536,usbstack=picosdk,opt=Optimize2,exceptions=Enabled' }
+     Fqbn = 'rp2040:rp2040:rpipico:os=freertos,freq=250,flash=2097152_65536,usbstack=picosdk,opt=Optimize2,exceptions=Enabled' }
 )
 
 function Invoke-Arduino([string]$Fqbn, [string]$Flags, [string]$BuildDir, [string]$OutDir, [hashtable]$Env = @{}) {

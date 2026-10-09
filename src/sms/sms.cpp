@@ -18,6 +18,7 @@
 #include "sms_cart.h"
 #include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
 #include "../shared/dirty_bands.h"     // PicoCalc: push only the bands that changed
+#include "../shared/speedmeter.h"     // live Z80 MHz for the settings title
 
 static uint16_t* smsScratch = nullptr;   // per-frame RGB565 conversion band (like nesScratch/msxScratch)
 #if !BOARD_ROM_IN_FLASH
@@ -104,12 +105,14 @@ void smsLoop() {
 
   const uint32_t FRAME_US = 16687;
   uint32_t nextUs = micros();
+  SpeedMeter meter; meter.restart(sms::cpu.cycles);
   for (;;) {
-    if (OptionsWindow || paused) { vTaskDelay(pdMS_TO_TICKS(20)); nextUs = micros(); continue; }
-    if (smsResetReq)   { smsResetReq = false; sms::machineReset(); nextUs = micros(); }
+    if (OptionsWindow || paused) { vTaskDelay(pdMS_TO_TICKS(20)); nextUs = micros(); meter.restart(sms::cpu.cycles); continue; }
+    if (smsResetReq)   { smsResetReq = false; sms::machineReset(); nextUs = micros(); meter.restart(sms::cpu.cycles); }
     if (sms::romLen == 0) { vTaskDelay(pdMS_TO_TICKS(100)); continue; }   // no ROM -> nothing to run
 
     sms::runFrame();
+    meter.tick(sms::cpu.cycles, smsMeasuredMhz);
 
     if (smsFast) {
 #if defined(BOARD_DESKTOP)
@@ -211,6 +214,7 @@ void smsRenderFrame() {
   }
   tft.setSwapBytes(false);
 #endif
+  fpsFrameShown();
   sms::frameReady = false;
 }
 

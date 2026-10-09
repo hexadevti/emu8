@@ -16,6 +16,7 @@
 #include "pcxt.h"
 #include "fabgl/machine.h"
 #include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
+#include "../shared/speedmeter.h"     // live 8086 MHz-equiv for the settings title
 #include <string>
 
 // 1 MB main RAM (PSRAM) + 64 KB CGA/video window (internal: read every frame).
@@ -520,15 +521,21 @@ void pcxtLoop() {
     printLog(buf);
   }
 
+  // Live meter: instructions run, scaled like the benchmark (400 kIPS == a real 4.77 MHz XT).
+  uint32_t instrRun = 0;
+  SpeedMeter meter; meter.restart(instrRun);
   for (;;) {
-    if (OptionsWindow) { vTaskDelay(pdMS_TO_TICKS(20)); continue; }
+    if (OptionsWindow) { vTaskDelay(pdMS_TO_TICKS(20)); meter.restart(instrRun); continue; }
     if (pcResetReq)    { pcResetReq = false; g_pcxtMachine.trigReset(); }
 #if defined(BOARD_DESKTOP)
     g_pcxtMachine.run(400000);   // desktop: bigger batch — the device's 1ms-per-40k throttle (for WDT/
                                  // bus sharing) just slows the 8086 here (render/input are other threads)
+    instrRun += 400000;
 #else
     g_pcxtMachine.run(40000);
+    instrRun += 40000;
 #endif
+    meter.tick(instrRun, pcMeasuredMhz, 4.77f / 0.4f);   // MIPS x (4.77 MHz / 0.4 MIPS)
     // Give INT 33h a non-null vector so DOS programs (e.g. QBASIC) detect a mouse. The emulator
     // intercepts the actual INT 33h, so this target is never executed. Set only when null (the POST
     // clears the IVT at boot); leave a real driver's vector alone if one is ever installed.

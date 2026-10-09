@@ -114,6 +114,9 @@ void epromSetup() {
   sound = EEPROM.readBool(SoundEEPROMaddress);
   dacSound = EEPROM.readBool(dacSoundEEPROMaddress);
   volume = EEPROM.readChar(VolumeEEPROMaddress);
+#if defined(BOARD_PICOCALC)
+  volume = 0xf0;   // hardware volume control on the board: the app volume stays at maximum
+#endif
   currentPlatform = EEPROM.readChar(PlatformEEPROMaddress);
   if (currentPlatform > PLATFORM_ZX || currentPlatform == PLATFORM_SDMANAGER   // SD Manager is never saved
       || currentPlatform == 4)                                                    // 4 = retired platform id

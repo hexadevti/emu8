@@ -94,6 +94,7 @@ void atariRenderFrame() {
     }
     tft.setSwapBytes(false);
     if (atari::frontBuf) { __sync_synchronize(); atari::frontState = 0; }
+    fpsFrameShown();
     return;
   }
 #endif
@@ -117,6 +118,7 @@ void atariRenderFrame() {
   }
   tft.setSwapBytes(false);
   if (atari::frontBuf) { __sync_synchronize(); atari::frontState = 0; }   // snapshot free for the next field
+  fpsFrameShown();
 }
 
 // Joystick task -> TIA/RIOT input ports. dirBits: bit0=Up,1=Down,2=Left,3=Right (active-high here,
