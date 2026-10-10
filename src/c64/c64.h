@@ -51,16 +51,42 @@ extern volatile bool c64ResetReq;   // request a CPU reset (e.g. after mounting 
 // ---- VIC-II state (shared by memory + vic + render) ----
 extern uint8_t vicreg[0x40];
 extern uint8_t latchd011, latchd012;
-enum { VIC_FB_FREE, VIC_FB_WRITING, VIC_FB_DONE };   // framebuffer handoff, VIC <-> render task
-extern volatile uint8_t vicFbState;
-extern volatile uint8_t vicLinesDone;
-extern volatile uint32_t vicFrameNo, vicDrawnFrameNo;   // TEMP debug (serial fb dump)
+// Per-line VIC state, recorded by the emulator core for the render core (see c64_vic.cpp).
+struct VicLineRec {
+  volatile uint8_t frame;        // vicRecFrame of the frame it belongs to; 0 while being written
+  uint8_t lineMap, vertborder;
+  uint8_t snapRow;                // character row whose screen/colour bytes were copied, 0xFF: none
+  uint16_t screenmem, bitmapstart, vicmem, pad1;
+  const uint8_t *charset;
+  uint8_t reg[0x30];             // $D000-$D02F
+  uint8_t sprPtr[8];             // the sprite pointers (screen + $3F8) on this line
+};
+#define VIC_STRIP_LINES 8
+#define VIC_STRIPS 6             // RGB565 strips the render task streams through (in sharedBigBuf)
+#define VIC_REC_OFFSET (VIC_STRIPS * VIC_STRIP_LINES * 320 * 2)   // vicRec[400] follows them
+// 2 banks x 200 records (display lines 0..199): frame f is recorded into bank f & 1, so the render
+// core can trail the beam by up to a whole frame before a record it needs is overwritten.
+extern VicLineRec *vicRec;
+extern volatile uint8_t vicRecFrame;   // frame being recorded (1..254; odd/even alternate)
+// Even frames go to bank 1, odd ones to bank 0.
+inline VicLineRec *vicRecFor(uint8_t frame, uint8_t dline) { return vicRec + ((frame + 1) & 1) * 200 + dline; }
+// Per bank, the 40 screen + 40 colour bytes of each character row, copied when the beam enters it:
+// the render core trails the beam, and a game rewrites the row right after the beam has drawn it.
+#define VIC_SNAP_OFFSET (VIC_REC_OFFSET + 400 * sizeof(VicLineRec))
+extern uint8_t *vicSnap;
+inline uint8_t *vicSnapFor(uint8_t frame, uint8_t row) { return vicSnap + (((frame + 1) & 1) * 25 + row) * 80; }
+extern uint8_t vicLineBuf[320 + 16];
+extern volatile uint32_t c64PerfKhz;       // last second's 6510 speed (kHz), logged by the render task
+extern volatile uint8_t c64PerfVicPct;     // share of the emulator core spent recording/drawing lines
+extern volatile uint32_t c64MaxLineGapUs;  // longest gap between two visible lines (render task resets)
+void vicRenderRecord(const VicLineRec &r, uint8_t dline, uint8_t *out, uint16_t *dst,
+                     const uint16_t *pal);                  // render core: one line (dst: also RGB565)
+void vicLineToRgb(const uint8_t *out, uint16_t *dst, const uint16_t *pal);   // 320 indices -> RGB565
 extern bool vicCollPolled;       // the program has read $D01E/$D01F since reset (see c64_vic.cpp)
 extern uint16_t vicmem, bitmapstart, screenmemstart, rasterline;
 extern uint8_t syncd020;
 extern bool screenblank, badlinecond0;
-extern uint8_t *bitmap;          // current scanline within a half (8-bit colour indices)
-extern uint8_t *fbTop, *fbBot;   // 8-bit indexed framebuffer halves (lines 0..99 / 100..199)
+extern uint8_t *bitmap;          // the line the VIC renders into (= vicLineBuf, 8-bit colour indices)
 extern uint8_t *colormap;        // 1K color RAM
 extern const uint8_t *charset;   // points into chrom (flash) or RAM
 extern const uint8_t *chrom;     // character ROM (flash)

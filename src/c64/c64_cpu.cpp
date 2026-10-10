@@ -217,6 +217,9 @@ C64_HOT unsigned char pull8() {
 // of the CPU core spent rendering VIC lines, logged about once a second. Restarted after a pause so
 // the time the settings window was open does not count against it.
 static uint32_t perfCyc = 0, perfVicUs = 0, perfLastMs = 0;
+volatile uint32_t c64PerfKhz = 0;
+volatile uint8_t c64PerfVicPct = 0;
+volatile uint32_t c64MaxLineGapUs = 0;
 
 // The 1 MHz pacer and the render timer read the clock on the hot path. micros() is out of line and
 // lives in flash; on the PicoCalc the free-running 1 MHz timer register is the same value as one
@@ -235,10 +238,18 @@ static void perfSample() {
   uint32_t ms = now - perfLastMs;
   if (ms < 1000) return;
   c64MeasuredMhz = (float)perfCyc / ((float)ms * 1000.0f);
+#if defined(BOARD_PICOCALC)
+  // No log line from here on the device: a USB print stalls this core for a moment once a second,
+  // the beam then races to catch up, and the render core falls behind it -- the picture flickered
+  // on that beat. The render task logs the speed with its own 5 s report (c64.cpp).
+  c64PerfKhz = perfCyc / ms;
+  c64PerfVicPct = (uint8_t)((uint64_t)perfVicUs / 10 / ms);
+#else
   snprintf(buf, sizeof(buf), "C64: 6510 %.2f MHz (%d%% of PAL 0.985), VIC render %d%% of CPU core",
            c64MeasuredMhz, (int)(c64MeasuredMhz * 100.0f / 0.985f + 0.5f),
            (int)((uint64_t)perfVicUs / 10 / ms));
   printLog(buf);
+#endif
   perfLastMs = now; perfCyc = 0; perfVicUs = 0;
 }
 
@@ -1178,6 +1189,10 @@ C64_HOT void cpuLoop() {
 #endif
       if (bitmap) {                   // full VIC render only when a framebuffer exists
         uint32_t t0 = C64_NOW_US();
+        static uint32_t lastLineUs = 0;
+        if (t0 - lastLineUs > c64MaxLineGapUs && rasterline >= 52 && rasterline < 251)
+          c64MaxLineGapUs = t0 - lastLineUs;
+        lastLineUs = t0;
         drawRasterline();
         perfVicUs += C64_NOW_US() - t0;
       }

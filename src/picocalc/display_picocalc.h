@@ -63,6 +63,8 @@ namespace pcd {
   void bulkFill(uint16_t color, uint32_t len);        // read-increment-off DMA of `len` copies
 }
 
+uint32_t lcdSpiHz();                      // actual LCD SPI clock (logged by the C64 video stats)
+
 class DisplayGFX {
 public:
   // lifecycle
@@ -92,6 +94,9 @@ public:
                                              // MSB-first, i.e. native RGB565 (same as the
                                              // Arduino_GFX and SDL backends, which also ignore it)
   void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data);
+  void pushImageAsync(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data);  // returns at once
+  bool pushBusy();                  // pushImageAsync still sending
+  void pushWait();                  // until it is done
   void setBypassCanvas(bool) {}     // canvas fast-path flag; there is no canvas here
   void pushPanelBand(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data);
   void fillPanelBlack();            // the two 320x40 letterbox bars

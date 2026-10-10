@@ -25,17 +25,10 @@ uint8_t latchd011 = 0, latchd012 = 0;
 uint16_t vicmem = 0, bitmapstart = 0x2000, screenmemstart = 1024, rasterline = 0;
 uint8_t syncd020 = 0;
 bool screenblank = false, badlinecond0 = false;
-// VIC framebuffer is 8-bit indexed (C64 colour 0-15) and SPLIT into two halves so it fits
-// the fragmented heap (no contiguous 64K block exists alongside the 64K C64 RAM). `bitmap`
-// is repointed at the current scanline's start (in the right half) before each
-// drawRasterline; all VIC writes are line-relative. c64RenderFrame converts the indices to
-// RGB565 (via c64Colors) when pushing to the TFT.
-// 8-bit indexed framebuffer, two ~32K halves, MALLOC'd on the C64 path only (in vicSetup,
-// before the 64K C64 RAM so the contiguous blocks still fit). NOT static: a static BSS array
-// would be reserved for the Apple path too and starve its 128K RAM allocation (boot crash).
-uint8_t *bitmap = nullptr;          // -> current scanline (repointed per line); non-null = on
-uint8_t *fbTop  = nullptr;          // lines 0..99
-uint8_t *fbBot  = nullptr;          // lines 100..199
+// The VIC renders each line into vicLineBuf (8-bit colour indices; all VIC writes are
+// line-relative) and packs it into one of two 4-bit frames (c64_vic.cpp); c64RenderFrame converts
+// a finished frame to RGB565 when pushing it to the TFT.
+uint8_t *bitmap = nullptr;          // -> vicLineBuf once vicSetup has run; non-null = on
 uint8_t *colormap = nullptr;
 const uint8_t *charset = nullptr;
 const uint8_t *chrom = nullptr;

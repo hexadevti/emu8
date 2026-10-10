@@ -585,11 +585,14 @@ static void renderHeartbeat()
   static uint32_t frames = 0, lastMs = 0;
   frames++;
   uint32_t now = millis();
-  if (now - lastMs < 1000) return;
+  // Every 5 s, not every second: a USB print holds this core up for a moment, and the C64 picture
+  // is drawn just behind the beam -- the hiccup showed as a flicker on a one-second beat.
+  if (now - lastMs < 5000) return;
+  const uint32_t span = now - lastMs;
   lastMs = now;
   char m[96];   // local, not the shared `buf`: this runs on the other core from setup()/loop()
   sprintf(m, "video: %lu fps core=%u splash=%d opts=%d plat=%d clr=%d",
-          (unsigned long)frames, (unsigned)get_core_num(), (int)splashActive,
+          (unsigned long)(frames * 1000 / span), (unsigned)get_core_num(), (int)splashActive,
           (int)OptionsWindow, (int)currentPlatform, (int)clearScr);
   printLog(m);
   frames = 0;
@@ -835,7 +838,7 @@ void renderLoop(void *pvParameters)
       fpsFrameShown();
       if (oskActive()) { displaySetUiMode(true); oskRender(); }  // keyboard owns the bottom (UI)
       Vertical_blankingOn_Off = true;
-      vTaskDelay(pdMS_TO_TICKS(10));
+      taskYIELD();                       // c64RenderFrame paces itself on the beam (sleeps while it waits)
       continue;
     }
 

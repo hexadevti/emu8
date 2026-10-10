@@ -33,6 +33,7 @@
 #include <hardware/spi.h>
 #include <hardware/dma.h>
 #include <hardware/gpio.h>
+#include <hardware/clocks.h>
 #include <string.h>
 
 // Pixel format. 0 (default) = COLMOD 0x55, RGB565, 2 bytes/px -- community-confirmed working on the
@@ -256,6 +257,9 @@ static const uint8_t kInit[] = {
   0xF7,  4, 0xA9,0x51,0x2C,0x82,             // adjust control 3
 };
 
+static uint32_t s_spiHz;                // the LCD SPI clock spi_init() actually set
+uint32_t lcdSpiHz() { return s_spiHz; }
+
 void DisplayGFX::begin() {
   // Called TWICE by design: the boot console brings the panel up as the first thing setup()
   // does, and videoSetup() calls begin() again once the emulator owns the screen. The second
@@ -272,7 +276,15 @@ void DisplayGFX::begin() {
   gpio_init(LCD_DC_PIN);  gpio_set_dir(LCD_DC_PIN,  GPIO_OUT); gpio_put(LCD_DC_PIN,  1);
   gpio_init(LCD_RST_PIN); gpio_set_dir(LCD_RST_PIN, GPIO_OUT); gpio_put(LCD_RST_PIN, 1);
 
-  spi_init(LCD_SPI, LCD_SPI_HZ);
+  // clk_peri (the SPI clock) runs from clk_sys. arduino-pico's set_sys_clock_khz() leaves it on the
+  // 48MHz USB PLL, which caps SPI at 24MHz: a full C64 frame then took ~45ms on the wire and the
+  // panel showed one frame in three. From clk_sys (250MHz) LCD_SPI_HZ gets its 62.5MHz. This runs
+  // first thing in setup(), before the SD card's spi0 is set up; Arduino SPI computes its divider
+  // from clock_get_hz(clk_peri) at each transaction anyway.
+  if (clock_get_hz(clk_peri) != clock_get_hz(clk_sys))
+    clock_configure(clk_peri, 0, CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLK_SYS,
+                    clock_get_hz(clk_sys), clock_get_hz(clk_sys));
+  s_spiHz = spi_init(LCD_SPI, LCD_SPI_HZ);
   spi_set_format(LCD_SPI, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
   s_fmt16 = false;
   gpio_set_function(LCD_SCK_PIN,  GPIO_FUNC_SPI);
@@ -459,6 +471,21 @@ void DisplayGFX::pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uin
       panelPushRaw(cx, cy + _offY + r, cw, 1, data + (size_t)(sy + r) * w + sx);
   }
 }
+// pushImage without the wait: the DMA is still sending `data` when this returns, so the caller must
+// leave it alone until pushBusy() is false (pushWait()). Anything else that talks to the panel waits
+// for it first. Full rows only (no horizontal clipping).
+void DisplayGFX::pushImageAsync(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data) {
+  pxFlush();
+  if (!data || w <= 0 || h <= 0 || x < 0 || y < 0 || x + w > DISP_LOGICAL_W || y + h > _logH) {
+    pushImage(x, y, w, h, data);
+    return;
+  }
+  panelWindow(x, y + _offY, x + w - 1, y + _offY + h - 1);
+  fmt16();
+  txBuf(data, (uint32_t)w * (uint32_t)h);
+}
+bool DisplayGFX::pushBusy() { return s_dma >= 0 && dma_channel_is_busy(s_dma); }
+void DisplayGFX::pushWait() { txWait(); }
 // Same geometry as pushImage on this board (logical == panel apart from the letterbox offset).
 void DisplayGFX::pushPanelBand(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data) {
   pushImage(x, y, w, h, data);

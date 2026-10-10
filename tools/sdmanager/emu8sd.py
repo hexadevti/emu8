@@ -66,6 +66,9 @@ class SerialTransport:
         self.s.port = port
         self.s.baudrate = baud
         self.s.timeout = 0.05
+        # A device busy running a game does not drain its USB input: without this a write blocks
+        # forever instead of failing, and the caller never gets to retry.
+        self.s.write_timeout = 2
         self.s.dtr = False
         self.s.rts = False
         self.s.open()
