@@ -112,6 +112,18 @@ to some components).
 - **Settings persistence in EEPROM** (platform, machine type, speed, sound/volume, joystick,
   video options and the last-loaded image per platform).
 - **Up-scaling / smooth up-scaling**, plus a fill-screen mode and NES frame-skip on the 480×272 S3 panel.
+- **UNMOUNT** on every platform: highlight the loaded image in the file list and the mount button turns
+  red and reads **UNMOUNT** (or press `Del` / `Backspace`). Cartridges, programs and snapshots leave an
+  empty, idle machine; disks and tapes are ejected while the program keeps running.
+- **General settings** (the **SETUP** button on the system menu): **ROM FOLDER** (where system ROMs are
+  read from, default `/roms`), **APPS FOLDER** (where every file browser starts, default `/`), **RESET**
+  (erase all saved settings and ROM picks, then reboot) and a **HELP** page.
+- **ROMS page**: any system ROM can be pointed at another file, or set to **(none)**.
+- **Live speed readout**: the settings title shows the measured emulated CPU speed (MHz) and the panel fps.
+- **Sound is muted while any menu is open** (settings window, system menu), on every system.
+- **Only changed screen areas are sent to the panel** (dirty bands on MSX, Coleco, SMS, ZX and Apple II;
+  changed rows only on the C64), and the SMS uses **frame pacing with adaptive frame-skip** so game speed
+  and music tempo stay steady under load.
 
 ### Apple II+ / IIe
 
@@ -121,7 +133,8 @@ to some components).
 - **ProDOS hard disk** (block device) — large `.hdv` / `.po` / `.2mg` volumes.
 - Video: LoRes, HiRes, text 40/80-column, page 1/2, mixed/split, colour or mono.
 - Speaker, analog joystick/paddles, AppleMouse-style mouse plumbing.
-- Built-in **6502 debugger** (step / breakpoint / stack trace). System ROMs load from `/roms/` on the SD card (see [ROM sources](#rom-sources)).
+- Built-in **6502 debugger** (step / breakpoint / stack trace). System ROMs load from `/roms/` on the SD card (see [ROM sources](#rom-sources)) —
+  on the PicoCalc that now includes the IIe ROM (`Apple2e_Enhanced.rom`), which is no longer built into the firmware.
 
 ### Commodore 64
 
@@ -152,7 +165,8 @@ to some components).
   64 KB work RAM in slot 3.
 - Loads `.rom` / `.mx1` cartridges and `.dsk` floppies. The BIOS (with MSX BASIC) is the Sharp Epcom
   HotBit 1.2, read from `/roms/hotbit12.rom` on the SD card; `.dsk` images use the Disk BASIC ROM at
-  `/roms/hb3600_disk.rom`.
+  `/roms/hb3600_disk.rom`. The **DISK ROM** setting is **AUTO** (on when a `.dsk` is mounted), **ON** or
+  **OFF** (no drive, even with a disk mounted).
 - USB keyboard / on-screen keyboard for typing, joystick/gamepad on controller port 1.
 
 ### Sega Master System
@@ -196,9 +210,9 @@ wait for the timeout to boot the currently-selected platform. On the CYD a joyst
 dismisses the splash.
 
 On the **PicoCalc** the splash is driven from the keyboard: the arrows move over the enabled systems,
-`Enter` picks one, and `Esc` boots the current one. **Ctrl-F6** brings the same menu up at any time
-**without rebooting**. The running system is paused underneath it. Picking the system that is already
-running, pressing `Esc` or Ctrl-F6 again, or letting the menu time out resumes it where it left off.
+`Enter` picks one, and `Esc` boots the current one. **Ctrl-Shift-F1** brings the same menu up at any time
+**without rebooting**. The running system is paused (and its sound muted) underneath it. Picking the system that is already
+running, pressing `Esc` or Ctrl-Shift-F1 again, or letting the menu time out resumes it where it left off.
 Only picking a *different* system saves the choice and reboots.
 
 ---
@@ -242,10 +256,10 @@ behind `Ctrl`, so bare function keys stay available to the emulated system:
 | --- | --- |
 | `Ctrl` + `F1` | Open / close the settings menu |
 | `Ctrl` + `F3` | Apple **Reset** (CPU reset); SMS **PAUSE** |
-| `Ctrl` + `F6` (or `Ctrl` + `Shift` + `F3`) | System menu over the running emulator, no reboot (see above) |
-| `Ctrl` + `Shift` + `F1` | Reboot the Pico |
+| `Ctrl` + `Shift` + `F1` | System menu over the running emulator, no reboot (see above) |
+| `Ctrl` + `Shift` + `F3` | Hard reset: settings saved, then reboot straight back into the running system (no menu) |
 | `Ctrl` + `Shift` + `Up` | Reboot into the [UF2 Loader](https://github.com/pelrun/uf2loader) menu, to pick another app from the SD card |
-| `F3` | Hard reset (SMS, PC-XT, Coleco, ZX) |
+| `F3` | Atari **RESET** switch; reset on PC-XT, Coleco and ZX |
 
 In the settings menu the arrows move between controls and skip empty grid slots and the read-only
 speed readouts, `Enter` toggles or opens the focused control, and `Esc` backs out (and closes the menu
@@ -269,8 +283,9 @@ shows the images for the **current platform**; function keys / touch toggles cov
 | `F6` | **Color** ↔ **Mono** video |
 | `F7` | **Upscale** ↔ **Regular** |
 | `F8` | **Smooth upscale** ↔ **Regular** |
-| `Enter` | Mount / load the highlighted image |
-| `Ctrl` + `Enter` | Save settings/selection to EEPROM and reboot |
+| `Enter` | Mount / load the highlighted image (C64: mounts / LOADs without running) |
+| `Ctrl` + `Enter` | Save settings/selection to EEPROM and reboot (C64: LOAD & RUN) |
+| `Del` / `Backspace` | Unmount the highlighted image, if it is the one loaded |
 | `Esc` | Exit the menu |
 
 A built-in **6502 debugger** (Apple core) offers pause/continue, single-step (`F10`), breakpoint by
@@ -332,15 +347,20 @@ arduino-cli upload -p COM5 --fqbn esp32:esp32:esp32s3:PSRAM=opi,PartitionScheme=
 ### ClockworkPi PicoCalc (UF2 Loader)
 
 With pelrun's [UF2 Loader](https://github.com/pelrun/uf2loader) (**v2.4.1+**) installed, a build goes
-onto the SD card instead of over the loader, with no cable unplugged: the **Deploy RP2040 (SD)** task
-([`tools/deploy-picocalc.ps1`](tools/deploy-picocalc.ps1)) sends emu8 a reboot-into-the-menu request
-over its USB serial port, copies the `.uf2` to `pico1-apps\emu8.uf2` on the SD card the loader
-exposes as a USB drive, and hands the card back to the menu -- pick **emu8.uf2** there. If emu8
-does not answer, it reboots the Pico into BOOTSEL and reflashes the loader, whose menu then opens by
-itself. **Build & Deploy RP2040 (SD)** builds first. The Pico's micro-USB must be connected to the PC.
+onto the SD card over emu8's USB serial port only, with no USB drive and no cable unplugged: the
+**Deploy RP2040 (SD)** task ([`tools/deploy-serial.py`](tools/deploy-serial.py)) asks the running emu8 to
+restart into SD Manager mode (`@sdmgr`), uploads the `.uf2` to `pico1-apps/emu8.uf2` (to a `.new` file
+first, then swapped in, so a broken transfer never leaves a bad image), and opens the UF2 Loader menu --
+press **Enter** on **emu8.uf2** there. **Build & Deploy RP2040 (SD)** builds first. By hand:
 
-While the micro-USB is connected, the loader always shows the card to the PC ("USB is connected") and
-ignores the keys; **PicoCalc: Release SD card to loader menu** gives it back without a deploy.
+```sh
+python tools/deploy-serial.py --uf2 build-picocalc-rp2040/emu8.ino.uf2 --port COM5
+```
+
+The older USB-drive route, [`tools/deploy-picocalc.ps1`](tools/deploy-picocalc.ps1), still exists, but
+mounting and ejecting the loader's drive tends to leave Windows / USB hubs needing a replug. While the
+micro-USB is connected the loader shows the card to the PC ("USB is connected") and ignores the keys;
+**PicoCalc: Release SD card to loader menu** gives it back.
 
 ---
 
@@ -432,7 +452,7 @@ The firmware includes a small file server on the USB serial port. You can browse
 rename and delete files on the card **without removing it**. The server is a separate mode, not a
 background task: pick **SD MGR** on the system menu (the splash) and the board reboots into it,
 with no emulator running and a status screen showing whether a host is connected. To leave it,
-tap the screen on the touch boards (the board reboots to the system menu), or press **Ctrl-F6** on
+tap the screen on the touch boards (the board reboots to the system menu), or press **Ctrl-Shift-F1** on
 the PicoCalc and pick a system (the board reboots into it). The system you were last running stays
 selected. Three clients speak its
 protocol:

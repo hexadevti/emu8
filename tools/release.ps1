@@ -12,6 +12,7 @@
 #   pwsh tools/release.ps1 -Version 1.0.0 -Targets picocalc,desktop
 #   pwsh tools/release.ps1 -Version 1.0.0 -Publish                # build + create the GitHub releases
 #   pwsh tools/release.ps1 -Version 1.0.0 -Publish -SkipBuild     # publish what is already in dist/
+#   pwsh tools/release.ps1 -Version 1.2.0 -Targets picocalc -Publish -WhatsNew notes.md   # prepend a changelog
 #
 # Needs the same one-time toolchain setup as the VS Code tasks (see README "Software prerequisites",
 # src/shared/p4/README.md for the isolated P4 core, and MSYS2 MINGW32 with SDL2 for the desktop).
@@ -22,6 +23,7 @@ param(
   [switch]$Publish,
   [switch]$SkipBuild,
   [switch]$Draft,
+  [string]$WhatsNew,                     # markdown file, added at the top of every published release's notes
   [string]$Msys = 'C:\msys64'
 )
 $ErrorActionPreference = 'Stop'
@@ -281,7 +283,7 @@ Firmware for the **ClockworkPi PicoCalc**. Pick the file that matches the Pico m
 - With the [UF2 Loader](https://github.com/pelrun/uf2loader) (v2.4.1+): copy the ``.uf2`` into ``pico1-apps`` (Pico) or ``pico2-apps`` (Pico 2) on the SD card and pick it in the loader menu. From emu8, ``Ctrl``+``Shift``+``Up`` goes back to that menu.
 - Without it: hold **BOOTSEL** while powering on / plugging USB in, then copy the ``.uf2`` onto the ``RPI-RP2`` / ``RP2350`` drive. The board reboots into emu8 by itself. (This replaces the loader, if you had one.)
 
-Controls: ``Ctrl``+``F1`` settings, ``Ctrl``+``F6`` system menu, ``Ctrl``+``Shift``+``Up`` UF2 Loader menu — see the [README](https://github.com/hexadevti/emu8#controls).
+Controls: ``Ctrl``+``F1`` settings, ``Ctrl``+``Shift``+``F1`` system menu, ``Ctrl``+``Shift``+``F3`` hard reset, ``Ctrl``+``Shift``+``Up`` UF2 Loader menu — see the [README](https://github.com/hexadevti/emu8#controls).
 
 $SDCARD
 "@ }
@@ -328,7 +330,9 @@ if ($Publish) {
     $tag = "$t-v$Version"
     $n = $NOTES[$t]
     $notesFile = Join-Path $work "$t-notes.md"
-    [IO.File]::WriteAllText($notesFile, $n.Body + "`n`n---`nBuilt from $short.")   # no BOM
+    $body = $n.Body
+    if ($WhatsNew) { $body = "## What's new`n`n" + (Get-Content -Raw -Encoding utf8 $WhatsNew).Trim() + "`n`n---`n`n" + $body }
+    [IO.File]::WriteAllText($notesFile, $body + "`n`n---`nBuilt from $short.")   # no BOM
     $ghArgs = @('release', 'create', $tag) + $assets[$t] + @('--title', $n.Title, '--notes-file', $notesFile, '--target', $commit)
     if ($Draft) { $ghArgs += '--draft' }
     Write-Host "Publishing $tag" -ForegroundColor Green
