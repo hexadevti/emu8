@@ -37,7 +37,8 @@ void machineWire();             // point cpu.rd/wr/in/out at the routers; call a
 void machineReset();            // reset Z80 + VDP + PSG + I/O + mapper
 uint8_t memRead8(uint16_t a);
 void    memWrite8(uint16_t a, uint8_t v);
-void    runFrame();             // one 60 Hz frame: per-scanline Z80 time + VDP line/VBlank interrupts
+void    runFrame(bool render = true);   // one 60 Hz frame: per-scanline Z80 time + VDP line/VBlank interrupts;
+                                        // render=false skips drawing the picture (frameskip)
 void    smsPause();             // SMS PAUSE button -> latched Z80 NMI (consumed at frame boundary)
 
 // ---- I/O ports (sms_io.cpp) ----
@@ -61,6 +62,13 @@ bool    vdpIrqActive();            // frame or line interrupt pending AND enable
 void    vdpRender();               // paint Mode 4 (bg + sprites) into framebuffer (indexed 0..31)
 void    vdpBuildPalette(uint16_t* lut32); // CRAM -> 32-entry RGB565 LUT (for the device render path)
 uint8_t vdpRegister(int r);        // diagnostics
+// Render on the display core (sms_vdp.cpp): the Z80's core captures, the display core draws.
+bool    vdpSnapAlloc();            // heap copy of what the renderer reads; false -> render inline
+bool    vdpHasSnap();
+void    vdpCapture();              // Z80's core, frame boundary, display core idle
+void    vdpRenderCaptured();       // display core: captured frame -> framebuffer
+uint8_t vdpShownRegister(int r);   // register / palette of the frame being shown
+void    vdpBuildShownPalette(uint16_t* lut32);
 uint8_t vdpCram(int i);            // diagnostics
 
 // ---- SN76489 PSG (sms_psg.cpp) ----

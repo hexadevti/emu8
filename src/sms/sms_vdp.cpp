@@ -122,6 +122,10 @@ static inline uint16_t cramToRgb565(uint8_t c) {
 void vdpBuildPalette(uint16_t* lut32) { for (int i = 0; i < 32; i++) lut32[i] = cramToRgb565(cram[i]); }
 
 // ---- Mode 4 rendering -------------------------------------------------------------------------
+// Render source: the live VDP state (vdpRender) or the captured copy (vdpRenderCaptured), below.
+static const uint8_t *rVram, *rReg, *rHS;
+static uint8_t rVs, rStat;
+
 // Background: 32x28 tile name table (2 bytes/entry), 8x8 4-bitplane tiles (32 bytes each). Horizontal
 // scroll (R8) and vertical scroll (R9, latched) with the top-rows / right-cols scroll locks (R0
 // bits 6/7) and the hide-left-8 column (R0 bit5). Background pixels carry a priority bit that, when
@@ -129,49 +133,87 @@ void vdpBuildPalette(uint16_t* lut32) { for (int i = 0; i < 32; i++) lut32[i] = 
 // per-pixel: background-over-sprite flag for the current scanline; sharedBigBuf tail, see emu.h
 static uint8_t (&bgPrio)[VDP_W] = SHARED_TAIL_ARRAY(SMS_BGPRIO_OFF, VDP_W);
 
-static void renderBgLine(uint8_t* fb, int y) {
-  uint16_t nameBase = (uint16_t)((vreg[2] & 0x0E) << 10);
-  uint8_t  backdrop = (uint8_t)(16 + (vreg[7] & 0x0F));   // border/backdrop uses the sprite palette
-  bool lockTop   = (vreg[0] & 0x40) && (y < 16);          // top 2 rows ignore hscroll
-  bool hideLeft8 = (vreg[0] & 0x20) != 0;
-  uint8_t hs = lockTop ? 0 : lineHS[y];
-  uint8_t* row = fb + y * VDP_W;
-  const bool lockRightOn = (vreg[0] & 0x80) != 0;         // right 8 columns ignore vscroll
-  const int  tmYScroll   = (y + vsLatch) % 224;           // vertical wrap is modulo 224 (28 rows)
+// One line of the background is decoded tile by tile into a line buffer laid on the tile grid (33
+// tiles = 264 pixels), then copied out at the fine-scroll offset. Each tile's 4 bitplanes become 8
+// pixel bytes with word operations -- a nibble of a plane spread to the low bit of 4 bytes by table,
+// 4 pixels per store -- instead of the old per-pixel shifting: on the M0+ that loop was most of the
+// ~28 ms a picture cost. Both buffers are in sharedBigBuf's tail (emu.h).
+#define linePx (reinterpret_cast<uint32_t*>(sharedBigBuf + SMS_LINEPX_OFF))
+#define linePr (reinterpret_cast<uint32_t*>(sharedBigBuf + SMS_LINEPR_OFF))
+static_assert((SMS_LINEPX_OFF & 3) == 0 && (SMS_LINEPR_OFF & 3) == 0, "SMS line buffers must be word aligned");
 
-  // Each tile row is decoded once into 8 pixels and reused for every screen pixel it covers, instead
-  // of re-reading the name table and four bitplanes per pixel: on the PicoCalc's Cortex-M0+ the
-  // per-pixel version alone ate most of the frame budget on the Z80's core.
-  uint8_t tpx[8], tpr[8];
-  int  curCol = -1;
-  bool curLock = false;
-  for (int x = 0; x < VDP_W; x++) {
-    bool lockRight = lockRightOn && (x >= 192);
-    int tmX = (x - hs) & 0xFF;                             // horizontal wrap is modulo 256
-    int tileCol = tmX >> 3;
-    if (tileCol != curCol || lockRight != curLock) {
-      curCol = tileCol; curLock = lockRight;
-      int tmY = lockRight ? y : tmYScroll;                 // y < 192 < 224: no wrap when locked
-      uint16_t e = (uint16_t)(nameBase + ((tmY >> 3) * 32 + tileCol) * 2);
-      uint8_t lo = vram[e & 0x3FFF], hi = vram[(e + 1) & 0x3FFF];
-      int tile = lo | ((hi & 1) << 8);
-      bool hflip = hi & 0x02;
-      int  pal   = (hi & 0x08) ? 16 : 0;
-      bool prio  = hi & 0x10;
-      int fy = tmY & 7; if (hi & 0x04) fy = 7 - fy;        // vflip
-      uint16_t base = (uint16_t)(tile * 32 + fy * 4);
-      uint8_t p0 = vram[base & 0x3FFF],       p1 = vram[(base + 1) & 0x3FFF];
-      uint8_t p2 = vram[(base + 2) & 0x3FFF], p3 = vram[(base + 3) & 0x3FFF];
-      for (int fx = 0; fx < 8; fx++) {
-        int sh = hflip ? fx : 7 - fx;
-        int color = ((p0 >> sh) & 1) | (((p1 >> sh) & 1) << 1)
-                  | (((p2 >> sh) & 1) << 2) | (((p3 >> sh) & 1) << 3);
-        tpx[fx] = (uint8_t)(pal + color);
-        tpr[fx] = (prio && color != 0) ? 1 : 0;
-      }
-    }
-    row[x]    = tpx[tmX & 7];
-    bgPrio[x] = tpr[tmX & 7];
+// Nibble -> its 4 bits in the low bit of 4 bytes (little-endian: byte 0 is the leftmost pixel).
+// FWD: bit 3 leftmost (a plane's high bit is its leftmost pixel); REV: bit 0 leftmost (h-flip).
+#define S4(b0, b1, b2, b3) ((uint32_t)(b0) | ((uint32_t)(b1) << 8) | ((uint32_t)(b2) << 16) | ((uint32_t)(b3) << 24))
+#define FWD(n) S4(((n) >> 3) & 1, ((n) >> 2) & 1, ((n) >> 1) & 1, (n) & 1)
+#define REV(n) S4((n) & 1, ((n) >> 1) & 1, ((n) >> 2) & 1, ((n) >> 3) & 1)
+static const uint32_t spreadFwd[16] = { FWD(0), FWD(1), FWD(2), FWD(3), FWD(4), FWD(5), FWD(6), FWD(7),
+                                        FWD(8), FWD(9), FWD(10), FWD(11), FWD(12), FWD(13), FWD(14), FWD(15) };
+static const uint32_t spreadRev[16] = { REV(0), REV(1), REV(2), REV(3), REV(4), REV(5), REV(6), REV(7),
+                                        REV(8), REV(9), REV(10), REV(11), REV(12), REV(13), REV(14), REV(15) };
+#undef FWD
+#undef REV
+#undef S4
+
+// Decode name-table column tileCol of map row tmY into dst[0..1] (8 pixel bytes, palette applied)
+// and pr[0..1] (1 where a high-priority tile has a non-zero pixel). Returns whether pr is non-zero.
+static inline bool decodeTile(uint16_t nameBase, int tileCol, int tmY, uint32_t* dst, uint32_t* pr) {
+  uint16_t e = (uint16_t)(nameBase + ((tmY >> 3) * 32 + tileCol) * 2);
+  uint8_t lo = rVram[e & 0x3FFF], hi = rVram[(e + 1) & 0x3FFF];
+  int tile = lo | ((hi & 1) << 8);
+  int fy = tmY & 7; if (hi & 0x04) fy = 7 - fy;            // vflip
+  const uint8_t* t = rVram + ((tile * 32 + fy * 4) & 0x3FFF); // 4 planes; tile*32+28 < 0x4000: no wrap
+  const uint8_t p0 = t[0], p1 = t[1], p2 = t[2], p3 = t[3];
+  uint32_t l, r;
+  if (hi & 0x02) {                                         // hflip: bit 0 is the leftmost pixel
+    l = spreadRev[p0 & 15] | (spreadRev[p1 & 15] << 1) | (spreadRev[p2 & 15] << 2) | (spreadRev[p3 & 15] << 3);
+    r = spreadRev[p0 >> 4] | (spreadRev[p1 >> 4] << 1) | (spreadRev[p2 >> 4] << 2) | (spreadRev[p3 >> 4] << 3);
+  } else {
+    l = spreadFwd[p0 >> 4] | (spreadFwd[p1 >> 4] << 1) | (spreadFwd[p2 >> 4] << 2) | (spreadFwd[p3 >> 4] << 3);
+    r = spreadFwd[p0 & 15] | (spreadFwd[p1 & 15] << 1) | (spreadFwd[p2 & 15] << 2) | (spreadFwd[p3 & 15] << 3);
+  }
+  bool prio = false;
+  if (hi & 0x10) {                                         // in front of sprites where the pixel is opaque
+    pr[0] = (l | (l >> 1) | (l >> 2) | (l >> 3)) & 0x01010101u;
+    pr[1] = (r | (r >> 1) | (r >> 2) | (r >> 3)) & 0x01010101u;
+    prio = (pr[0] | pr[1]) != 0;
+  } else {
+    pr[0] = pr[1] = 0;
+  }
+  const uint32_t pal = (hi & 0x08) ? 0x10101010u : 0;     // sprite palette (CRAM 16-31)
+  dst[0] = l | pal;
+  dst[1] = r | pal;
+  return prio;
+}
+
+static void renderBgLine(uint8_t* fb, int y) {
+  uint16_t nameBase = (uint16_t)((rReg[2] & 0x0E) << 10);
+  uint8_t  backdrop = (uint8_t)(16 + (rReg[7] & 0x0F));   // border/backdrop uses the sprite palette
+  bool lockTop   = (rReg[0] & 0x40) && (y < 16);          // top 2 rows ignore hscroll
+  bool hideLeft8 = (rReg[0] & 0x20) != 0;
+  uint8_t hs = lockTop ? 0 : rHS[y];
+  uint8_t* row = fb + y * VDP_W;
+  const bool lockRightOn = (rReg[0] & 0x80) != 0;         // right 8 columns ignore vscroll
+  const int  tmYScroll   = (y + rVs) % 224;                // vertical wrap is modulo 224 (28 rows)
+
+  // Screen x shows map column (x - hs) & 0xFF: x = 0 is pixel `fine` of tile column c0.
+  const int start = (256 - hs) & 0xFF;
+  const int c0 = start >> 3, fine = start & 7;
+  const uint8_t* px = reinterpret_cast<const uint8_t*>(linePx);
+  const uint8_t* pr = reinterpret_cast<const uint8_t*>(linePr);
+  bool anyPrio = false;
+  for (int k = 0; k < 33; k++)
+    anyPrio |= decodeTile(nameBase, (c0 + k) & 31, tmYScroll, linePx + 2 * k, linePr + 2 * k);
+  const int split = lockRightOn ? 192 : VDP_W;
+  memcpy(row, px + fine, split);
+  if (anyPrio) memcpy(bgPrio, pr + fine, split); else memset(bgPrio, 0, split);
+  if (lockRightOn) {                                       // x >= 192: the unscrolled map row y
+    anyPrio = false;
+    for (int k = 24; k < 33; k++)                          // tiles under x = 192..255
+      anyPrio |= decodeTile(nameBase, (c0 + k) & 31, y, linePx + 2 * k, linePr + 2 * k);
+    memcpy(row + 192, px + fine + 192, VDP_W - 192);
+    if (anyPrio) memcpy(bgPrio + 192, pr + fine + 192, VDP_W - 192);
+    else memset(bgPrio + 192, 0, VDP_W - 192);
   }
   if (hideLeft8) for (int x = 0; x < 8; x++) row[x] = backdrop;
 }
@@ -180,40 +222,40 @@ static void renderBgLine(uint8_t* fb, int y) {
 // the sprite palette (CRAM 16-31); colour 0 is transparent. Max 8 per line -> overflow (status bit6);
 // overlapping opaque pixels set the collision flag (status bit5).
 static void renderSpriteLine(uint8_t* fb, int y) {
-  uint16_t attr = (uint16_t)((vreg[5] & 0x7E) << 7);
-  uint16_t patb = (uint16_t)((vreg[6] & 0x04) << 11);
-  int h = (vreg[1] & 0x02) ? 16 : 8;
-  int mag = (vreg[1] & 0x01) ? 2 : 1;
+  uint16_t attr = (uint16_t)((rReg[5] & 0x7E) << 7);
+  uint16_t patb = (uint16_t)((rReg[6] & 0x04) << 11);
+  int h = (rReg[1] & 0x02) ? 16 : 8;
+  int mag = (rReg[1] & 0x01) ? 2 : 1;
   int dh = h * mag;
-  int shiftX = (vreg[0] & 0x08) ? 8 : 0;                  // R0 bit3: shift sprites left by 8
+  int shiftX = (rReg[0] & 0x08) ? 8 : 0;                  // R0 bit3: shift sprites left by 8
   uint8_t* row = fb + y * VDP_W;
   uint8_t (&mark)[VDP_W] = SHARED_TAIL_ARRAY(SMS_MARK_OFF, VDP_W);           // sharedBigBuf tail, see emu.h
   memset(mark, 0, sizeof(mark));
 
   int drawn = 0;
   for (int i = 0; i < 64; i++) {
-    int sy = vram[(attr + i) & 0x3FFF];
+    int sy = rVram[(attr + i) & 0x3FFF];
     if (sy == 0xD0) break;                                // terminator (192-line mode)
     int top = (sy + 1) & 0xFF; if (top > 224) top -= 256;
     if (y < top || y >= top + dh) continue;               // sprite not on this scanline
-    if (drawn >= 8) { vstatus |= 0x40; break; }           // 9th sprite on the line -> overflow
+    if (drawn >= 8) { rStat |= 0x40; break; }           // 9th sprite on the line -> overflow
     drawn++;
-    int sx = vram[(attr + 0x80 + i * 2) & 0x3FFF] - shiftX;
-    int tile = vram[(attr + 0x80 + i * 2 + 1) & 0x3FFF];
+    int sx = rVram[(attr + 0x80 + i * 2) & 0x3FFF] - shiftX;
+    int tile = rVram[(attr + 0x80 + i * 2 + 1) & 0x3FFF];
     if (h == 16) tile &= 0xFE;                             // 8x16: even tile + next
     int r = (y - top) / mag;                               // 0..h-1
     uint16_t base = (uint16_t)(patb + tile * 32 + r * 4);
     for (int c = 0; c < 8; c++) {
       int sh = 7 - c;
-      int color = ((vram[base & 0x3FFF] >> sh) & 1)
-                | (((vram[(base + 1) & 0x3FFF] >> sh) & 1) << 1)
-                | (((vram[(base + 2) & 0x3FFF] >> sh) & 1) << 2)
-                | (((vram[(base + 3) & 0x3FFF] >> sh) & 1) << 3);
+      int color = ((rVram[base & 0x3FFF] >> sh) & 1)
+                | (((rVram[(base + 1) & 0x3FFF] >> sh) & 1) << 1)
+                | (((rVram[(base + 2) & 0x3FFF] >> sh) & 1) << 2)
+                | (((rVram[(base + 3) & 0x3FFF] >> sh) & 1) << 3);
       if (color == 0) continue;                            // transparent
       for (int m = 0; m < mag; m++) {
         int px = sx + c * mag + m;
         if (px < 0 || px >= VDP_W) continue;
-        if (mark[px]) { vstatus |= 0x20; continue; }       // collision; lower-index sprite wins
+        if (mark[px]) { rStat |= 0x20; continue; }       // collision; lower-index sprite wins
         mark[px] = 1;
         if (!bgPrio[px]) row[px] = (uint8_t)(16 + color);  // behind high-priority background
       }
@@ -221,14 +263,14 @@ static void renderSpriteLine(uint8_t* fb, int y) {
   }
 }
 
-void vdpRender() {
+static void renderFrame() {
   uint8_t* fb = framebuffer;
   if (!fb) return;
-  vstatus &= ~(0x40 | 0x20);                               // recompute overflow + collision each frame
-  bool mode4    = (vreg[0] & 0x04) != 0;
-  bool blanked  = (vreg[1] & 0x40) == 0;                   // R1 bit6: display enable
+  rStat = 0;                                               // overflow + collision, recomputed each frame
+  bool mode4    = (rReg[0] & 0x04) != 0;
+  bool blanked  = (rReg[1] & 0x40) == 0;                   // R1 bit6: display enable
   if (!mode4 || blanked) {                                 // legacy TMS modes / blanked -> backdrop fill
-    uint8_t backdrop = (uint8_t)(16 + (vreg[7] & 0x0F));
+    uint8_t backdrop = (uint8_t)(16 + (rReg[7] & 0x0F));
     memset(fb, backdrop, FB_SIZE);
     return;
   }
@@ -236,6 +278,61 @@ void vdpRender() {
     renderBgLine(fb, y);
     renderSpriteLine(fb, y);
   }
+}
+
+// Render the live VDP state (the Z80's core, at the frame boundary).
+void vdpRender() {
+  rVram = vram; rReg = vreg; rHS = lineHS; rVs = vsLatch;
+  renderFrame();
+  vstatus = (uint8_t)((vstatus & ~(0x40 | 0x20)) | rStat);
+}
+
+// ---- render on the display core -----------------------------------------------------------------
+// Drawing the picture is most of a frame's cost on the PicoCalc's M0+, and the Z80's core paid it on
+// top of the emulation -- so only 1 frame in 4 could be drawn. Instead the Z80's core copies what the
+// renderer reads (VRAM + registers + CRAM + the per-line scroll, ~16.6K, about 0.1 ms) and the
+// display core draws from that copy while the Z80 runs on. Heap, allocated by smsSetup(): nothing
+// static, so no other system loses RAM; without it everything works as before.
+struct VdpSnap {
+  uint8_t vram[0x4000];
+  uint8_t vreg[16];
+  uint8_t cram[32];
+  uint8_t lineHS[VDP_H];
+  uint8_t vsLatch;
+  uint8_t statusOut;   // overflow / collision found by the last render, handed back to vstatus
+};
+static VdpSnap* snap = nullptr;
+
+bool vdpSnapAlloc() {
+  if (!snap) snap = (VdpSnap*)malloc(sizeof(VdpSnap));
+  if (snap) memset(snap, 0, sizeof(VdpSnap));
+  return snap != nullptr;
+}
+bool vdpHasSnap() { return snap != nullptr; }
+
+// Z80's core, at the frame boundary, only while the display core is idle (frameReady == false).
+void vdpCapture() {
+  memcpy(snap->vram, vram, sizeof(snap->vram));
+  memcpy(snap->vreg, vreg, sizeof(snap->vreg));
+  memcpy(snap->cram, cram, sizeof(snap->cram));
+  memcpy(snap->lineHS, lineHS, sizeof(snap->lineHS));
+  snap->vsLatch = vsLatch;
+  vstatus |= snap->statusOut;                              // a frame late; nothing else touches it now
+  snap->statusOut = 0;
+}
+
+// Display core: draw the captured frame into framebuffer.
+void vdpRenderCaptured() {
+  rVram = snap->vram; rReg = snap->vreg; rHS = snap->lineHS; rVs = snap->vsLatch;
+  renderFrame();
+  snap->statusOut = rStat;
+}
+
+// Register / palette of the picture being shown (the capture when there is one).
+uint8_t vdpShownRegister(int r) { return snap ? snap->vreg[r & 15] : vreg[r & 15]; }
+void vdpBuildShownPalette(uint16_t* lut32) {
+  const uint8_t* c = snap ? snap->cram : cram;
+  for (int i = 0; i < 32; i++) lut32[i] = cramToRgb565(c[i]);
 }
 
 } // namespace sms

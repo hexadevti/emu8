@@ -43,7 +43,11 @@ void c64Setup() {
   // buffers, so allocate them here to avoid a null-pointer store.
   // They, and the VIC colour RAM, live in the Apple II's Disk II track buffer: the platforms are
   // mutually exclusive, and the running C64 has almost no heap to spare (the renderer is in SRAM).
+#if defined(BOARD_PICOCALC)
+  extern uint8_t *const trackEncodedData;   // a pointer into platformPool here (apple2/disk.cpp)
+#else
   extern uint8_t trackEncodedData[];
+#endif
   menuScreen = trackEncodedData;
   menuColor  = trackEncodedData + 0x546;
   c64::colormap = trackEncodedData + 2 * 0x546;    // 1K color RAM ($D800); 3724 of the 5856 bytes
@@ -201,7 +205,12 @@ static uint32_t c64VidDrawUs, c64VidBeamUs, c64VidPushUs, c64VidRowsSent;
 // changed go to the panel: the SPI is the bottleneck -- a full 320x200 frame is 16.4ms of the
 // 20ms a PAL frame lasts even at 62.5MHz -- and most of a C64 screen is the same from one frame
 // to the next. Invalid after anything else may have drawn over the picture.
+#if defined(BOARD_PICOCALC)
+static_assert(POOL_C64_ROWHASH + 200 * 4 <= PLATFORM_POOL_SIZE, "C64 row hashes overflow platformPool");
+static uint32_t *const c64RowHash = (uint32_t *)(platformPool + POOL_C64_ROWHASH);   // shared pool, emu.h
+#else
 static uint32_t c64RowHash[200];
+#endif
 static bool c64RowHashValid = false;
 static inline uint32_t c64LineHash(const uint8_t *line) {
   const uint32_t *w = (const uint32_t *)line;
@@ -352,7 +361,8 @@ static void c64RenderBitmap() {
 
   if (now - c64VidLogMs >= 5000) {
     if (c64VidLogMs) {
-      sprintf(buf, "C64 video: %lu whole + %lu torn frames, %lu skipped in %lu ms; ms drawing %lu, "
+      char vb[400];                        // longer than the shared 255-byte buf
+      snprintf(vb, sizeof(vb), "C64 video: %lu whole + %lu torn frames, %lu skipped in %lu ms; ms drawing %lu, "
               "waiting beam %lu, waiting SPI %lu; %lu rows sent; lag avg %lu max %lu lines, %lu frames > 30; "
               "6510 %lu kHz, VIC %u%%, longest line gap %lu us; free heap %u, LCD SPI %lu kHz",
               (unsigned long)c64VidFrames, (unsigned long)c64VidTorn, (unsigned long)c64VidSkipped,
@@ -368,7 +378,7 @@ static void c64RenderBitmap() {
 #else
               0UL);
 #endif
-      printLog(buf);
+      printLog(vb);
     }
     c64VidFrames = c64VidTorn = c64VidSkipped = 0;
     c64VidDrawUs = c64VidBeamUs = c64VidPushUs = c64VidRowsSent = 0;

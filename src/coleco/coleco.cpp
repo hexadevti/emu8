@@ -109,7 +109,12 @@ void colecoSetup() {
 #endif
 
   coleco::ram = colAllocFast(coleco::RAM_SIZE);          // 1 KB work RAM
+#if defined(BOARD_PICOCALC)
+  static_assert(coleco::VRAM_SIZE <= PLATFORM_POOL_SIZE, "VRAM must fit platformPool");
+  msx::vram   = platformPool;                            // 16 KB VDP RAM, static (emu.h)
+#else
   msx::vram   = colAllocFast(coleco::VRAM_SIZE);         // 16 KB VDP RAM (the shared TMS9918A core)
+#endif
   msx::framebuffer = sharedBigBuf;                       // 256*192 = 49152 <= sizeof(sharedBigBuf)
   if (coleco::ram) memset(coleco::ram, 0, coleco::RAM_SIZE);
   if (msx::vram)   memset(msx::vram, 0, coleco::VRAM_SIZE);

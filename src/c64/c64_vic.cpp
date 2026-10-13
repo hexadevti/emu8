@@ -299,4 +299,8 @@ C64_HOT void vicLineToRgb(const uint8_t *out, uint16_t *dst, const uint16_t *pal
   }
 }
 
+// End marker of the C64's SRAM code on the PicoCalc: the Apple II borrows the idle run of it up to
+// here (a2LendC64Code, src/apple2/memory.cpp). Never called; keep it the last C64_HOT in this file.
+C64_HOT void vicHotEnd() {}
+
 } // namespace c64

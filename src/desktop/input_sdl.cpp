@@ -95,6 +95,7 @@ static void pollController() {
 //   EMU_JOYPORT=1|2   C64: joystick port the script drives
 //   EMU_TRIG_TO=<f>   stop pulsing the trigger at frame f
 //   EMU_JOYPORT_AT=<f> switch to the other joystick port at frame f
+//   EMU_TAP_EVERY=<n> repeat the SPACE tap every n frames from EMU_TAP
 static void desktopScriptInput() {
   static long f = -1; f++;
   static int  tap  = []{ const char*s=getenv("EMU_TAP");       return s?atoi(s):-1; }();
@@ -106,7 +107,11 @@ static void desktopScriptInput() {
   static int jp = []{ const char*s=getenv("EMU_JOYPORT"); return s?atoi(s):0; }();   // C64: 1 or 2
   static long jpAt = []{ const char*s=getenv("EMU_JOYPORT_AT"); return s?atol(s):-1L; }();
   if (jp == 1 || jp == 2) joyPort = (uint8_t)((jpAt >= 0 && f >= jpAt) ? 3 - jp : jp);
-  if (tap >= 0) { if (f >= tap && f < tap + 15) pressAdd(0x2C); else pressRemove(0x2C); }  // SPACE = HID 0x2C
+  static long tapEvery = []{ const char*s=getenv("EMU_TAP_EVERY"); return s?atol(s):0L; }();   // repeat the tap
+  if (tap >= 0) {
+    const long t = (tapEvery > 0 && f >= tap) ? (f - tap) % tapEvery : f - tap;
+    if (t >= 0 && t < 15) pressAdd(0x2C); else pressRemove(0x2C);   // SPACE = HID 0x2C
+  }
   // arrow-key HID codes: Right 0x4F, Left 0x50, Down 0x51, Up 0x52
   const uint8_t AR=0x4F, AL=0x50, AD=0x51, AU=0x52;
   if (hfrom >= 0 && f >= hfrom) {

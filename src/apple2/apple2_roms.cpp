@@ -84,7 +84,11 @@ static const unsigned char* a2LoadIIeToFlash() {
   }
   // Staged through trackRawData: the DiskII track buffer is idle until diskSetup() runs, and a
   // malloc'd 4K here was a transient the IIe heap budget (A2_IIE_RESERVE) had to carry.
+#if defined(BOARD_PICOCALC)
+  extern uint8_t *const trackRawData;   // in platformPool (emu.h)
+#else
   extern uint8_t trackRawData[];
+#endif
   const uint8_t* fb = romFlashLoad(ROMFLASH_BIOS, f, 0x4000, trackRawData);
   f.close();
   if (!fb) { sprintf(buf, "Apple II: ROM %s: copy to flash failed", path); printLog(buf); }

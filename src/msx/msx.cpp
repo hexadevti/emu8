@@ -90,40 +90,44 @@ static bool isBiosName(const std::string& nm) {
 }
 
 // ---- SD BIOS ------------------------------------------------------------------------------------
+static const char* g_biosErr = "";        // why the BIOS did not load, for the NO BIOS screen
+static char g_biosPath[ROMSEL_SLOT_LEN];  // the file that was tried
 static bool loadBiosFromSD() {
   // Exactly one file: the BIOS picked on the settings ROMS page, else the default
   // /roms/hotbit12.rom (Sharp Epcom HotBit 1.2: MSX1 BIOS + MSX BASIC). Nothing else is tried.
   char picked[ROMSEL_SLOT_LEN];
-  strcpy(picked, romPath(ROMSEL_MSX_BIOS));
-  const char* names[] = { picked };
-  for (const char* nm : names) {
-    if (!*nm) continue;
-    File f = FSTYPE.open(nm, FILE_READ);
-    if (!f) continue;
-    int len = f.size();
-    if (len >= 0x4000 && len <= 0x8000) {
-#if BOARD_ROM_IN_FLASH
-      // PicoCalc: no PSRAM, so the BIOS is copied into spare flash and read through XIP (a no-op
-      // compare on every boot after the first). See src/picocalc/romflash_picocalc.cpp.
-      const uint8_t* fb = romFlashLoad(ROMFLASH_BIOS, f, len); f.close();
-      if (fb) { msx::bios = fb; msx::biosLen = len;
-                msx::biosIsCbios = strstr(nm, "cbios") || strstr(nm, "CBIOS");
-                sprintf(buf, "MSX: BIOS %s (%dK, flash)", nm, len / 1024); printLog(buf); return true; }
-      continue;
-#endif
-      uint8_t* b = msxAllocFast(0x8000);
-      if (b) {
-        int got = f.read(b, len); f.close();
-        if (got == len) { msx::bios = b; msx::biosLen = len;
-                          msx::biosIsCbios = strstr(nm, "cbios") || strstr(nm, "CBIOS");
-                          sprintf(buf, "MSX: BIOS %s (%dK)", nm, len / 1024); printLog(buf); return true; }
-        free(b);
-      } else f.close();
-    } else f.close();
-  }
+  snprintf(picked, sizeof(picked), "%s", romPath(ROMSEL_MSX_BIOS));
+  strcpy(g_biosPath, picked);
+  const char* nm = picked;
   msx::biosLen = 0;
-  sprintf(buf, "MSX: NO BIOS - %.80s missing or not 16-32K", picked); printLog(buf);
-  return false;
+  if (!*nm) { g_biosErr = "BIOS set to NONE"; printLog("MSX: NO BIOS - slot set to none"); return false; }
+  File f = FSTYPE.open(nm, FILE_READ);
+  if (!f) { g_biosErr = "cannot open file"; sprintf(buf, "MSX: NO BIOS - cannot open %.80s", nm); printLog(buf); return false; }
+  int len = f.size();
+  if (len < 0x4000 || len > 0x8000) {
+    f.close(); g_biosErr = "wrong size (need 16-32K)";
+    sprintf(buf, "MSX: NO BIOS - %.80s is %d bytes, need 16-32K", nm, len); printLog(buf); return false;
+  }
+#if BOARD_ROM_IN_FLASH
+  // PicoCalc: no PSRAM, so the BIOS is copied into spare flash and read through XIP (a no-op
+  // compare on every boot after the first). See src/picocalc/romflash_picocalc.cpp. Staged through
+  // msxScratch like the cart and disk ROM: after the 80K of RAM + VRAM the heap may not spare 4K.
+  const uint8_t* fb = romFlashLoad(ROMFLASH_BIOS, f, len, (uint8_t*)msxScratch); f.close();
+  if (!fb) { g_biosErr = "copy to flash failed"; sprintf(buf, "MSX: NO BIOS - %.80s flash load failed", nm); printLog(buf); return false; }
+  msx::bios = fb; msx::biosLen = len;
+  msx::biosIsCbios = strstr(nm, "cbios") || strstr(nm, "CBIOS");
+  sprintf(buf, "MSX: BIOS %s (%dK, flash)", nm, len / 1024); printLog(buf);
+  return true;
+#else
+  uint8_t* b = msxAllocFast(0x8000);
+  if (!b) { f.close(); g_biosErr = "out of memory"; printLog("MSX: NO BIOS - alloc failed"); return false; }
+  int got = f.read(b, len); f.close();
+  if (got != len) { free(b); g_biosErr = "SD read short"; sprintf(buf, "MSX: NO BIOS - %.80s read short", nm); printLog(buf); return false; }
+  msx::bios = b; msx::biosLen = len;
+  msx::biosIsCbios = strstr(nm, "cbios") || strstr(nm, "CBIOS");
+  sprintf(buf, "MSX: BIOS %s (%dK)", nm, len / 1024); printLog(buf);
+  return true;
+#endif
 }
 
 // Scan SD root for *.rom / *.dsk into msxFiles (excluding the reserved BIOS names).
@@ -163,13 +167,19 @@ void msxSetup() {
 #endif
 
   msx::ram  = msxAllocFast(0x10000);            // 64 KB work RAM (slot 3) - keep internal for speed
+#if defined(BOARD_PICOCALC)
+  static_assert(msx::VRAM_SIZE <= PLATFORM_POOL_SIZE, "MSX VRAM must fit platformPool");
+  msx::vram = platformPool;                     // 16 KB VDP RAM: static, the heap only holds the 64K RAM
+#else
   msx::vram = msxAllocFast(msx::VRAM_SIZE);     // 16 KB VDP RAM - read every frame
+#endif
   msx::framebuffer = sharedBigBuf;              // 256*192 = 49152 <= sizeof(sharedBigBuf)
   if (msx::ram)  memset(msx::ram, 0, 0x10000);
   if (msx::vram) memset(msx::vram, 0, msx::VRAM_SIZE);
   if (!msx::ram || !msx::vram) {
     sprintf(buf, "MSX: out of memory for RAM/VRAM (heap=%u)", (unsigned)ESP.getFreeHeap());
     printLog(buf);
+    g_biosErr = "out of memory for RAM/VRAM";   // shown on the NO BIOS screen
     msx::biosLen = 0;                            // msxLoop idles on biosLen == 0 instead of crashing
     return;
   }
@@ -517,6 +527,9 @@ bool msxRenderLoadWarning() {
       tft.setTextColor(TFT_WHITE, TFT_BLACK); tft.drawString("Put hotbit12.rom (32K) in /roms", 8, 40, 1);
       tft.drawString("on the SD card,", 8, 56, 1);
       tft.drawString("or pick one in SETTINGS (Ctrl-F1) > ROMS.", 8, 72, 1);
+      tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+      tft.drawString(g_biosPath, 8, 96, 1);                     // what was tried, and why it failed
+      tft.drawString(*g_biosErr ? g_biosErr : "not loaded", 8, 112, 1);
       tft.setTextDatum(MC_DATUM);
       drawn = true;
     }

@@ -388,6 +388,19 @@ extern unsigned char* menuColor;
 extern unsigned char sharedBigBuf[2 * (320 * 100 + 16)];   // C64 framebuffer / Apple main RAM
                                        // (shared static 64K). Sized here, not just declared, so
                                        // memoryAlloc() can static_assert against its tail.
+#if defined(BOARD_PICOCALC)
+// A second shared static block, for buffers only one platform ever uses: the PicoCalc boots one
+// platform per power-on (a switch reboots), so they need not each hold RAM of their own. The MSX
+// (and ColecoVision) VDP RAM lives here too; on the RP2040 the 64K + 16K of MSX RAM + VRAM no
+// longer fit the heap together.
+#define PLATFORM_POOL_SIZE 0x4000
+extern unsigned char platformPool[PLATFORM_POOL_SIZE];
+#define POOL_A2_TRACKRAW   0          // Apple II DiskII raw track, 4096 (apple2/disk.cpp)
+#define POOL_A2_TRACKENC   4096       // Apple II encoded track, 5856 (apple2/disk.cpp)
+#define POOL_SPK_TOGTS     9952       // Apple II / PC-XT speaker flip stamps, 4096 (shared/speaker.cpp)
+#define POOL_SPK_RING      14048      // speaker sample ring, 2048 (shared/speaker.cpp)
+#define POOL_C64_ROWHASH   0          // C64 per-row hashes, 800 (c64/c64.cpp)
+#endif
 
 // The MSX / SMS / ColecoVision per-line and FDC buffers, in sharedBigBuf past the 256x192
 // framebuffer, the 4K scratch band and the two menu buffers those cores put there. As .bss they
@@ -402,7 +415,9 @@ extern unsigned char sharedBigBuf[2 * (320 * 100 + 16)];   // C64 framebuffer / 
 #define SMS_LINEHS_OFF      (MSX_DIRTY_OFF + 1024)          // 192  sms_vdp.cpp
 #define SMS_BGPRIO_OFF      (SMS_LINEHS_OFF + 192)          // 256  sms_vdp.cpp
 #define SMS_MARK_OFF        (SMS_BGPRIO_OFF + 256)          // 256  sms_vdp.cpp
-#define Z80_TAIL_END        (SMS_MARK_OFF + 256)
+#define SMS_LINEPX_OFF      (SMS_MARK_OFF + 256)            // 272  sms_vdp.cpp (word aligned)
+#define SMS_LINEPR_OFF      (SMS_LINEPX_OFF + 272)          // 272  sms_vdp.cpp (word aligned)
+#define Z80_TAIL_END        (SMS_LINEPR_OFF + 272)
 static_assert(Z80_TAIL_END <= (int)sizeof(sharedBigBuf),
               "MSX/SMS line + FDC buffers must fit in sharedBigBuf's tail");
 // A fixed-size array view of sharedBigBuf at `off`, so sizeof() at the use sites keeps working.

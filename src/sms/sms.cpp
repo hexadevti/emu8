@@ -19,6 +19,7 @@
 #include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
 #include "../shared/dirty_bands.h"     // PicoCalc: push only the bands that changed
 #include "../shared/speedmeter.h"     // live Z80 MHz for the settings title
+#include "../shared/framepacer.h"     // steady NORMAL-speed pacing (frameskip / stretched period)
 
 static uint16_t* smsScratch = nullptr;   // per-frame RGB565 conversion band (like nesScratch/msxScratch)
 #if !BOARD_ROM_IN_FLASH
@@ -71,6 +72,11 @@ void smsSetup() {
   sms::ram  = smsAllocFast(sms::WRAM_SIZE);              // 8 KB work RAM - keep internal for speed
   sms::vram = smsAllocFast(sms::VRAM_SIZE);              // 16 KB VDP RAM - read every frame
   sms::framebuffer = sharedBigBuf;                       // 256*192 = 49152 <= sizeof(sharedBigBuf)
+  // The display core draws the picture from a copy of the VDP state (sms_vdp.cpp), so the Z80's core
+  // does not pay for it. Optional: without the 16.6K the Z80's core draws, as before.
+  const bool snapOk = sms::ram && sms::vram && sms::vdpSnapAlloc();
+  sprintf(buf, "SMS: picture drawn on the %s", snapOk ? "display core" : "Z80's core (no room for the copy)");
+  printLog(buf);
   if (sms::ram)  memset(sms::ram, 0, sms::WRAM_SIZE);
   if (sms::vram) memset(sms::vram, 0, sms::VRAM_SIZE);
   if (!sms::ram || !sms::vram) {
@@ -103,35 +109,31 @@ void smsLoop() {
     printLog(buf);
   }
 
-  const uint32_t FRAME_US = 16687;
-  uint32_t nextUs = micros();
+  // NORMAL mode: steady pacing with frameskip / a stretched period when the host falls behind
+  // (framepacer.h), so the game -- and its music -- never speeds up and slows down in bursts.
+  FramePacer pacer(16687);
   SpeedMeter meter; meter.restart(sms::cpu.cycles);
   for (;;) {
-    if (OptionsWindow || paused) { vTaskDelay(pdMS_TO_TICKS(20)); nextUs = micros(); meter.restart(sms::cpu.cycles); continue; }
-    if (smsResetReq)   { smsResetReq = false; sms::machineReset(); nextUs = micros(); meter.restart(sms::cpu.cycles); }
+    if (OptionsWindow || paused) { vTaskDelay(pdMS_TO_TICKS(20)); pacer.resync(); meter.restart(sms::cpu.cycles); continue; }
+    if (smsResetReq)   { smsResetReq = false; sms::machineReset(); pacer.resync(); meter.restart(sms::cpu.cycles); }
     if (sms::romLen == 0) { vTaskDelay(pdMS_TO_TICKS(100)); continue; }   // no ROM -> nothing to run
 
-    sms::runFrame();
+    sms::runFrame(pacer.begin(smsFast));
     meter.tick(sms::cpu.cycles, smsMeasuredMhz);
+    pacer.end(smsFast);
 
-    if (smsFast) {
-#if defined(BOARD_DESKTOP)
-      taskYIELD();             // desktop: full host speed (render/input on other threads)
-#else
-      vTaskDelay(1);
-#endif
-      nextUs = micros();
-    } else {
-      nextUs += FRAME_US;
-      int32_t wait = (int32_t)(nextUs - micros());
-      if (wait > 0) {
-        uint32_t ms = (uint32_t)wait / 1000;
-        vTaskDelay(pdMS_TO_TICKS(ms ? ms : 1));
-      } else if (wait < -100000) {
-        nextUs = micros();
-      } else {
-        vTaskDelay(1);
+    // Every 5 s: emulated frame rate (real SMS = 59.9) and the pacer's state, for the serial log.
+    static uint32_t logMs = 0, logFrames = 0;
+    logFrames++;
+    const uint32_t nowMs = millis();
+    if (nowMs - logMs >= 5000) {
+      if (logMs) {
+        sprintf(buf, "SMS: emu fps=%.1f period=%luus work=%luus skip=%d",
+                logFrames * 1000.0f / (nowMs - logMs), (unsigned long)pacer.periodUs,
+                (unsigned long)(pacer.workQ4 >> 4), pacer.skip);
+        printLog(buf);
       }
+      logMs = nowMs; logFrames = 0;
     }
   }
 }
@@ -141,12 +143,13 @@ void smsLoop() {
 void smsRenderFrame() {
   if (!sms::frameReady) return;
   if (!smsScratch || !sms::framebuffer) { sms::frameReady = false; return; }
+  if (sms::vdpHasSnap()) sms::vdpRenderCaptured();   // the Z80's core only captured this frame
   uint16_t pal[32];
-  sms::vdpBuildPalette(pal);
+  sms::vdpBuildShownPalette(pal);
   // SMS "blank leftmost column" (R0 bit5): games hide the 8px column where new tiles scroll in. On a
   // real SMS it shows the backdrop colour (lost in TV overscan); on the LCD we render it black so it
   // merges with the side border instead of looking like an unfilled strip.
-  const bool hideLeft8 = (sms::vdpRegister(0) & 0x20) != 0;
+  const bool hideLeft8 = (sms::vdpShownRegister(0) & 0x20) != 0;
   const int outTop = oskRasterTop();
   const int outH   = oskRasterHeight();
   const int belowY = outTop + outH;

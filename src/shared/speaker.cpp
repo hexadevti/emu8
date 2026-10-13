@@ -50,7 +50,12 @@ void speakerToggle() {
 // keeps a 2.5x margin over the worst observed and hands 2K back to the heap -- which the Apple IIe
 // map genuinely needs (see A2_IIE_RESERVE in src/apple2/memory.cpp).
 #define SPK_RING  1024
+#if defined(BOARD_PICOCALC)
+static_assert(POOL_SPK_RING % 4 == 0 && POOL_SPK_RING + SPK_RING * 2 <= PLATFORM_POOL_SIZE, "speaker ring overflows platformPool");
+static int16_t *const spkRing = (int16_t *)(platformPool + POOL_SPK_RING);   // shared pool, emu.h
+#else
 static int16_t spkRing[SPK_RING];
+#endif
 static volatile uint32_t spkW = 0, spkR = 0;   // free-running write/read counts (mask to index)
 
 // ---- the $C030 toggle timeline ------------------------------------------------------------
@@ -94,7 +99,12 @@ static volatile uint32_t spkW = 0, spkR = 0;   // free-running write/read counts
 // Sample period as 16.16 microseconds: 22.0us on the PicoCalc, 22.675us on the I2S boards. Kept as
 // a fixed-point step rather than a divide so the timeline advances at exactly SPK_FS on both.
 #define SPK_PERIOD_Q16 ((uint32_t)(((uint64_t)1000000 << 16) / SPK_FS))
+#if defined(BOARD_PICOCALC)
+static_assert(POOL_SPK_TOGTS % 4 == 0 && POOL_SPK_TOGTS + SPK_TOG_RING * 2 <= POOL_SPK_RING, "speaker stamps overlap in platformPool");
+static volatile uint16_t *const spkTogTs = (volatile uint16_t *)(platformPool + POOL_SPK_TOGTS);
+#else
 static volatile uint16_t spkTogTs[SPK_TOG_RING];
+#endif
 static volatile uint32_t spkTogW = 0, spkTogR = 0;
 static volatile bool     spkTogLost = false;   // producer had nowhere to put a flip; ISR resyncs
 

@@ -18,6 +18,7 @@ void setup() {
   bootProgressStep("Waiting for USB serial");
 #endif
   logSetup();
+  printLog("emu8 build " __DATE__ " " __TIME__);   // which firmware is running (touch emu8.ino to refresh)
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
   // Arduino-ESP32 core 3.x (ESP32-P4): the loop task feeds the Task WDT each iteration but isn't
   // subscribed to it, so the fast CPU loop() floods the log with "esp_task_wdt_reset: task not

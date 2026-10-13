@@ -192,6 +192,9 @@ unsigned char* menuColor;
 // so the framebuffer is deterministic (no heap-fragmentation failure) without permanently
 // stealing heap from whichever platform isn't using it. 320*100+16 = 32016 per C64 half.
 alignas(8) unsigned char sharedBigBuf[2 * (320 * 100 + 16)];   // aligned: PC-XT guest RAM pages on PicoCalc
+#if defined(BOARD_PICOCALC)
+alignas(8) unsigned char platformPool[PLATFORM_POOL_SIZE];      // see emu.h
+#endif
 
 // speaker
 boolean speaker_state = false;

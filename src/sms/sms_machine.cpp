@@ -66,7 +66,7 @@ void machineReset() {
 // one scanline at a time so the VDP line-interrupt counter (split-screen status bars) and the VBlank
 // interrupt land at the right rasters. The frame is rendered once at the end using the per-line
 // horizontal-scroll snapshot captured during the active display.
-void runFrame() {
+void runFrame(bool render) {
   const int LINES = 262;
   const int ACTIVE = VDP_H;          // 192 active scanlines
   const uint32_t TPL = 228;          // T-states per scanline (228*262 = 59736, matches MSX frame)
@@ -76,8 +76,12 @@ void runFrame() {
     if (line < ACTIVE) vdpSnapshotLine(line);   // capture R8 hscroll for this raster
     if (vdpIrqActive()) Cpu::irq(cpu, 0xFF);    // IM 1 -> RST 38h (data-bus byte ignored)
   }
-  // Render race-free at the frame boundary, only once core 0 has displayed the previous frame.
-  if (!frameReady) { vdpRender(); frameReady = true; }
+  // At the frame boundary, only once the display core has shown the previous frame: capture it for
+  // the display core to draw (vdpRenderCaptured), or draw it here if there is no room for the copy.
+  if (render && !frameReady) {
+    if (vdpHasSnap()) vdpCapture(); else vdpRender();
+    frameReady = true;
+  }
   if (pauseLatch) { pauseLatch = false; Cpu::nmi(cpu); }   // PAUSE -> NMI between frames
 }
 

@@ -8,8 +8,15 @@
 ushort diskFileHeaderSize = 0;
 #define trackEncodedSize 5856
 #define trackRawSize 4096
+#if defined(BOARD_PICOCALC)
+static_assert(POOL_A2_TRACKENC >= POOL_A2_TRACKRAW + trackRawSize && POOL_A2_TRACKENC + trackEncodedSize <= POOL_SPK_TOGTS,
+              "Apple II track buffers overlap in platformPool (emu.h)");
+extern uint8_t *const trackRawData     = platformPool + POOL_A2_TRACKRAW;   // shared pool, emu.h
+extern uint8_t *const trackEncodedData = platformPool + POOL_A2_TRACKENC;
+#else
 uint8_t trackRawData[trackRawSize];
 uint8_t trackEncodedData[trackEncodedSize];
+#endif
 uint8_t diskVolume;
 bool diskChanged = false;
 bool trackChanged = false;

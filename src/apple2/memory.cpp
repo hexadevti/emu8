@@ -82,23 +82,34 @@ static unsigned char* a2LentBank = nullptr;
 // keeps its full speed. The bounds are sanity-checked; if the layout ever changes, this returns
 // nullptr and everything comes off the heap as before.
 #if defined(BOARD_PICOCALC)
-namespace c64 { void ciaTick(int cpuCycles); uint8_t nextRasterline(); }
+namespace c64 { void ciaTick(int cpuCycles); uint8_t nextRasterline();
+                 struct VicLineRec;
+                 void vicRenderRecord(const VicLineRec &r, uint8_t dline, uint8_t *out, uint16_t *dst,
+                                      const uint16_t *pal);
+                 void vicHotEnd(); }
+static uintptr_t a2LendLo = 0, a2LendEnd = 0;
 static unsigned char* a2LendC64Code(size_t n, const char* what)
 {
-  static uintptr_t next = 0, end = 0;
+  static uintptr_t next = 0;
   static bool probed = false;
   if (!probed) {
     probed = true;
     uintptr_t lo = (uintptr_t)&c64::ciaTick & ~(uintptr_t)1;          // Thumb bit off
     uintptr_t hi = (uintptr_t)&c64::nextRasterline & ~(uintptr_t)1;
-    if (lo >= 0x20000000u && hi < 0x20040000u && hi > lo && hi - lo <= 0x4000) {
-      next = (lo + 3) & ~(uintptr_t)3;
-      end  = hi;
+    // Since the renderer moved to SRAM too (vicRenderRecord & co., ~9K), the run goes on to
+    // c64::vicHotEnd: take that when it lies right past the renderer, else the old bound.
+    uintptr_t hi2 = (uintptr_t)&c64::vicHotEnd & ~(uintptr_t)1;
+    uintptr_t rr  = (uintptr_t)&c64::vicRenderRecord & ~(uintptr_t)1;
+    if (hi2 > hi && hi2 > rr && rr > lo && hi2 < 0x20040000u && hi2 - lo <= 0x5000) hi = hi2;
+    if (lo >= 0x20000000u && hi < 0x20040000u && hi > lo && hi - lo <= 0x5000) {
+      next = a2LendLo = (lo + 3) & ~(uintptr_t)3;
+      a2LendEnd = hi;
     }
-    sprintf(buf, "Apple II: C64 RAM code %s (%u bytes to lend)", end ? "lent" : "NOT where expected",
-            (unsigned)(end ? end - next : 0));
+    sprintf(buf, "Apple II: C64 RAM code %s (%u bytes to lend)", a2LendEnd ? "lent" : "NOT where expected",
+            (unsigned)(a2LendEnd ? a2LendEnd - next : 0));
     printLog(buf);
   }
+  uintptr_t end = a2LendEnd;
   if (!end || end - next < n) return nullptr;
   unsigned char* p = (unsigned char*)next;
   next += (n + 3) & ~(size_t)3;
@@ -107,6 +118,15 @@ static unsigned char* a2LendC64Code(size_t n, const char* what)
   return p;
 }
 #endif
+
+// free() unless p was lent out of the idle C64 code RAM above.
+static void a2FreeMaybeLent(unsigned char* p)
+{
+#if defined(BOARD_PICOCALC)
+  if ((uintptr_t)p >= a2LendLo && (uintptr_t)p < a2LendEnd) return;
+#endif
+  free(p);
+}
 
 // Heap unless the idle C64 code RAM can take it. Never passed to free().
 static unsigned char* a2AllocLent(size_t n, const char* what)
@@ -139,7 +159,7 @@ static bool a2AllocIIeMap()
 
   unsigned char* ax   = a2Alloc(0xc000, "aux RAM");
   unsigned char* ab1  = a2Alloc(0x2000, "IIe aux bank-switched RAM 1");
-  unsigned char* mb1  = a2Alloc(0x2000, "IIe bank-switched RAM 1");
+  unsigned char* mb1  = a2AllocLent(0x2000, "IIe bank-switched RAM 1");
   unsigned char* mb21 = a2AllocMb21();
   size_t freeLeft = apple2MemAllocFailed ? 0 : heap_caps_get_free_size(MALLOC_CAP_8BIT);
   if (!apple2MemAllocFailed) {
@@ -148,7 +168,7 @@ static bool a2AllocIIeMap()
     printLog(buf);
   }
   if (apple2MemAllocFailed || freeLeft < A2_IIE_RESERVE) {
-    free(ax); free(ab1); free(mb1); a2FreeMb21(mb21);
+    free(ax); free(ab1); a2FreeMaybeLent(mb1); a2FreeMb21(mb21);
     apple2MemAllocFailed = false;   // not fatal: memoryAlloc() falls back to the II+ map
     apple2RomLoadFailed  = false;
     return false;
@@ -197,7 +217,7 @@ void apple2FallbackToIIplus(const char* why)
   if (a2IIeMapOnHeap) {
     free(auxram);                        // the three sharedBigBuf-backed banks are NOT freed
     free(IIEAuxBankSwitchedRAM1);
-    free(IIEmemoryBankSwitchedRAM1);
+    a2FreeMaybeLent(IIEmemoryBankSwitchedRAM1);
     a2FreeMb21(IIEmemoryBankSwitchedRAM2_1);
     a2IIeMapOnHeap = false;
   }
