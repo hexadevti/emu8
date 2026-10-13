@@ -220,6 +220,17 @@ void epromSetup() {
   if (const char *c = getenv("EMU_C64")) { selectedC64FileName = c; c64Autoload = true; }
   // EMU_ZX=/x.tap (or .tzx/.sna/.z80) loads it on the ZX Spectrum at boot (tapes type LOAD "").
   if (const char *z = getenv("EMU_ZX")) selectedZxFileName = z;
+  // EMU_CART=/x.nes (or .a26 / .rom / .sms / .col) loads it on the current cartridge system at boot.
+  if (const char *c = getenv("EMU_CART")) {
+    switch (currentPlatform) {
+      case PLATFORM_NES:    selectedNesFileName    = c; break;
+      case PLATFORM_ATARI:  selectedAtariFileName  = c; break;
+      case PLATFORM_MSX:    selectedMsxFileName    = c; break;
+      case PLATFORM_SMS:    selectedSmsFileName    = c; break;
+      case PLATFORM_COLECO: selectedColecoFileName = c; break;
+      default: break;
+    }
+  }
   // Default the Apple II to THROTTLED 1 MHz on desktop: uncapped runs the 6502 at tens of MHz on a PC,
   // which makes the 1-bit speaker ultrasonic/garbage. (Toggle it off in Control > Clock speed for a
   // speed-up, accepting bad audio.) EMU_FAST=1 forces uncapped instead.

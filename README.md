@@ -24,6 +24,25 @@ plus the experimental **PC-XT** target that is still in development:
 
 ---
 
+## Screenshots
+
+*Captured from the desktop (SDL2) build. The firmware draws the same 320×240 picture on the boards.*
+
+| | |
+| :---: | :---: |
+| <img src="docs/screenshots/system-menu.png" width="320" alt="Boot splash / system menu"> | <img src="docs/screenshots/settings-sms.png" width="320" alt="Settings window with file list"> |
+| Boot splash: pick a system, or **SETUP** | Settings window: toggles, ROM list, **UNMOUNT** |
+| <img src="docs/screenshots/nes-smb.png" width="320" alt="NES: Super Mario Bros."> | <img src="docs/screenshots/sms-sonic.png" width="320" alt="Master System: Sonic the Hedgehog"> |
+| NES | Sega Master System |
+| <img src="docs/screenshots/msx-galaga.png" width="320" alt="MSX: Galaga"> | <img src="docs/screenshots/atari-pitfall.png" width="320" alt="Atari 2600: Pitfall!"> |
+| MSX1 | Atari 2600 |
+| <img src="docs/screenshots/apple2-loderunner.png" width="320" alt="Apple II: Lode Runner"> | <img src="docs/screenshots/c64-skramble.png" width="320" alt="C64: 3-D Skramble"> |
+| Apple II | Commodore 64 |
+| <img src="docs/screenshots/atari-riverraid.png" width="320" alt="Atari 2600: River Raid"> | <img src="docs/screenshots/zx48.png" width="320" alt="ZX Spectrum 48K boot screen"> |
+| Atari 2600 | ZX Spectrum 48K |
+
+---
+
 ## Supported boards
 
 emu8 builds for **four boards** from the same source tree — the target is selected at *compile time*
@@ -61,6 +80,7 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
 
 ## Table of contents
 
+- [Screenshots](#screenshots)
 - [Download a release](#download-a-release)
 - [Features](#features)
 - [Boot & platform selection](#boot--platform-selection)
@@ -287,6 +307,10 @@ shows the images for the **current platform**; function keys / touch toggles cov
 | `Ctrl` + `Enter` | Save settings/selection to EEPROM and reboot (C64: LOAD & RUN) |
 | `Del` / `Backspace` | Unmount the highlighted image, if it is the one loaded |
 | `Esc` | Exit the menu |
+
+The general settings (**SETUP** on the system menu) and the built-in help:
+
+<img src="docs/screenshots/general-settings.png" width="320" alt="General settings"> <img src="docs/screenshots/help.png" width="320" alt="Help page">
 
 A built-in **6502 debugger** (Apple core) offers pause/continue, single-step (`F10`), breakpoint by
 address, and a live instruction/stack trace.

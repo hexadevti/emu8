@@ -144,13 +144,29 @@ static void desktopTypeInject() {
   static size_t idx = 0; static bool down = false;
   if (fr < at || (fr % 6) != 0) return;         // wait for boot, then ~1 transition / 6 frames
   if (!s[idx]) return;
-  SDL_Scancode sc = scancodeForChar(s[idx]);
-  if (sc == SDL_SCANCODE_UNKNOWN) { idx++; return; }
+  // {F10} {UP} {DOWN} {LEFT} {RIGHT} {ENTER} {ESC} {DEL} name a special key; {WAIT} idles one step.
+  static const struct { const char *name; SDL_Scancode sc; } kTok[] = {
+    {"F10", SDL_SCANCODE_F10}, {"UP", SDL_SCANCODE_UP}, {"DOWN", SDL_SCANCODE_DOWN},
+    {"LEFT", SDL_SCANCODE_LEFT}, {"RIGHT", SDL_SCANCODE_RIGHT}, {"ENTER", SDL_SCANCODE_RETURN},
+    {"ESC", SDL_SCANCODE_ESCAPE}, {"DEL", SDL_SCANCODE_DELETE}, {"WAIT", SDL_SCANCODE_UNKNOWN}};
+  size_t len = 1;
+  SDL_Scancode sc = SDL_SCANCODE_UNKNOWN;
+  if (s[idx] == '{') {
+    const char *end = strchr(s + idx, '}');
+    if (!end) { idx = strlen(s); return; }
+    len = (size_t)(end - (s + idx)) + 1;
+    for (const auto &t : kTok)
+      if (strlen(t.name) == len - 2 && !strncmp(s + idx + 1, t.name, len - 2)) sc = t.sc;
+    if (sc == SDL_SCANCODE_UNKNOWN) { idx += len; return; }
+  } else {
+    sc = scancodeForChar(s[idx]);
+    if (sc == SDL_SCANCODE_UNKNOWN) { idx++; return; }
+  }
   SDL_Event e; memset(&e, 0, sizeof(e));
   e.key.keysym.scancode = sc;
   e.key.keysym.sym = SDL_GetKeyFromScancode(sc);
   if (!down) { e.type = SDL_KEYDOWN; e.key.state = SDL_PRESSED;  down = true; }
-  else       { e.type = SDL_KEYUP;   e.key.state = SDL_RELEASED; down = false; idx++; }
+  else       { e.type = SDL_KEYUP;   e.key.state = SDL_RELEASED; down = false; idx += len; }
   SDL_PushEvent(&e);
 }
 
