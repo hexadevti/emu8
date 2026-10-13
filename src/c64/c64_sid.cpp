@@ -212,6 +212,7 @@ void sidTask(void *) {
   size_t wrote;
   while (running) {
     for (int i = 0; i < SID_BLOCK; i++) buf[i] = (uint16_t)genSample();   // 16-bit, 0x8000 centre
+    if (menuOpen()) for (int i = 0; i < SID_BLOCK; i++) buf[i] = 0x8000;   // silent under a menu
 #if defined(BOARD_DESKTOP)
     // EMU_SID_LOG=<file>: every 20 ms, the 25 registers + the 3 envelope levels (offline analysis),
     // and EMU_SID_WAV=<file>: the raw 16-bit output.

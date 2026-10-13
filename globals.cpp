@@ -80,6 +80,7 @@ float nesMeasuredMhz = 0.0f; // NES: measured 2A03 speed (fps-derived), updated 
 bool AppleIIe = true;
 bool OptionsWindow = false;
 bool DebugWindow = false;
+bool menuOpen() { return OptionsWindow || splashActive; }
 bool ClearWindow = false;
 bool initializedHdDisk = false;
 bool HdDisk = false;

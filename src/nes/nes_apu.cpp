@@ -221,7 +221,7 @@ static int16_t genSample16() {
   if (y < -60000) y = -60000;
   hpPrevIn = in; hpPrevOut = y;
 
-  if (!sound || OptionsWindow) return 0;   // filter state still advances, so no thump on unmute
+  if (!sound || menuOpen()) return 0;   // filter state still advances, so no thump on unmute
   int32_t out = (y * APU_GAIN * (int32_t)volume) >> 8;
   if (out >  32767) out =  32767;
   if (out < -32768) out = -32768;

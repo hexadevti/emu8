@@ -153,6 +153,7 @@ void uiDirScanProgress(int count);    // draw a "Loading…" bar while a directo
 void videoSetup();
 void requestSplashOnNextBoot();       // arrange for the boot splash to show after the next reboot
 extern bool splashActive;             // true until the boot splash times out or is dismissed
+bool menuOpen();                      // settings window or system menu up: every audio path outputs silence
 void rebootToSdManager();            // video.cpp: restart into SD Manager mode (one boot)
 bool sdManagerBootRequested();        // this boot is the SD Manager one the splash asked for (consumes it)
 #if defined(BOARD_PICOCALC)

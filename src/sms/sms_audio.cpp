@@ -20,7 +20,7 @@ static void smsAudioTask(void *) {
   uint16_t out[128];
   size_t wrote;
   while (running) {
-    bool mute = (!sound) || OptionsWindow;
+    bool mute = (!sound) || menuOpen();
     for (int i = 0; i < 128; i++) out[i] = (uint16_t)(sms::psgGenSample((int)volume, mute) << 8);
 #if BOARD_AUDIO_DAC
     i2s_write(I2S_NUM_0, out, sizeof(out), &wrote, portMAX_DELAY);

@@ -18,7 +18,7 @@ static void zxAudioTask(void *) {
   int32_t dc = 0;                       // running mean of the level, 8.8 fixed point
   uint8_t last = 0;
   while (running) {
-    const bool mute = (!sound) || OptionsWindow;
+    const bool mute = (!sound) || menuOpen();
     for (int i = 0; i < 128; i++) {
       uint8_t s;
       if (zx::beeperPop(&s)) {

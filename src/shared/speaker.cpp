@@ -16,7 +16,7 @@ void speakerSetup() {
 void speakerToggle() {
   speaker_state = !speaker_state;
   // High half of the wave outputs `volume`; low half outputs 0. Muted -> always 0.
-  dac_output_voltage(DAC_CHANNEL_2, (sound && speaker_state) ? volume : 0);
+  dac_output_voltage(DAC_CHANNEL_2, (sound && speaker_state && !menuOpen()) ? volume : 0);
 }
 
 #else
@@ -198,7 +198,7 @@ static void IRAM_ATTR spkISR()
   // harmless polarity flip -- losing one edge makes a window that should average to silence read
   // full scale instead. The denser the toggling the worse it got, which is precisely what a noise
   // loop does and why speech survived it while noise did not.
-  int amp = sound ? ((int)volume << 4) : 0;            // volume 0..0xF0 -> 0..~3840 (kept low: a full
+  int amp = (sound && !menuOpen()) ? ((int)volume << 4) : 0;   // volume 0..0xF0 -> 0..~3840 (kept low: a full
                                                       // square is loud; the slider scales from here)
   int16_t s;
   if (currentPlatform == PLATFORM_PCXT) {

@@ -89,7 +89,7 @@ static int genSample() {
     }
   }
   int s = (mix - 15) * (int)volume / 255;      // center on 0, apply app master volume
-  if (!sound || OptionsWindow) s = 0;          // mute toggle / silence while the menu is open
+  if (!sound || menuOpen()) s = 0;          // mute toggle / silence while the menu is open
   int dac = 128 + s * 4;
   if (dac < 0)   dac = 0;
   if (dac > 255) dac = 255;

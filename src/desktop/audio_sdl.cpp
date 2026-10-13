@@ -119,7 +119,7 @@ static void speakerCallback(void * /*ud*/, Uint8 *stream, int len) {
 
   bool pcxt = (currentPlatform == PLATFORM_PCXT);
   for (int k = 0; k < frames; k++) {
-    int amp = sound ? ((int)volume << 4) : 0;           // volume 0..0xF0 -> 0..~3840
+    int amp = (sound && !menuOpen()) ? ((int)volume << 4) : 0;   // volume 0..0xF0 -> 0..~3840
     int16_t s;
     if (pcxt) {
       int f = g_pcSpkFreq;
