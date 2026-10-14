@@ -27,7 +27,7 @@
         "--verbose",
         "--build-property",
         "compiler.optimization_flags=-O2",
-        "${workspaceFolder}"
+        "${workspaceFolder}/emu8"
       ],
       "group": {
         "kind": "build",
@@ -51,7 +51,7 @@
         "--fqbn",
         "esp32:esp32:esp32:PSRAM=disabled,PartitionScheme=huge_app,CPUFreq=240,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=921600,LoopCore=1,EventsCore=1,DebugLevel=none",
         "--verbose",
-        "${workspaceFolder}"
+        "${workspaceFolder}/emu8"
       ],
       "dependsOn": "Arduino: Build",
       "dependsOrder": "sequence",
@@ -76,7 +76,7 @@
         "compiler.optimization_flags=-O2",
         "--build-property",
         "compiler.cpp.extra_flags=-DBOARD_JC4827W543",
-        "${workspaceFolder}"
+        "${workspaceFolder}/emu8"
       ],
       "group": "build",
       "problemMatcher": ["$gcc"],
@@ -97,7 +97,7 @@
         "--fqbn",
         "esp32:esp32:esp32s3:PSRAM=opi,PartitionScheme=huge_app,CPUFreq=240,FlashMode=qio,FlashSize=4M,UploadSpeed=921600,USBMode=default,CDCOnBoot=default,DebugLevel=none",
         "--verbose",
-        "${workspaceFolder}"
+        "${workspaceFolder}/emu8"
       ],
       "dependsOn": "Arduino: Build (JC4827W543)",
       "dependsOrder": "sequence",
@@ -133,7 +133,7 @@
         "compiler.optimization_flags=-O2",
         "--build-property",
         "compiler.cpp.extra_flags=-DBOARD_JC1060P470",
-        "${workspaceFolder}"
+        "${workspaceFolder}/emu8"
       ],
       "options": {
         "env": {
@@ -156,7 +156,7 @@
         "--fqbn",
         "esp32:esp32:esp32p4:PSRAM=enabled,FlashSize=16M,PartitionScheme=huge_app,DebugLevel=none",
         "--verbose",
-        "${workspaceFolder}"
+        "${workspaceFolder}/emu8"
       ],
       "options": {
         "env": {
@@ -202,14 +202,14 @@
         "rp2040:rp2040:rpipico2:arch=arm,os=freertos,freq=200,flash=4194304_65536,usbstack=picosdk,opt=Optimize2,exceptions=Enabled",
         "--verbose",
         "--build-property",
-        "compiler.cpp.extra_flags=-DBOARD_PICOCALC -I${workspaceFolder}/src/picocalc/pico_shim",
+        "compiler.cpp.extra_flags=-DBOARD_PICOCALC -I${workspaceFolder}/emu8/src/picocalc/pico_shim",
         "--build-property",
-        "compiler.c.extra_flags=-DBOARD_PICOCALC -I${workspaceFolder}/src/picocalc/pico_shim",
+        "compiler.c.extra_flags=-DBOARD_PICOCALC -I${workspaceFolder}/emu8/src/picocalc/pico_shim",
         "--build-path",
         "${workspaceFolder}/.picocalc-rp2350-build",
         "--output-dir",
         "${workspaceFolder}/build-picocalc",
-        "${workspaceFolder}"
+        "${workspaceFolder}/emu8"
       ],
       "group": "build",
       "problemMatcher": ["$gcc"],
@@ -228,7 +228,7 @@
         "--verbose",
         "--input-dir",
         "${workspaceFolder}/build-picocalc",
-        "${workspaceFolder}"
+        "${workspaceFolder}/emu8"
       ],
       "dependsOn": "Arduino: Build (PicoCalc)",
       "dependsOrder": "sequence",
@@ -274,14 +274,14 @@
         "rp2040:rp2040:rpipico:os=freertos,freq=250,flash=2097152_65536,usbstack=picosdk,opt=Optimize2,exceptions=Enabled",
         "--verbose",
         "--build-property",
-        "compiler.cpp.extra_flags=-DBOARD_PICOCALC -I${workspaceFolder}/src/picocalc/pico_shim",
+        "compiler.cpp.extra_flags=-DBOARD_PICOCALC -I${workspaceFolder}/emu8/src/picocalc/pico_shim",
         "--build-property",
-        "compiler.c.extra_flags=-DBOARD_PICOCALC -I${workspaceFolder}/src/picocalc/pico_shim",
+        "compiler.c.extra_flags=-DBOARD_PICOCALC -I${workspaceFolder}/emu8/src/picocalc/pico_shim",
         "--build-path",
         "${workspaceFolder}/.picocalc-rp2040-build",
         "--output-dir",
         "${workspaceFolder}/build-picocalc-rp2040",
-        "${workspaceFolder}"
+        "${workspaceFolder}/emu8"
       ],
       "group": "build",
       "problemMatcher": ["$gcc"],
