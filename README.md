@@ -566,11 +566,11 @@ emulated system. The top-level sketch wires them together:
 | Path | Purpose |
 | --- | --- |
 | [`emu8.ino`](emu8/emu8.ino) | `setup()` / `loop()` — per-platform init and the main dispatch |
-| [`board.h`](emu8/board.h) | Board selection (CYD vs JC4827W543), capability macros, pin map |
+| [`board.h`](emu8/board.h) | Board selection (CYD, JC4827W543, PicoCalc), capability macros, pin map |
 | [`emu.h`](emu8/emu.h) · [`proto.h`](emu8/proto.h) · [`globals.cpp`](emu8/globals.cpp) | Shared state (`extern`), prototypes, definitions |
 | [`rom.h`](emu8/rom.h) | Embedded Apple II/IIe ROMs |
 | [`User_Setup.h`](emu8/User_Setup.h) | TFT_eSPI configuration (CYD) |
-| [`src/shared/`](emu8/src/shared/) | Display (TFT_eSPI + Arduino_GFX backends), video/splash, SD, EEPROM, options UI, touch keyboard, USB gamepad + USB keyboard, joystick, audio, logging |
+| [`src/shared/`](emu8/src/shared/) | Display (TFT_eSPI + Arduino_GFX backends), video/splash, SD, SD-over-serial, EEPROM, options UI, file browser, touch keyboard, USB gamepad + USB keyboard, joystick, audio, logging, fonts |
 | [`src/apple2/`](emu8/src/apple2/) | 6502 CPU, memory, language card, soft switches, Disk II, ProDOS HD, mouse |
 | [`src/c64/`](emu8/src/c64/) | 6510, VIC-II, SID, CIA, keyboard, disk, `.crt` loader, ROMs |
 | [`src/nes/`](emu8/src/nes/) | 2A03 CPU, PPU, APU, iNES loader, mappers 0–4 |
@@ -579,11 +579,17 @@ emulated system. The top-level sketch wires them together:
 | [`src/msx/`](emu8/src/msx/) | MSX1 — TMS9918 VDP, AY-3-8910 PSG, 8255 PPI, slot/BIOS, disk |
 | [`src/zx/`](emu8/src/zx/) | ZX Spectrum 48K — ULA screen/border, keyboard, beeper, Kempston, SNA/Z80 loaders, TAP/TZX tape trap |
 | [`src/sms/`](emu8/src/sms/) | Sega Master System — 315-5124 VDP (Mode 4), SN76489 PSG, Sega mapper, cart loader |
+| [`src/coleco/`](emu8/src/coleco/) | ColecoVision — machine, audio |
 | [`src/pcxt/`](emu8/src/pcxt/) | PC-XT — fabgl i8086 machine, CGA, PC speaker, disk mount (in development) |
+| [`src/picocalc/`](emu8/src/picocalc/) | ClockworkPi PicoCalc (RP2040) port — display, keyboard input, audio, UF2 loader, ROM-in-flash, Pico SDK shims |
 | [`src/desktop/`](emu8/src/desktop/) | SDL2 desktop debug build — Arduino/FreeRTOS shims, SDL display/audio/input backends (see its [README](emu8/src/desktop/README.md)) |
+| [`CMakeLists.txt`](CMakeLists.txt) | CMake build for the SDL2 desktop debug build |
+| [`third_party/imgui/`](third_party/imgui/) | Dear ImGui (desktop debug UI) |
 | [`host/`](host/) | Off-device debug harnesses (MSX / SMS cores on a PC, SD serial server) |
+| [`tools/`](tools/) | Release packaging, desktop runner, PicoCalc deploy/flash scripts, ROM extraction |
 | [`tools/sdmanager/`](tools/sdmanager/) | SD card manager over USB serial: web app, Windows app (Electron), Python CLI, protocol spec + tests |
-| [`data/`](data/) · [`resources/`](resources/) | Sample disk images / test files |
+| [`docs/screenshots/`](docs/screenshots/) | README screenshots |
+| `sdcard/` · `software/` *(git-ignored)* | Local SD card image for the desktop build (`sdcard/roms/` for system ROMs) and a scratch folder of disk/cart images for testing |
 
 ---
 
