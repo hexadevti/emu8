@@ -9,8 +9,8 @@
 // every ~40 writes, so the client's resync/retry path gets exercised.
 //
 // Build:
-//   g++ -O2 -std=c++17 -DSDSERIAL_HOST -Isrc/desktop/arduino_shim -o sdserial_host
-//       host/sdserial_host.cpp src/shared/sdserial.cpp
+//   g++ -O2 -std=c++17 -DSDSERIAL_HOST -Iemu8/src/desktop/arduino_shim -o sdserial_host
+//       host/sdserial_host.cpp emu8/src/shared/sdserial.cpp
 
 #include <Arduino.h>
 #include "FS.h"

@@ -16,6 +16,7 @@ endif()
 set(CMAKE_CXX_FLAGS_DEBUG "-Og -g3 -fno-omit-frame-pointer")
 
 set(REPO ${CMAKE_CURRENT_SOURCE_DIR})
+set(SKETCH ${REPO}/emu8)   # the Arduino sketch folder: emu8.ino, board.h/emu.h/..., src/
 
 # Match the ESP32: `char` is effectively unsigned there, and the cores read memory bytes into `char`
 # and do arithmetic on them (e.g. Apple II text glyph index `chr*7*8` for codes >= 0x80). x86/MinGW
@@ -40,28 +41,28 @@ endif()
 # --- Sources: the SAME core/shared code the device compiles, minus the hardware-only leaves
 #     (replaced by src/desktop/*), minus PC-XT/fabgl (Phase 3). ---
 file(GLOB_RECURSE CORE_SRC CONFIGURE_DEPENDS
-  ${REPO}/src/apple2/*.cpp ${REPO}/src/c64/*.cpp  ${REPO}/src/nes/*.cpp
-  ${REPO}/src/atari/*.cpp  ${REPO}/src/msx/*.cpp
-  ${REPO}/src/sms/*.cpp    ${REPO}/src/z80/*.cpp  ${REPO}/src/coleco/*.cpp
-  ${REPO}/src/zx/*.cpp
-  ${REPO}/src/shared/*.cpp)
+  ${SKETCH}/src/apple2/*.cpp ${SKETCH}/src/c64/*.cpp  ${SKETCH}/src/nes/*.cpp
+  ${SKETCH}/src/atari/*.cpp  ${SKETCH}/src/msx/*.cpp
+  ${SKETCH}/src/sms/*.cpp    ${SKETCH}/src/z80/*.cpp  ${SKETCH}/src/coleco/*.cpp
+  ${SKETCH}/src/zx/*.cpp
+  ${SKETCH}/src/shared/*.cpp)
 list(REMOVE_ITEM CORE_SRC
-  ${REPO}/src/shared/audio_amp.cpp      # -> src/desktop/audio_sdl.cpp
-  ${REPO}/src/shared/speaker.cpp        # -> src/desktop/audio_sdl.cpp
-  ${REPO}/src/shared/display_gfx.cpp    # -> src/desktop/display_sdl.cpp
-  ${REPO}/src/shared/sd.cpp             # -> src/desktop/sd_host.cpp
-  ${REPO}/src/shared/usbgamepad.cpp     # ESP32-S3 USB host driver (input via SDL instead)
-  ${REPO}/src/shared/keyboardPs2.cpp)   # CYD PS/2 path (input via SDL instead)
+  ${SKETCH}/src/shared/audio_amp.cpp      # -> src/desktop/audio_sdl.cpp
+  ${SKETCH}/src/shared/speaker.cpp        # -> src/desktop/audio_sdl.cpp
+  ${SKETCH}/src/shared/display_gfx.cpp    # -> src/desktop/display_sdl.cpp
+  ${SKETCH}/src/shared/sd.cpp             # -> src/desktop/sd_host.cpp
+  ${SKETCH}/src/shared/usbgamepad.cpp     # ESP32-S3 USB host driver (input via SDL instead)
+  ${SKETCH}/src/shared/keyboardPs2.cpp)   # CYD PS/2 path (input via SDL instead)
 
-file(GLOB DESKTOP_SRC CONFIGURE_DEPENDS ${REPO}/src/desktop/*.cpp)
+file(GLOB DESKTOP_SRC CONFIGURE_DEPENDS ${SKETCH}/src/desktop/*.cpp)
 # PC-XT is now built for real on desktop (see PCXT_SRC below), so drop the empty stub that used to
 # satisfy the linker. pcxt_stub.cpp defines pcxtSetup()/pcxtLoop()/... — keeping it would clash.
-list(REMOVE_ITEM DESKTOP_SRC ${REPO}/src/desktop/pcxt_stub.cpp)
+list(REMOVE_ITEM DESKTOP_SRC ${SKETCH}/src/desktop/pcxt_stub.cpp)
 
 # PC-XT (Intel 8086): the machine core in src/pcxt/fabgl/ is a host-portable vendored fabgl subset
 # (i8086 + PIC/PIT/i8042/RTC/BIOS + a state-only GraphicsAdapter); src/pcxt/*.cpp is the emu8 glue
 # (allocation, run loop, CGA render push, disk mount). All ESP-isms resolve through the arduino_shim.
-file(GLOB PCXT_SRC CONFIGURE_DEPENDS ${REPO}/src/pcxt/*.cpp ${REPO}/src/pcxt/fabgl/*.cpp)
+file(GLOB PCXT_SRC CONFIGURE_DEPENDS ${SKETCH}/src/pcxt/*.cpp ${SKETCH}/src/pcxt/fabgl/*.cpp)
 
 # --- Dear ImGui (docking branch) — the desktop-only native UI shell (resizable window, menu bar,
 #     settings dialog, debug panels). Vendored in third_party/imgui, DELIBERATELY OUTSIDE src/ so the
@@ -78,7 +79,7 @@ set(IMGUI_SRC
   ${IMGUI_DIR}/backends/imgui_impl_sdlrenderer2.cpp)
 
 # Compile the Arduino sketch as a C++ translation unit (copied so the compiler accepts the name).
-configure_file(${REPO}/emu8.ino ${CMAKE_BINARY_DIR}/emu8_ino.cpp COPYONLY)
+configure_file(${SKETCH}/emu8.ino ${CMAKE_BINARY_DIR}/emu8_ino.cpp COPYONLY)
 
 # Dear ImGui doesn't depend on the board defines: build it once and share it between both executables.
 add_library(emu8_imgui OBJECT ${IMGUI_SRC})
@@ -107,7 +108,7 @@ option(EMU_PORTABLE "Use sdcard/ next to the executable instead of the repo's sd
 function(emu8_add_desktop_target name sim)
   add_executable(${name}
     ${CMAKE_BINARY_DIR}/emu8_ino.cpp
-    ${REPO}/globals.cpp
+    ${SKETCH}/globals.cpp
     ${CORE_SRC}
     ${DESKTOP_SRC}
     ${PCXT_SRC}
@@ -119,15 +120,15 @@ function(emu8_add_desktop_target name sim)
   # arduino_shim MUST come first so #include <Arduino.h>/SD.h/EEPROM.h/SPI.h/FS.h/BLEDevice.h and
   # "driver/i2s.h" etc. resolve to the shim instead of the real (absent) libraries.
   target_include_directories(${name} BEFORE PRIVATE
-    ${REPO}/src/desktop/arduino_shim
-    ${REPO})
+    ${SKETCH}/src/desktop/arduino_shim
+    ${SKETCH})
 
   target_compile_definitions(${name} PRIVATE BOARD_DESKTOP)
   if(sim)
     target_compile_definitions(${name} PRIVATE EMU_SIM_PICOCALC EMU_SKIN_PNG="${REPO}/docs/picocalc.png")
     # the device picture, .incbin'd (rebuilt when the PNG changes)
-    target_sources(${name} PRIVATE ${REPO}/src/desktop/picocalc_skin_png.S)
-    set_property(SOURCE ${REPO}/src/desktop/picocalc_skin_png.S APPEND PROPERTY OBJECT_DEPENDS ${REPO}/docs/picocalc.png)
+    target_sources(${name} PRIVATE ${SKETCH}/src/desktop/picocalc_skin_png.S)
+    set_property(SOURCE ${SKETCH}/src/desktop/picocalc_skin_png.S APPEND PROPERTY OBJECT_DEPENDS ${REPO}/docs/picocalc.png)
   endif()
 
   # --- Emulated SD card location. Dev builds point at the repo's sdcard/ (absolute, so it is found

@@ -32,6 +32,7 @@ $ALL = 'cyd','jc4827w543','jc1060p470','picocalc','desktop','sdmanager'
 $Targets = @($Targets | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })   # -File passes "a,b" as one string
 foreach ($t in $Targets) { if ($ALL -notcontains $t) { throw "unknown target '$t' (valid: $($ALL -join ', '))" } }
 $repo    = (Resolve-Path "$PSScriptRoot\..").Path
+$sketch  = Join-Path $repo 'emu8'                         # the Arduino sketch folder (emu8.ino + src/)
 $out     = Join-Path $repo "dist\v$Version"
 $work    = Join-Path $env:LOCALAPPDATA 'emu8-release'     # build trees, outside the sketch folder
 New-Item -ItemType Directory -Force $out, $work | Out-Null
@@ -73,7 +74,7 @@ function Invoke-Arduino([string]$Fqbn, [string]$Flags, [string]$BuildDir, [strin
     # Compiler warnings go to stderr, which Windows PowerShell 5.1 turns into terminating errors under
     # 'Stop' whenever the output is redirected; the exit code is what says whether it failed.
     $ErrorActionPreference = 'Continue'
-    & arduino-cli @cmd $repo 2>&1 | ForEach-Object { "$_" }
+    & arduino-cli @cmd $sketch 2>&1 | ForEach-Object { "$_" }
     $ErrorActionPreference = 'Stop'
     if ($LASTEXITCODE) { throw "arduino-cli compile failed for $Fqbn" }
   } finally {
@@ -148,7 +149,7 @@ function Build-PicoCalc {
   $assets = @()
   foreach ($p in $PICO_BOARDS) {
     $bin = Join-Path $work "picocalc-$($p.Tag)-out"
-    $flags = "-DBOARD_PICOCALC -I$repo/src/picocalc/pico_shim"
+    $flags = "-DBOARD_PICOCALC -I$sketch/src/picocalc/pico_shim"
     Invoke-Arduino $p.Fqbn $flags (Join-Path $work "picocalc-$($p.Tag)-build") $bin
     $uf2 = Join-Path $out "emu8-picocalc-$($p.Tag)-v$Version.uf2"
     Copy-Item (Join-Path $bin 'emu8.ino.uf2') $uf2 -Force

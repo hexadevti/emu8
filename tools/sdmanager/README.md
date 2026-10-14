@@ -2,7 +2,7 @@
 
 Browse, upload, download, rename and delete files on an emu8 board's internal microSD card over USB, without taking the card out. Use it for ROMs, BIOS files and disk images.
 
-There are three clients. All use the same [protocol](PROTOCOL.md) and talk to the server built into the firmware ([src/shared/sdserial.cpp](../../src/shared/sdserial.cpp)):
+There are three clients. All use the same [protocol](PROTOCOL.md) and talk to the server built into the firmware ([src/shared/sdserial.cpp](../../emu8/src/shared/sdserial.cpp)):
 
 | | Where it runs | Needs |
 |---|---|---|
@@ -96,8 +96,8 @@ python tools/sdmanager/emu8sd.py --port COM5 reboot
 The firmware server also builds as a PC program that uses a folder as its "SD card" and stdin/stdout as its "serial port" ([host/sdserial_host.cpp](../../host/sdserial_host.cpp)). The protocol tests drive it on a clean line and on a noisy one, with log lines mixed in and corrupted replies:
 
 ```sh
-g++ -O2 -std=c++17 -Wall -DSDSERIAL_HOST -Isrc/desktop/arduino_shim \
-    -o sdserial_host host/sdserial_host.cpp src/shared/sdserial.cpp
+g++ -O2 -std=c++17 -Wall -DSDSERIAL_HOST -Iemu8/src/desktop/arduino_shim \
+    -o sdserial_host host/sdserial_host.cpp emu8/src/shared/sdserial.cpp
 node tools/sdmanager/test/protocol.test.mjs ./sdserial_host
 ```
 

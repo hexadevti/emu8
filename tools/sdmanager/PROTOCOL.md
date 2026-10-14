@@ -1,6 +1,6 @@
 # emu8 SD manager: serial protocol (version 1)
 
-The firmware side is [src/shared/sdserial.cpp](../../src/shared/sdserial.cpp). The clients are [web/protocol.js](web/protocol.js) and [emu8sd.py](emu8sd.py).
+The firmware side is [src/shared/sdserial.cpp](../../emu8/src/shared/sdserial.cpp). The clients are [web/protocol.js](web/protocol.js) and [emu8sd.py](emu8sd.py).
 
 The server runs as a low-priority FreeRTOS task on the board's normal serial port, next to whichever emulator is active. Until a host sends a valid frame, the port behaves as before: the boot log is printed and nothing else changes.
 
