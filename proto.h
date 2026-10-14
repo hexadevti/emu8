@@ -8,8 +8,8 @@ void logSetup();
 void printLog(String txt);
 void printLog(const char *txt);   // no heap copy: a running C64 has little to spare
 // Boot progress screen: the panel comes up before the emulator does and names the step the
-// firmware is on, so the seconds spent waiting for the mainboard rail, waiting for a USB
-// terminal, reading ROMs and scanning the card are not a black screen. No-ops off the PicoCalc.
+// firmware is on, so the seconds spent waiting for the mainboard rail, reading ROMs and
+// scanning the card are not a black screen. No-ops off the PicoCalc.
 void bootProgressBegin();               // panel up + logo + the first step
 void bootProgressStep(const char *what);// replace the status line ("Loading iie.bin", ...)
 void bootProgressEnd();                 // hand the panel to the render loop

@@ -1,5 +1,13 @@
 #include "../../emu.h"
 
+#if defined(BOARD_PICOCALC)
+// Set just before the new-device reboot and cleared by every boot that gets past it. Not zeroed by
+// a software reset (garbage at power-on), so a second new-device boot right after that reboot knows
+// the defaults did not stick and must not reboot again (epromSetup).
+RTC_NOINIT_ATTR static uint32_t firstBootRebootMagic;
+#define FIRST_BOOT_REBOOT_MAGIC 0xF1B0A55Au
+#endif
+
 // Apple II+ and Apple IIe are two systems on the splash, and each keeps its own DEVICE (disk/HD),
 // SPEED and last disk / HD image: a IIe-only ProDOS disk left mounted must not come up in the II+.
 // The global settings (sound, volume, video, joystick) stay shared. The II+ uses the original
@@ -86,26 +94,39 @@ void epromSetup() {
   EEPROM.begin(EEPROM_SIZE);
   //delay(3000);
   readStringFromEEPROM(NewDeviceConfigEEPROMaddress, &NewDeviceConfig);
-  sprintf(buf, "EEPROM NewDeviceConfig value: %s", NewDeviceConfig.c_str());
+  snprintf(buf, sizeof(buf), "EEPROM NewDeviceConfig value: %s", NewDeviceConfig.c_str());
   printLog(buf);
 
-  
+
   if (NewDeviceConfig != "ok")
   {
-    
+
     Serial.println("New Device");
     eepromWriteDefaults();
-    EEPROM.commit();
+    const bool saved = EEPROM.commit();
 #if defined(BOARD_PICOCALC)
     // The PicoCalc's first boot after the settings flash is written hangs on the disk scan, while
     // the next one comes up fine: reboot once now, with the defaults saved, into the system menu.
+    // Only ONCE: if the defaults did not reach flash, the next boot lands here again, and
+    // rebooting every time would leave the device stuck on "Reading settings" forever. Then it
+    // just carries on with the defaults it has in RAM.
     a2SeedIIeConfig();
-    printLog("EEPROM: defaults written, rebooting once");
-    requestSplashOnNextBoot();
-    delay(100);
-    ESP.restart();
+    if (saved && firstBootRebootMagic != FIRST_BOOT_REBOOT_MAGIC) {
+      firstBootRebootMagic = FIRST_BOOT_REBOOT_MAGIC;
+      printLog("EEPROM: defaults written, rebooting once");
+      requestSplashOnNextBoot();
+      delay(100);
+      ESP.restart();
+    }
+    printLog(saved ? "EEPROM: defaults written, continuing without the first-boot reboot"
+                   : "EEPROM: could not save the defaults, running with them anyway");
+#else
+    (void)saved;
 #endif
   }
+#if defined(BOARD_PICOCALC)
+  firstBootRebootMagic = 0;
+#endif
   
   a2SeedIIeConfig();
   AppleIIe = EEPROM.readBool(IIpIIeEEPROMaddress);
@@ -210,7 +231,7 @@ void epromSetup() {
   sprintf(buf, "EEPROM: Apple II settings are the %s's", a2CfgIsIIe ? "IIe" : "II+");
   printLog(buf);
   
-  sprintf(buf, "EEPROM values\nHdDisk=%d,AppleIIe=%d,Fast1MhzSpeed=%d,joystick=%d,videoColor=%d,sound=%d,\nvolume=%d,dacSound=%d,\nselectedHdFileName=%s,selectedDiskFileName=%s,NewDeviceConfig=%s", HdDisk,AppleIIe,Fast1MhzSpeed,joystick,videoColor,sound,volume,dacSound,selectedHdFileName.c_str(),selectedDiskFileName.c_str(),NewDeviceConfig.c_str());
+  snprintf(buf, sizeof(buf), "EEPROM values\nHdDisk=%d,AppleIIe=%d,Fast1MhzSpeed=%d,joystick=%d,videoColor=%d,sound=%d,\nvolume=%d,dacSound=%d,\nselectedHdFileName=%s,selectedDiskFileName=%s,NewDeviceConfig=%s", HdDisk,AppleIIe,Fast1MhzSpeed,joystick,videoColor,sound,volume,dacSound,selectedHdFileName.c_str(),selectedDiskFileName.c_str(),NewDeviceConfig.c_str());
   printLog(buf);
   
 #if defined(BOARD_DESKTOP)
@@ -249,15 +270,26 @@ int writeStringToEEPROM(int addrOffset, const String &strToWrite)
   return addrOffset + 1 + len;
 }
 
+// Every string slot is 128 bytes (length byte + up to 127 chars). A blank or never-written slot
+// reads 0xFF: as a length that is a 255-char string of 0xFF bytes, which on a brand-new device
+// used to reach sprintf(buf, ...) and overrun the 255-byte log buffer during "Reading settings".
+// Anything that is not a plausible stored string comes back empty instead.
+#define EEPROM_STR_MAX 127
 int readStringFromEEPROM(int addrOffset, String *strToRead)
 {
   int newStrLen = EEPROM.read(addrOffset);
-  char data[newStrLen + 1];
+  if (newStrLen > EEPROM_STR_MAX || addrOffset + 1 + newStrLen > EEPROM_SIZE) {
+    *strToRead = "";
+    return addrOffset + 1;
+  }
+  char data[EEPROM_STR_MAX + 1];
   for (int i = 0; i < newStrLen; i++)
   {
-    data[i] = EEPROM.read(addrOffset + 1 + i);
+    uint8_t c = EEPROM.read(addrOffset + 1 + i);
+    if (c < 0x20 || c == 0xFF) { *strToRead = ""; return addrOffset + 1; }   // erased / garbage
+    data[i] = (char)c;
   }
-  data[newStrLen] = '\0'; 
+  data[newStrLen] = '\0';
   *strToRead = String(data);
   return addrOffset + 1 + newStrLen;
 }

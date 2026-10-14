@@ -8,14 +8,11 @@ void setup() {
 #if defined(BOARD_PICOCALC)
   // Order matters twice over. The panel, the SD slot and the keyboard are all on the PicoCalc
   // mainboard, which the Pico's own USB does NOT power, so nothing may be initialised until the
-  // unit is switched on. And the loading screen goes up BEFORE logSetup(), because that waits up
-  // to five seconds for a USB terminal to attach -- five seconds that used to be a black screen
-  // with no way to tell a slow boot from a dead one. Serial.begin() comes first so the waits can
-  // still log; logSetup() calls it again, which is harmless.
+  // unit is switched on. Serial.begin() comes first so the mainboard wait can still log;
+  // logSetup() calls it again, which is harmless. Boot never waits for a USB terminal.
   Serial.begin(115200);
   picocalcWaitForMainboard();
   bootProgressBegin();
-  bootProgressStep("Waiting for USB serial");
 #endif
   logSetup();
   printLog("emu8 build " __DATE__ " " __TIME__);   // which firmware is running (touch emu8.ino to refresh)
