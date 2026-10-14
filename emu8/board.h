@@ -362,8 +362,8 @@
 // Fill-screen video toggle (SCREEN: FILL / ORIG) in Settings. The S3 panel (480x272), the P4 DSI
 // panel (1024x600) and the desktop window can scale the 320x240 video to fill (on the big P4 panel
 // fill is effectively mandatory — centered 320x240 would be tiny); the CYD is already 320x240.
-// The PicoCalc (320x320) uses it for MSX/SMS only: FILL scales their 256x192 to 320x240 (4:3),
-// which costs ~57% more SPI time per frame (~40fps shown instead of ~60; emulation speed unchanged).
+// On the PicoCalc (320x320) the toggle reads SCREEN: SMOOTH / ORIG: every core scales up to fill the
+// screen with bilinear blending (dband::smooth5 and friends), at the cost of more SPI time per frame.
 #if defined(BOARD_DESKTOP) || defined(BOARD_PICOCALC)
   #define BOARD_HAS_SCREENFILL 1
 #else

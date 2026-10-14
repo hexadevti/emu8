@@ -3,6 +3,15 @@
 #include "bootlogo.h"
 #if UI_PICOCALC
 #include "dirty_bands.h"
+// Apple II SCREEN: SMOOTH: the 8:7 line repeat sends some source lines twice; one copy is blended
+// with the neighbouring line (tft.setRowBlend: 1 = with the row above, 2 = with the row below). The
+// neighbour is always in the same 8-line band, so a band redraws the same no matter which bands
+// around it are skipped as unchanged: line 0 of a band blends its second copy with line 1, any
+// other line its first copy with the line before.
+#define APPLE_ROW_BLEND(line, rep, times) \
+  tft.setRowBlend((times) < 2 ? 0 : (line) == 0 ? ((rep) == 1 ? 2 : 0) : ((rep) == 0 ? 1 : 0))
+#else
+#define APPLE_ROW_BLEND(line, rep, times)
 #endif   // embedded boot-splash logo (RGB565)
 #include <esp_system.h>          // esp_reset_reason()
 #include <esp_attr.h>            // RTC_NOINIT_ATTR
@@ -423,6 +432,9 @@ static void splashDrawBtn(int i, bool enabled)
 
 static bool splashDrawn = false;     // splashService() paints the whole menu once per showing
 static bool splashResumeCpu = false; // opened over a running core (splashOpen), which it paused
+#if UI_PICOCALC
+static uint32_t splashBatSig = ~0u;  // battery gauge as last drawn on the menu
+#endif
 
 static void splashFinish()           // boot the current platform
 {
@@ -512,7 +524,16 @@ static void splashService()
 #endif
     for (int i = 0; i < SPLASH_N; i++) splashDrawBtn(i, splashEnabled(i));
     splashDrawn = true;
+#if UI_PICOCALC
+    splashBatSig = ~0u;
+#endif
   }
+#if UI_PICOCALC
+  if (splashBatSig != uiBatterySig()) {               // top-right corner, above the logo
+    splashBatSig = uiBatterySig();
+    uiDrawBattery(314, SPLASH_LOGO_Y / 2, TFT_BLACK);
+  }
+#endif
 
   int16_t tx, ty;
   if (touchRead(&tx, &ty)) {
@@ -1036,9 +1057,9 @@ void renderLoop(void *pvParameters)
     screen_width = 280;
     screen_height = oskRasterHeight();
 #if UI_PICOCALC
-    // SCREEN: FILL (Settings): 280x192 scaled ~8:7 on both axes to 320x220 (rows 10..229) of the 320x240
+    // SCREEN: SMOOTH (Settings): 280x192 scaled ~8:7 on both axes to 320x220 (rows 10..229) of the 320x240
     // logical screen. Vertically that is the existing coef192 line repeat; horizontally the display
-    // doubles every 7th pixel (setHScale78 below). A mode change wipes the screen once, so the
+    // doubles every 7th pixel (setHScale78 below); setSmooth blends both repeats. A mode change wipes the screen once, so the
     // bigger picture's edges do not linger around the smaller one.
     extern bool screenFill;
     static bool appleLastFill = false;
@@ -1101,9 +1122,12 @@ void renderLoop(void *pvParameters)
 #if UI_PICOCALC
     // FILL: every 280-wide branch widens 7:8 to the full 320. (The 80-col text branch above is
     // already 320 wide; the clear and the menu keep their unscaled 320x240 window.)
-    if (appleFill && !OptionsWindow && !DebugWindow && !clearScr && !wide80) {
-      tft.setAddrWindow(0, margin_y, 320, rasterH);
-      tft.setHScale78(true);
+    if (appleFill && !OptionsWindow && !DebugWindow && !clearScr) {
+      if (!wide80) {
+        tft.setAddrWindow(0, margin_y, 320, rasterH);
+        tft.setHScale78(true);
+      }
+      tft.setSmooth(true);         // SCREEN: SMOOTH -- see APPLE_ROW_BLEND
     }
 #endif
     tft.startWrite();
@@ -1256,6 +1280,7 @@ void renderLoop(void *pvParameters)
                 last_y = upscaleCoef_y;
                 while (repeat_y < repeatTimes_y)
                 {
+                  APPLE_ROW_BLEND(j, repeat_y, repeatTimes_y);
                   x_upscaled = margin_x;
                   x = margin_x;
                   last_x = margin_x;
@@ -1306,6 +1331,7 @@ void renderLoop(void *pvParameters)
                 const unsigned char *mn  = ram + rowAddr;
                 while (repeat_y < repeatTimes_y)
                 {
+                  APPLE_ROW_BLEND(block, repeat_y, repeatTimes_y);
                   // End Upscale
                   if (gfxPad) tft.writeColor(TFT_BLACK, gfxPad);   // mixed-mode 80-col frame: center in 320
                   for (int c = 0; c < 0x28; c += 2)
@@ -1347,6 +1373,7 @@ void renderLoop(void *pvParameters)
                 last_y = upscaleCoef_y;
                 while (repeat_y < repeatTimes_y)
                 {
+                  APPLE_ROW_BLEND(block, repeat_y, repeatTimes_y);
                   x_upscaled = margin_x;
                   x = margin_x;
                   last_x = margin_x;
@@ -1475,6 +1502,7 @@ void renderLoop(void *pvParameters)
               last_y = upscaleCoef_y;
               while (repeat_y < repeatTimes_y)
               {
+                APPLE_ROW_BLEND(i, repeat_y, repeatTimes_y);
                 x_upscaled = margin_x;
                 x = margin_x;
                 last_x = margin_x;
@@ -1535,6 +1563,7 @@ void renderLoop(void *pvParameters)
               last_y = upscaleCoef_y;
               while (repeat_y < repeatTimes_y)
               {
+                APPLE_ROW_BLEND(i, repeat_y, repeatTimes_y);
                 x_upscaled = margin_x;
                 x = margin_x;
                 last_x = margin_x;

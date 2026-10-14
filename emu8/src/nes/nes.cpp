@@ -1,5 +1,6 @@
 #include "../../emu.h"
 #include "nes.h"
+#include "../shared/dirty_bands.h"     // PicoCalc SCREEN: SMOOTH (dband::writeSmoothBand256)
 
 // NES core C-linkage glue, called by the platform dispatch:
 //   setup() -> nesSetup(),  loop() -> nesLoop(),  renderLoop() -> nesRenderFrame(),
@@ -111,7 +112,7 @@ static void nesPushFrame(const uint16_t *pal) {
   lastPal = pal; lastPushMs = nowMs;
 
 #if UI_PICOCALC
-  // SCREEN: FILL (Settings): 256x240 scaled 5:4 on both axes to 320x300 on the RAW 320x320 panel
+  // SCREEN: SMOOTH (Settings): 256x240 scaled 5:4 bilinear on both axes to 320x300 on the RAW 320x320 panel
   // (rows 10..309), so it reaches into the letterbox bars. Held off while the boot hint owns rows
   // 280..319. Each 8-line band becomes exactly 10 output rows, so the band digests carry over;
   // a mode change repaints everything, including the bars/borders the other mode left behind.
@@ -132,17 +133,7 @@ static void nesPushFrame(const uint16_t *pal) {
       bandDig[y >> 3] = dig;
       tft.setPanelAddrWindow(0, F_TOP + y * 5 / 4, 320, 10);
       tft.startWrite();
-      for (int oy = 0; oy < 10; oy++) {
-        const uint8_t *src = band + (oy * 4 / 5) * NES_W;          // rows 0,0,1,2,3,4,4,5,6,7
-        for (int x = 0; x < NES_W; x += 4) {
-          const uint16_t c0 = pal[src[x] & 0x3F];
-          tft.writeColor(c0, 1);
-          tft.writeColor(c0, 1);
-          tft.writeColor(pal[src[x + 1] & 0x3F], 1);
-          tft.writeColor(pal[src[x + 2] & 0x3F], 1);
-          tft.writeColor(pal[src[x + 3] & 0x3F], 1);
-        }
-      }
+      dband::writeSmoothBand256(band, pal, 0x3F, false);           // 8 lines -> 10 rows, bilinear
       nes::fbReadLine = y + 8;      // band fully read (only the SPI drain is left)
       tft.endWrite();
     }

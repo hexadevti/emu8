@@ -38,6 +38,49 @@ static bool fbLess(const std::string &a, const std::string &b)
 // ---------------------------------------------------------------------------
 // Scan
 // ---------------------------------------------------------------------------
+// Free heap the scan leaves alone. On the PicoCalc's RP2040 the C64 starts a scan with ~10KB free
+// and each listed entry costs ~40-60 bytes, so a folder of a few hundred files used to run the
+// heap dry, throw std::bad_alloc and lose the WHOLE list (an empty browser, or just ".."). Now the
+// scan stops short of this reserve and shows what it has -- the reserve is what the machine still
+// needs afterwards (the C64's per-entry problem codes, SD File objects to mount the pick, the UI).
+// ESP32 boards keep more: WiFi/BT and the USB host allocate at run time.
+#if defined(BOARD_PICOCALC)
+#define FB_HEAP_RESERVE 3072
+#else
+#define FB_HEAP_RESERVE 16384
+#endif
+
+// Free heap is a sum of holes on the RP2040 (rp2040.getFreeHeap()), not the largest block, so this
+// is a margin check, not a guarantee -- an add that still fails is caught in fbTryAdd().
+static bool fbHeapLow() { return ESP.getFreeHeap() < FB_HEAP_RESERVE; }
+
+// fbAdd() that reports running out of heap instead of throwing: false = stop the scan here.
+static bool fbTryAdd(FileBrowser &b, const std::string &prefix, const char *name, bool isDir)
+{
+  if (fbHeapLow()) return false;
+  try { fbAdd(b, prefix, name, isDir); }
+  catch (const std::bad_alloc &) { return false; }
+  return true;
+}
+
+// The browsers scanned so far, so fbListTruncated() can answer for a bare list.
+static FileBrowser *fbSeen[16];
+
+static void fbRemember(FileBrowser &b)
+{
+  for (FileBrowser *&p : fbSeen) {
+    if (p == &b) return;
+    if (!p) { p = &b; return; }
+  }
+}
+
+bool fbListTruncated(const std::vector<std::string> &list)
+{
+  for (FileBrowser *p : fbSeen)
+    if (p && p->out == &list) return p->truncated;
+  return false;
+}
+
 // True between taking gBusLock and giving it back. fbScan()'s catch needs it: a std::bad_alloc
 // thrown mid-enumeration would otherwise leave the SD bus locked for good.
 static bool fbHoldsBus = false;
@@ -51,12 +94,13 @@ static void fbScanBody(FileBrowser &b)
   // exhaust the heap"), and reserving it up front did the exact opposite: 250 std::strings is
   // ~8KB claimed in one contiguous block for a folder that usually holds a handful of images.
   // Let the vector grow; the cap is still enforced in the loop below.
+  // (The readdir path below sizes it exactly instead, once it has counted the folder.)
   out.reserve(32);
   if (b.dir != "/") out.push_back("..");                      // go-up entry
 
   std::string prefix = (b.dir == "/") ? std::string("/")
                                       : (std::string(b.dir.c_str()) + "/");
-  bool truncated = false;
+  bool truncated = false, heapLow = false;
   int scanned = 0;
   unsigned long t0 = millis();
 
@@ -97,8 +141,20 @@ static void fbScanBody(FileBrowser &b)
   DIR *dp = opendir(vfsPath.c_str());
   if (dp) {
     struct dirent *de;
+    // Count first (no allocation) and size the vector once. Growing it by doubling needs the old
+    // AND the new block live at the same moment -- ~9KB contiguous to pass 128 entries, which is
+    // more than the C64 on the RP2040 has in total. Not fatal if the exact size is refused: the
+    // vector then just grows as before, and fbTryAdd() stops it at the reserve.
+    int count = (int)out.size();
+    while ((de = readdir(dp)) != nullptr && count < b.maxEntries) count++;
+    closedir(dp);
+    try { out.reserve(count); } catch (const std::bad_alloc &) {}
+    dp = opendir(vfsPath.c_str());
+  }
+  if (dp) {
+    struct dirent *de;
     while ((de = readdir(dp)) != nullptr) {
-      fbAdd(b, prefix, de->d_name, de->d_type == DT_DIR);
+      if (!fbTryAdd(b, prefix, de->d_name, de->d_type == DT_DIR)) { truncated = heapLow = true; break; }
       if ((++scanned & 0x3f) == 0) uiDirScanProgress((int)out.size());   // progress bar + yield
       if ((int)out.size() >= b.maxEntries) { truncated = true; break; }
     }
@@ -120,7 +176,7 @@ static void fbScanBody(FileBrowser &b)
       const char *nmc = file.name();                          // a full path on some cores
       if (nmc && *nmc) {
         const char *base = strrchr(nmc, '/');
-        fbAdd(b, prefix, base ? base + 1 : nmc, file.isDirectory());
+        if (!fbTryAdd(b, prefix, base ? base + 1 : nmc, file.isDirectory())) { truncated = heapLow = true; break; }
       }
       file = dir.openNextFile();
       if ((++scanned & 0x0f) == 0) uiDirScanProgress((int)out.size());
@@ -142,11 +198,13 @@ static void fbScanBody(FileBrowser &b)
   }
 
   std::sort(out.begin(), out.end(), fbLess);
+  b.truncated = truncated;
 
   // %.80s: buf is 255 bytes shared globally and a nested path can be long.
   sprintf(buf, "%s: %.80s -> %d entr(ies) in %lums (scanned %d)%s free heap=%u", b.tag,
           b.dir.c_str(), (int)out.size(), millis() - t0, scanned,
-          truncated ? " (TRUNCATED)" : "", (unsigned)ESP.getFreeHeap());
+          !truncated ? "" : heapLow ? " (TRUNCATED: heap low)" : " (TRUNCATED)",
+          (unsigned)ESP.getFreeHeap());
   printLog(buf);
 
 #if defined(BOARD_PICOCALC)
@@ -177,6 +235,8 @@ static void fbScanBody(FileBrowser &b)
 void fbScan(FileBrowser &b)
 {
   if (b.dir.length() == 0) b.dir = appsBaseDir();   // first scan: the general settings' apps folder
+  fbRemember(b);
+  b.truncated = false;
   try {
     fbScanBody(b);
   } catch (const std::bad_alloc &) {
@@ -184,6 +244,7 @@ void fbScan(FileBrowser &b)
     std::vector<std::string>().swap(*b.out);             // give the partial list's heap back
     // Keep the go-up entry, or a folder too big to list would strand the user inside it.
     if (b.dir != "/") { try { b.out->push_back(".."); } catch (const std::bad_alloc &) {} }
+    b.truncated = true;
     sprintf(buf, "%s: OUT OF HEAP during scan -- only \"..\" kept (free heap=%u)", b.tag,
             (unsigned)ESP.getFreeHeap());
     printLog(buf);

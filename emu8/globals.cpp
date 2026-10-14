@@ -133,8 +133,8 @@ uint8_t joyPort = 2;          // C64: joystick port (1 or 2)
 volatile bool c64AutoloadPending = false;  // .prg/.d64 autoload deferred to the BASIC READY trap
 String NewDeviceConfig;
 byte selectedHdFile;
-uint8_t firstShowFile = 0;
-uint8_t shownFile = 0xff;
+uint16_t firstShowFile = 0;
+uint16_t shownFile = SHOWN_NONE;
 
 // softswitches
 bool Graphics_Text = false;

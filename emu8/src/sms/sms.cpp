@@ -40,7 +40,7 @@ static bool smsEndsCI(const std::string& s, const char* suf) {
 }
 
 // Scan SD root for *.sms / *.bin into smsFiles.
-#define SMS_MAX_FILES 200
+#define SMS_MAX_FILES FB_MAX_ENTRIES
 // SD ROM browser (.sms/.bin + subdirectories); see src/shared/filebrowser.h.
 static bool smsAccept(const std::string &n) {
   return smsEndsCI(n, ".sms") || smsEndsCI(n, ".bin");

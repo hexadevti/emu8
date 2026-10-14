@@ -332,4 +332,8 @@ bool pcSimHostKey(int sc, bool down, bool repeat)
   return true;
 }
 
+// The STM32's battery register (input_picocalc.cpp): a fixed reading, so the gauge shows in the menus.
+int  picocalcBatteryPercent()  { return 76; }
+bool picocalcBatteryCharging() { return false; }
+
 #endif // BOARD_DESKTOP && EMU_SIM_PICOCALC

@@ -121,7 +121,7 @@ bool atariLoadROM(const char *path) {
 }
 
 // Scan the SD root for *.a26 / *.bin files into the global atariFiles list (full paths).
-#define ATARI_MAX_FILES 200
+#define ATARI_MAX_FILES FB_MAX_ENTRIES
 // SD ROM browser (.a26/.bin + subdirectories); see src/shared/filebrowser.h.
 static bool atariAccept(const std::string &n) {
   return endsWithCI(n, ".a26") || endsWithCI(n, ".bin");

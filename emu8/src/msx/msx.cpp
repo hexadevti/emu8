@@ -131,7 +131,7 @@ static bool loadBiosFromSD() {
 }
 
 // Scan SD root for *.rom / *.dsk into msxFiles (excluding the reserved BIOS names).
-#define MSX_MAX_FILES 200
+#define MSX_MAX_FILES FB_MAX_ENTRIES
 // SD ROM/disk browser (.rom/.mx1/.dsk + subdirectories); see src/shared/filebrowser.h.
 // The BIOS images stay hidden -- they are loaded by name, not picked.
 static bool msxAccept(const std::string &n) {

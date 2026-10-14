@@ -58,6 +58,10 @@ namespace pcd {
   uint32_t stageFill = 0;
   uint8_t  stageHalf = 0;
   uint8_t  hsc = 0;
+  uint8_t  rowBlend = 0;
+  bool     smooth = false;      // setSmooth() armed for this window
+  bool     prevValid = false;   // stage[stageHalf ^ 1] holds the previous full row of this window
+  bool     holding = false;     // ...or a row marked setRowBlend(2), waiting for the next one
 }
 
 // ============================== low-level panel I/O ===========================================
@@ -187,7 +191,39 @@ namespace pcd {
 // A staging half just filled up: hand it to DMA and flip. txWait() joins the transfer started by
 // the PREVIOUS kick, which was on the other half -- that is the whole point of the ping-pong, the
 // decoder gets to refill one half while SPI is still draining the other.
+static inline uint16_t avg565(uint16_t a, uint16_t b) {
+  return (uint16_t)((((a ^ b) & 0xF7DE) >> 1) + (a & b));
+}
+// SCREEN: SMOOTH (setSmooth): a full row is blended before it goes out. Out of line, so the inline
+// writeColor() stays a plain store.
+static void smoothKick() {
+  uint16_t *cur = stage[stageHalf], *oth = stage[stageHalf ^ 1];
+  if (hsc)                                           // 7:8: the inserted pixel of each 8-pixel group
+    for (uint32_t i = 7; i < STAGE_LEN - 1; i += 8) cur[i] = avg565(cur[i - 1], cur[i + 1]);
+  const uint8_t mode = rowBlend;
+  rowBlend = 0;
+  if (holding) {                                     // the held row (oth) goes first, blended with this one
+    for (uint32_t i = 0; i < STAGE_LEN; i++) oth[i] = avg565(oth[i], cur[i]);
+    txWait();
+    txBuf(oth, STAGE_LEN);
+    holding = false;
+  } else if (mode == 1 && prevValid) {               // oth is the row above, still (only) being read by DMA
+    for (uint32_t i = 0; i < STAGE_LEN; i++) cur[i] = avg565(cur[i], oth[i]);
+  } else if (mode == 2) {                            // hold it; the next row lands in oth once it is idle
+    txWait();
+    holding = true;
+    stageHalf ^= 1;
+    stageFill  = 0;
+    return;
+  }
+  txWait();
+  txBuf(cur, STAGE_LEN);
+  stageHalf ^= 1;
+  stageFill  = 0;
+  prevValid  = true;
+}
 void stageKick() {
+  if (smooth && stageFill == STAGE_LEN) { smoothKick(); return; }
   txWait();
   txBuf(stage[stageHalf], stageFill);
   stageHalf ^= 1;
@@ -196,8 +232,14 @@ void stageKick() {
 // Flush a partially-filled half, in order, and join. Used before anything that reconfigures DMA
 // or moves the address window.
 void stageDrain() {
+  if (holding) {                                     // nothing followed it: send it unblended
+    txWait();
+    txBuf(stage[stageHalf ^ 1], STAGE_LEN);
+    holding = false;
+  }
   if (stageFill) stageKick();
   txWait();
+  prevValid = false;
 }
 // writeColor() with a large len: skip staging entirely and let DMA repeat one source word. Makes
 // the full-screen clear (writeColor(color, 320*240) in video.cpp) a single zero-CPU descriptor.
@@ -497,12 +539,16 @@ void DisplayGFX::startWrite() {
   pcd::stageFill = 0;                                // nothing carried over from a previous window
   pcd::stageHalf = 0;
   pcd::hsc = _hscale ? 7 : 0;                        // groups restart at the window origin
+  pcd::smooth = _smooth;
+  pcd::prevValid = pcd::holding = false;
+  pcd::rowBlend = 0;
   fmt16();
 }
 void DisplayGFX::endWrite() {
   pcd::stageDrain();
   pcd::hsc = 0;
-  _hscale = false;
+  pcd::smooth = false;
+  _hscale = _smooth = false;
 }
 
 // ---------- single pixels, coalesced into horizontal runs ----------

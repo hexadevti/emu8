@@ -246,7 +246,7 @@ static void ouiBrowse(const std::string &entry)
   else if (ouiIsPcxt())    { if (up) pcxtBrowseUp();    else pcxtBrowseEnter(p); }
   else if (HdDisk)         { if (up) hdBrowseUp();      else hdBrowseEnter(p); }
   else                     { if (up) diskBrowseUp();    else diskBrowseEnter(p); }
-  shownFile = 0xff; firstShowFile = 0;
+  shownFile = SHOWN_NONE; firstShowFile = 0;
   optionsUiSyncSelection();
   optionsUiDirty = true;
 }
@@ -262,7 +262,7 @@ void optionsUiSyncSelection()
   for (int i = 0; i < (int)files.size(); i++)
     if (files[i] == sel) { idx = i; break; }
   if (idx < 0) idx = 0;
-  shownFile = (uint8_t)idx;
+  shownFile = (uint16_t)idx;
   if (files.empty()) { firstShowFile = 0; return; }
   if (shownFile < firstShowFile) firstShowFile = shownFile;
   else if (shownFile >= firstShowFile + OUI_FB_ROWS) firstShowFile = shownFile - OUI_FB_ROWS + 1;
@@ -380,7 +380,8 @@ static void ouiClearToggles(int first)
 static void ouiDrawScreenToggle()
 {
 #if BOARD_HAS_SCREENFILL
-  ouiDrawToggle(ouiScreenSlot(), "SCREEN", screenFill ? "FILL" : "ORIG", OUI_TXT);
+  // The PicoCalc's FILL is always upscaled bilinear, hence its name there.
+  ouiDrawToggle(ouiScreenSlot(), "SCREEN", !screenFill ? "ORIG" : UI_PICOCALC ? "SMOOTH" : "FILL", OUI_TXT);
 #endif
 }
 
@@ -487,7 +488,7 @@ static void ouiDrawFiles()
   const char *problem = (shownFile < files.size()) ? ouiEntryProblem(shownFile) : nullptr;
   char hdr[64];
   if (problem) snprintf(hdr, sizeof(hdr), "! %s", problem);
-  else sprintf(hdr, "%s  (%d)", ouiIsC64() ? "PRG/D64/CRT" : ouiIsNES() ? "NES ROMS"
+  else sprintf(hdr, "%s  (%d%s)", ouiIsC64() ? "PRG/D64/CRT" : ouiIsNES() ? "NES ROMS"
                          : ouiIsAtari() ? "A26/BIN ROMS"
                          : ouiIsMsx() ? "MSX ROM/DSK"
                          : ouiIsSms() ? "SMS ROMS"
@@ -495,7 +496,7 @@ static void ouiDrawFiles()
                          : ouiIsZx() ? "SNA/Z80/TAP"
                          : ouiIsPcxt() ? "PC DISK IMG"
                          : (HdDisk ? "HD IMAGES" : "DISK IMAGES"),
-          (int)files.size());
+          (int)files.size(), fbListTruncated(files) ? "+" : "");   // "+": the folder holds more
   if (ouiChanged(ouiSigHdr, ouiHash(hdr))) {
     tft.fillRect(0, OUI_FB_TOP, 320, OUI_FB_HDR_H, OUI_BG);
     tft.setTextDatum(BL_DATUM);
@@ -595,7 +596,7 @@ void uiDirScanProgress(int count)
   tft.drawString(s, 160, y + listH / 2 - 9, 2);
   int bx = 24, bw = 272, bh = 8, by = y + listH / 2 + 6;
   tft.drawRoundRect(bx, by, bw, bh, 3, OUI_BORDER);
-  int fw = count >= 250 ? bw - 2 : (bw - 2) * count / 250;     // bar fills toward the 250 cap
+  int fw = count >= FB_MAX_ENTRIES ? bw - 2 : (bw - 2) * count / FB_MAX_ENTRIES;   // toward the cap
   if (fw > 0) tft.fillRoundRect(bx + 1, by + 1, fw, bh - 2, 2, OUI_SEL);
   vTaskDelay(1);   // yield: feed the watchdog + let the idle task run during a long scan
 }
@@ -714,6 +715,44 @@ static void ouiDrawActions()
 }
 
 static int ouiRomTextW(const char *s, int font);
+
+#if OUI_PICOCALC
+// Battery gauge for the title bars and the system menu: "87%" then a small cell icon filled to the
+// charge, green / amber / red by level, cyan while charging (with "CHG" in front of the number).
+uint32_t uiBatterySig()
+{
+  return (uint32_t)(picocalcBatteryPercent() + 1) | (picocalcBatteryCharging() ? 0x1000u : 0u);
+}
+
+int uiDrawBattery(int rightX, int cy, uint16_t bg)
+{
+  const int pct = picocalcBatteryPercent();
+  if (pct < 0) return rightX;
+  const bool chg = picocalcBatteryCharging();
+  const int bw = 18, bh = 9, nub = 2;                 // cell body + positive terminal
+  const int bx = rightX - nub - bw, by = cy - bh / 2;
+  uint16_t fill = chg ? tft.color565(60, 200, 230)
+                : pct > 50 ? tft.color565(40, 200, 95)
+                : pct > 20 ? tft.color565(230, 170, 40)
+                           : tft.color565(230, 60, 50);
+  tft.fillRect(bx - 40, cy - 6, rightX - bx + 40, 13, bg);   // room for "CHG 100%"
+  tft.fillRect(bx, by, bw, 1, TFT_WHITE);            // outline (DisplayGFX has no drawRect)
+  tft.fillRect(bx, by + bh - 1, bw, 1, TFT_WHITE);
+  tft.fillRect(bx, by, 1, bh, TFT_WHITE);
+  tft.fillRect(bx + bw - 1, by, 1, bh, TFT_WHITE);
+  tft.fillRect(bx + bw, cy - 2, nub, 4, TFT_WHITE);
+  int w = (bw - 4) * pct / 100;
+  if (w < 1 && pct > 0) w = 1;
+  if (w > 0) tft.fillRect(bx + 2, by + 2, w, bh - 4, fill);
+  char s[12];
+  snprintf(s, sizeof(s), chg ? "CHG %d%%" : "%d%%", pct);
+  tft.setTextDatum(MR_DATUM);
+  tft.setTextColor(TFT_WHITE, bg);
+  tft.drawString(s, bx - 3, cy, 1);
+  return bx - 3 - tft.textWidth(s, 1);
+}
+#endif
+
 static void ouiDrawTitle()
 {
   const char *title = ouiIsC64() ? "COMMODORE 64"
@@ -742,21 +781,32 @@ static void ouiDrawTitle()
     n = snprintf(mhz, sizeof(mhz), "8086 %.2fMHz", pcMeasuredMhz);
   if (n < 0 || n >= (int)sizeof(mhz)) n = (int)strlen(mhz);
   snprintf(mhz + n, sizeof(mhz) - n, "%s%dfps", n ? "  " : "", (int)(emuFps + 0.5f));
-  if (!ouiChanged(ouiSigTitle, ouiHash(mhz, ouiHash(title)))) return;
+  uint32_t sig = ouiHash(mhz, ouiHash(title));
+#if OUI_PICOCALC
+  sig = ouiHash("bat", sig ^ uiBatterySig());
+#endif
+  if (!ouiChanged(ouiSigTitle, sig)) return;
 
   tft.fillRect(0, 0, 320, OUI_TITLE_H, OUI_TITLE);
   tft.setTextDatum(ML_DATUM);
   tft.setTextColor(OUI_TXT, OUI_TITLE);
   tft.drawString(title, 10, OUI_TITLE_H / 2, 2);
   int cw = OUI_TITLE_H, cx = 320 - cw;
+  int rx = cx - 8;                                    // right edge for the readouts
+#if OUI_PICOCALC
+  int bl = uiDrawBattery(rx, OUI_TITLE_H / 2, OUI_TITLE);
+  if (bl != rx) rx = bl - 8;
+#endif
   if (mhz[0]) {
-    // Too wide for the gap after the title (long names like "ZX SPECTRUM 48K")? Drop the CPU name.
+    // Too wide for the gap after the title (long names like "ZX SPECTRUM 48K")? Drop the CPU name,
+    // and if that is still too wide, keep only the fps.
     const char *speed = mhz;
-    const int room = cx - 8 - (10 + ouiRomTextW(title, 2) + 10);
+    const int room = rx - (10 + ouiRomTextW(title, 2) + 10);
     if (ouiRomTextW(speed, 1) > room && strchr(mhz, ' ') && strstr(mhz, "MHz")) speed = strchr(mhz, ' ') + 1;
+    if (ouiRomTextW(speed, 1) > room && strrchr(speed, ' ')) speed = strrchr(speed, ' ') + 1;
     tft.setTextDatum(MR_DATUM);
     tft.setTextColor(OUI_TXT, OUI_TITLE);
-    tft.drawString(speed, cx - 8, OUI_TITLE_H / 2, 1);
+    tft.drawString(speed, rx, OUI_TITLE_H / 2, 1);
   }
   tft.fillRect(cx, 0, cw, OUI_TITLE_H, OUI_RED);
   tft.setTextDatum(MC_DATUM);
@@ -1217,12 +1267,19 @@ typedef void (*OuiListRow)(int idx, char *a, size_t na, char *b, size_t nb, uint
 // result or the key hints. Rows come from ouiRomCount() / `row`; selection state is ouiRomSel etc.
 static void ouiDrawList(const char *title, const char *hdr, const char *hint, OuiListRow row, int lblW)
 {
-  if (ouiChanged(ouiSigTitle, ouiHash(title))) {
+  uint32_t tsig = ouiHash(title);
+#if OUI_PICOCALC
+  tsig = ouiHash("bat", tsig ^ uiBatterySig());
+#endif
+  if (ouiChanged(ouiSigTitle, tsig)) {
     tft.fillRect(0, 0, 320, OUI_TITLE_H, OUI_TITLE);
     tft.setTextDatum(ML_DATUM);
     tft.setTextColor(OUI_TXT, OUI_TITLE);
     tft.drawString(title, 10, OUI_TITLE_H / 2, 2);
     int cw = OUI_TITLE_H, cx = 320 - cw;
+#if OUI_PICOCALC
+    uiDrawBattery(cx - 8, OUI_TITLE_H / 2, OUI_TITLE);
+#endif
     tft.fillRect(cx, 0, cw, OUI_TITLE_H, OUI_RED);
     tft.setTextDatum(MC_DATUM);
     tft.setTextColor(OUI_TXT, OUI_RED);
@@ -1687,7 +1744,7 @@ static void ouiToggle(int idx)
       if (HdDisk) { if (hdFiles.empty())   loadHdFilesSync();   }
       else        { if (diskFiles.empty()) loadDiskFilesSync(); }
       printLog("DEVICE toggle done");
-      shownFile = 0xff; firstShowFile = 0; optionsUiSyncSelection();
+      shownFile = SHOWN_NONE; firstShowFile = 0; optionsUiSyncSelection();
       break;
     case 1: Fast1MhzSpeed = !Fast1MhzSpeed; break;
     case 2: sound = !sound; break;
@@ -1706,7 +1763,7 @@ static void ouiScroll(int dir)
   int fs = (int)firstShowFile + dir;
   if (fs < 0) fs = 0;
   if (fs > maxStart) fs = maxStart;
-  firstShowFile = (uint8_t)fs;
+  firstShowFile = (uint16_t)fs;
   optionsUiDirty = true;
 }
 
@@ -1940,7 +1997,7 @@ void optionsUiAdjust(int dir)         // dir: -1 = up, +1 = down
     int idx = (int)shownFile + (dir < 0 ? -1 : 1);
     if (idx < 0) idx = 0;
     if (idx > (int)files.size() - 1) idx = (int)files.size() - 1;
-    shownFile = (uint8_t)idx;
+    shownFile = (uint16_t)idx;
     if (shownFile < firstShowFile) firstShowFile = shownFile;
     else if (shownFile >= firstShowFile + OUI_FB_ROWS) firstShowFile = shownFile - OUI_FB_ROWS + 1;
     optionsUiDirty = true;
@@ -2168,7 +2225,7 @@ static void ouiHandleTap(int16_t x, int16_t y)
       int idx = firstShowFile + (y - OUI_FB_LIST) / OUI_FB_ROWH;
       if (idx < (int)files.size()) {
         if (ouiIsDir(files[idx])) ouiBrowse(files[idx]);   // enter dir / go up
-        else { shownFile = (uint8_t)idx; optionsUiDirty = true; }
+        else { shownFile = (uint16_t)idx; optionsUiDirty = true; }
       }
       return;
     }
@@ -2247,7 +2304,7 @@ void optionsUiOpen()
 // changes refresh the touch UI and keep the selected file visible.
 void optionsUiMarkDirty()
 {
-  if (shownFile != 0xff) {
+  if (shownFile != SHOWN_NONE) {
     if (shownFile < firstShowFile) firstShowFile = shownFile;
     else if (shownFile >= firstShowFile + OUI_FB_ROWS) firstShowFile = shownFile - OUI_FB_ROWS + 1;
   }

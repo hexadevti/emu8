@@ -23,10 +23,19 @@ struct FileBrowser {
   std::vector<std::string> *out;              // the entry list the options UI renders
   bool (*accept)(const std::string &name);    // filter on the BARE name; nullptr accepts every file
   bool (*verify)(const char *fullPath);       // optional content check, or nullptr -- see below
-  int   maxEntries;                           // cap, so a huge folder cannot exhaust the heap
+  int   maxEntries;                           // cap (FB_MAX_ENTRIES); the free heap may stop it sooner
   String dir;                                 // current directory: "/" or "/a/b" (never a trailing /);
                                               // "" = not scanned yet, starts in appsBaseDir()
+  bool  truncated;                            // last scan stopped early (cap or heap): more on the card
 };
+
+// Every core's entry cap. Kept well above any real folder: a cap that bites hides files from all
+// over the alphabet (it applies in FAT order, before the sort). Low heap stops a scan earlier --
+// see FB_HEAP_RESERVE in filebrowser.cpp.
+#define FB_MAX_ENTRIES 1000
+
+// True when the list was cut short by its last scan (the options UI shows the count as "N+").
+bool fbListTruncated(const std::vector<std::string> &list);
 
 // Rescan b.dir into *b.out. Directories are listed first, then files, each sorted
 // case-insensitively, with ".." pinned to the top.

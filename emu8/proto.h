@@ -168,6 +168,13 @@ bool sdManagerBootRequested();        // this boot is the SD Manager one the spl
 #define SPLASH_KEY_BACK   (5)          // Esc: leave the menu, keep the running system
 extern volatile int8_t splashKeyEvent;
 void splashOpen();                     // Ctrl-F6: the system menu over the running emulator, no reboot
+// Battery, read from the STM32 keyboard MCU (input_picocalc.cpp; a fixed value in the simulator).
+int  picocalcBatteryPercent();         // 0..100, -1 while not read yet
+bool picocalcBatteryCharging();
+// Draw the battery gauge right-aligned at rightX, centred on cy, over bg (optionsui.cpp). Returns
+// the x it starts at (rightX when there is nothing to show yet).
+int  uiDrawBattery(int rightX, int cy, uint16_t bg);
+uint32_t uiBatterySig();               // changes whenever the gauge would draw differently
 #endif
 #if defined(BOARD_DESKTOP)
 bool desktopDeviceHasPcxt();           // src/desktop/device.cpp: false while simulating the RP2040 PicoCalc

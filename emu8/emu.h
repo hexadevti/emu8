@@ -88,7 +88,8 @@ extern int freeSpace;
 // FSSetup()). Raw opendir()/readdir() need the full VFS path, so file scans prefix their
 // SD-relative directory with this. If FSSetup() ever passes a different mountpoint, update it.
 #if defined(BOARD_DESKTOP)
-#define SD_VFS_ROOT "./sdcard"   // desktop: the emulated SD card is this host dir (see sd_host.cpp).
+const char *desktopSdRoot();     // sd_host.cpp: the host dir backing the emulated SD card (repo sdcard/)
+#define SD_VFS_ROOT desktopSdRoot()   // desktop: the same root every other SD access maps under (not cwd)
 #elif defined(BOARD_PICOCALC)
 #define SD_VFS_ROOT ""           // arduino-pico has no global VFS: SDFS paths ARE SD-relative.
 #else
@@ -331,8 +332,11 @@ extern bool c64Autoload;          // C64: auto-load selectedC64FileName on boot
 extern uint8_t joyPort;           // C64: joystick port (1 or 2)
 extern String NewDeviceConfig;
 extern byte selectedHdFile;
-extern uint8_t firstShowFile;
-extern uint8_t shownFile;
+// File-list scroll position and highlighted entry. 16-bit: a folder may list more than 255 entries
+// (the cap is FB_MAX_ENTRIES and the free heap, see filebrowser.cpp). SHOWN_NONE = nothing picked.
+#define SHOWN_NONE 0xffff
+extern uint16_t firstShowFile;
+extern uint16_t shownFile;
 
 // Softswitches Config
 extern bool Graphics_Text;

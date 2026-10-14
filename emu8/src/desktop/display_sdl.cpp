@@ -252,10 +252,37 @@ void DisplayGFX::writeColor(uint16_t color, uint32_t len) {
     if (reps == 2) wire(1);
     for (int rep = reps; rep; rep--) {
       if ((unsigned)_curX < (unsigned)W && (unsigned)_curY < (unsigned)H) _fb[_curY * W + _curX] = color;
-      if (++_curX >= xEnd) { _curX = _winX; if (++_curY >= yEnd) _curY = _winY; }
+      if (++_curX >= xEnd) {
+        if (_smoothOn) smoothRow(_curY);
+        _curX = _winX; if (++_curY >= yEnd) _curY = _winY;
+      }
     }
     if (scale && _hsc == 0) _hsc = 7;
   }
+}
+
+// SCREEN: SMOOTH, the device's smoothKick() (display_picocalc.cpp) on the framebuffer row just done.
+static inline uint16_t avg565(uint16_t a, uint16_t b) {
+  return (uint16_t)((((a ^ b) & 0xF7DE) >> 1) + (a & b));
+}
+void DisplayGFX::smoothRow(int32_t y) {
+  const uint8_t mode = _rowBlend;
+  _rowBlend = 0;
+  if ((unsigned)y >= (unsigned)H || _winX < 0 || _winX + _winW > W) { _prevValid = false; return; }
+  uint16_t *r = _fb + y * W + _winX;
+  if (_hscale)
+    for (int32_t i = 7; i < _winW - 1; i += 8) r[i] = avg565(r[i - 1], r[i + 1]);
+  if (_heldY >= 0) {
+    uint16_t *h = _fb + _heldY * W + _winX;
+    for (int32_t i = 0; i < _winW; i++) h[i] = avg565(h[i], r[i]);
+    _heldY = -1;
+  } else if (mode == 1 && _prevValid && y > 0) {
+    const uint16_t *u = r - W;
+    for (int32_t i = 0; i < _winW; i++) r[i] = avg565(r[i], u[i]);
+  } else if (mode == 2) {
+    _heldY = y;
+  }
+  _prevValid = true;
 }
 
 // --- text: 1:1 bitmap fonts (src/shared/uitext.h), identical to the PicoCalc's ---

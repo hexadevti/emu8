@@ -145,9 +145,9 @@ static void desktopTypeInject() {
   static size_t idx = 0; static bool down = false;
   if (fr < at || (fr % 6) != 0) return;         // wait for boot, then ~1 transition / 6 frames
   if (!s[idx]) return;
-  // {F10} {UP} {DOWN} {LEFT} {RIGHT} {ENTER} {ESC} {DEL} name a special key; {WAIT} idles one step.
+  // {F10} {F1} {UP} {DOWN} {LEFT} {RIGHT} {ENTER} {ESC} {DEL} name a special key; {WAIT} idles one step.
   static const struct { const char *name; SDL_Scancode sc; } kTok[] = {
-    {"F10", SDL_SCANCODE_F10}, {"UP", SDL_SCANCODE_UP}, {"DOWN", SDL_SCANCODE_DOWN},
+    {"F10", SDL_SCANCODE_F10}, {"F1", SDL_SCANCODE_F1}, {"UP", SDL_SCANCODE_UP}, {"DOWN", SDL_SCANCODE_DOWN},
     {"LEFT", SDL_SCANCODE_LEFT}, {"RIGHT", SDL_SCANCODE_RIGHT}, {"ENTER", SDL_SCANCODE_RETURN},
     {"ESC", SDL_SCANCODE_ESCAPE}, {"DEL", SDL_SCANCODE_DELETE}, {"WAIT", SDL_SCANCODE_UNKNOWN}};
   size_t len = 1;
@@ -158,6 +158,16 @@ static void desktopTypeInject() {
     len = (size_t)(end - (s + idx)) + 1;
     for (const auto &t : kTok)
       if (strlen(t.name) == len - 2 && !strncmp(s + idx + 1, t.name, len - 2)) sc = t.sc;
+    // {CTRL+} / {CTRL-} hold / release Left Ctrl around the next keys, e.g. "{CTRL+}{F1}{CTRL-}".
+    if (len == 7 && (s[idx + 5] == '+' || s[idx + 5] == '-') && !strncmp(s + idx + 1, "CTRL", 4)) {
+      SDL_Event c; memset(&c, 0, sizeof(c));
+      const bool press = s[idx + 5] == '+';
+      c.type = press ? SDL_KEYDOWN : SDL_KEYUP; c.key.state = press ? SDL_PRESSED : SDL_RELEASED;
+      c.key.keysym.scancode = SDL_SCANCODE_LCTRL; c.key.keysym.sym = SDLK_LCTRL;
+      SDL_PushEvent(&c);
+      idx += len;
+      return;
+    }
     if (sc == SDL_SCANCODE_UNKNOWN) { idx += len; return; }
   } else {
     sc = scancodeForChar(s[idx]);

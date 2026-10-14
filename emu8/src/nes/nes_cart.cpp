@@ -226,7 +226,7 @@ bool nesLoadROM(const char *path) {
 }
 
 // Scan the SD root for *.nes files into the global nesFiles list (full paths).
-#define NES_MAX_FILES 200
+#define NES_MAX_FILES FB_MAX_ENTRIES
 // SD ROM browser (.nes + subdirectories). fbScan lists directories with a trailing "/" and
 // the options UI navigates into them; see src/shared/filebrowser.h.
 static bool nesAccept(const std::string &n) { return endsWithCI(n, ".nes"); }

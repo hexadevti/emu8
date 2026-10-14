@@ -1,5 +1,6 @@
 #include "../../emu.h"
 #include "atari.h"
+#include "../shared/dirty_bands.h"     // PicoCalc SCREEN: SMOOTH blends (dband::blendQ)
 
 // Atari 2600 core C-linkage glue, called by the platform dispatch:
 //   setup() -> atariSetup(),  loop() -> atariLoop(),  renderLoop() -> atariRenderFrame(),
@@ -72,7 +73,7 @@ void atariRenderFrame() {
   int oy = (240 - h) / 2;
   const uint16_t *pal = videoColor ? atari::atariPalette : atari::atariPaletteGray;
 #if UI_PICOCALC
-  // SCREEN: FILL (Settings): stretch the field vertically to all 240 lines (nearest neighbour), so
+  // SCREEN: SMOOTH (Settings): stretch the field vertically to all 240 lines (bilinear), so
   // the picture is 4:3 like on a TV instead of a 320x192 strip with 24px bars. ~25% more SPI time.
   extern bool screenFill;
   if (screenFill) {
@@ -80,12 +81,23 @@ void atariRenderFrame() {
     for (int y = 0; y < 240; ) {
       int n = 0;
       while (y + n < 240 && n < 8) {
-        const uint8_t *src = fb + ((y + n) * h / 240) * A_W;
-        uint16_t *dst = atariScratch + n * 320;
+        // SCREEN: SMOOTH -- bilinear in quarter steps: output row oy samples field line
+        // (oy + 0.5) * h / 240 - 0.5, and the 2x doubling is 3/4 own pixel + 1/4 that side's neighbour.
+        const int oy = y + n;
+        int s4 = ((2 * oy + 1) * h * 2 - 480) / 240;   // source line in quarters
+        if (s4 < 0) s4 = 0;
+        const int sa = s4 >> 2, q = s4 & 3, sb = sa + 1 < h ? sa + 1 : h - 1;
+        const uint8_t *ra = fb + sa * A_W, *rb = fb + sb * A_W;
+        uint16_t v[A_W + 2];                           // the blended line, a black pixel each side
+        v[0] = v[A_W + 1] = 0;
         for (int x = 0; x < A_W; x++) {
           int sc = x + A_XSHIFT;
-          uint16_t c = ((unsigned)sc < A_W) ? pal[src[sc] & 0x7F] : 0;
-          dst[x * 2] = c; dst[x * 2 + 1] = c;
+          v[x + 1] = ((unsigned)sc < A_W) ? dband::blendQ(pal[ra[sc] & 0x7F], pal[rb[sc] & 0x7F], q) : 0;
+        }
+        uint16_t *dst = atariScratch + n * 320;
+        for (int x = 0; x < A_W; x++) {
+          dst[x * 2]     = dband::q3_565(v[x + 1], v[x]);
+          dst[x * 2 + 1] = dband::q3_565(v[x + 1], v[x + 2]);
         }
         n++;
       }

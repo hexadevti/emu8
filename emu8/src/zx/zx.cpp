@@ -93,7 +93,7 @@ static bool loadRomFromSD() {
 }
 
 // SD browser (.sna/.z80/.tap/.tzx + subdirectories); see src/shared/filebrowser.h.
-#define ZX_MAX_FILES 200
+#define ZX_MAX_FILES FB_MAX_ENTRIES
 static bool zxAccept(const std::string &n) {
   return zxEndsCI(n, ".sna") || zxEndsCI(n, ".z80") || zxEndsCI(n, ".tap") || zxEndsCI(n, ".tzx");
 }
@@ -199,6 +199,20 @@ static void zxPaperLine(int y, uint16_t* dst) {
   }
 }
 
+#if UI_PICOCALC
+// Paper pixels x..x+3 (x a multiple of 4) of bitmap line y, decoded straight from the snapshot:
+// SCREEN: SMOOTH blends two lines at a time and sharedBigBuf has no room for a second line buffer.
+static inline void zxPaper4(int y, int x, uint16_t* o) {
+  const uint8_t a = zx::screen[6144 + (y >> 3) * 32 + (x >> 3)];
+  const int br = (a & 0x40) >> 3;
+  uint16_t ink = zxPal[(a & 7) | br], paper = zxPal[((a >> 3) & 7) | br];
+  if ((a & 0x80) && zx::flashPhase) { uint16_t t = ink; ink = paper; paper = t; }
+  uint8_t b = zx::screen[(((y & 0xC0) << 5) | ((y & 7) << 8) | ((y & 0x38) << 2)) + (x >> 3)];
+  if (x & 4) b <<= 4;
+  for (int i = 0; i < 4; i++, b <<= 1) o[i] = (b & 0x80) ? ink : paper;
+}
+#endif
+
 // Output row r (0..239) = border + paper, into zxLine.
 static void zxOutLine(int r, uint16_t* dst) {
   const uint16_t bc = zxPal[zx::borderLine[r] & 7];
@@ -245,15 +259,20 @@ static void zxPushDirty(bool fill, bool repaint) {
     tft.setAddrWindow(0, b * rowsPer, zx::OUT_W, (e - b) * rowsPer);
     tft.startWrite();
     if (fill) {
-      int lastSy = -1;
+      // Bilinear 5:4 (dband::smooth5): row k of each 5-row group blends two of its 4 paper lines.
       for (int oy = b * 10; oy < e * 10; oy++) {
-        const int sy = oy * 4 / 5;
-        if (sy != lastSy) { zxPaperLine(sy, zxLine); lastSy = sy; }
+        const int base = oy / 5 * 4, k = oy % 5, w = dband::kRowW[k];
+        const int m = base + dband::kRowMain[k], t = base + dband::kRowOther[k];
+        uint16_t c[4], o[5], q[5];
         for (int x = 0; x < 256; x += 4) {
-          tft.writeColor(zxLine[x], 2);
-          tft.writeColor(zxLine[x + 1], 1);
-          tft.writeColor(zxLine[x + 2], 1);
-          tft.writeColor(zxLine[x + 3], 1);
+          zxPaper4(m, x, c);
+          dband::smooth5(c[0], c[1], c[2], c[3], o);
+          if (w) {
+            zxPaper4(t, x, c);
+            dband::smooth5(c[0], c[1], c[2], c[3], q);
+            for (int i = 0; i < 5; i++) o[i] = (w == 2) ? dband::avg565(o[i], q[i]) : dband::q3_565(o[i], q[i]);
+          }
+          for (int i = 0; i < 5; i++) tft.writeColor(o[i], 1);
         }
       }
     } else {
@@ -288,7 +307,7 @@ void zxRenderFrame() {
 #endif
   const int outTop = 0;
 #if UI_PICOCALC
-  // SCREEN: FILL drops the border and scales the 256x192 paper 5:4 to the whole 320x240 screen.
+  // SCREEN: SMOOTH drops the border and scales the 256x192 paper 5:4 bilinear to the whole 320x240 screen.
   extern bool screenFill;
   const bool fill = screenFill && !osk;
   const bool repaint = clearScr;                     // a menu closed: anything may be on the panel

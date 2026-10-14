@@ -238,21 +238,21 @@ void listFiles(bool downDirection)
     files = hdFiles;
   }
   if (shownFile > files.size())
-    shownFile = 0xff;
+    shownFile = SHOWN_NONE;
   if (downDirection)
   {
-    if (shownFile != 0xff && shownFile >= firstShowFile + pageSize)
+    if (shownFile != SHOWN_NONE && shownFile >= firstShowFile + pageSize)
     {
       firstShowFile = shownFile - pageSize;
     }
   }
   else
   {
-    if (shownFile != 0xff && shownFile < firstShowFile && firstShowFile > 0)
+    if (shownFile != SHOWN_NONE && shownFile < firstShowFile && firstShowFile > 0)
       firstShowFile--;
   }
   int id = 0;
-  if (shownFile == 0xff) {
+  if (shownFile == SHOWN_NONE) {
     if ((HdDisk && selectedHdFileName == "/") || (!HdDisk && selectedDiskFileName == "/")) {
       shownFile = 0;
     } 

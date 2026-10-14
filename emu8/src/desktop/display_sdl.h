@@ -88,12 +88,17 @@ public:
   // scanline window (Apple II raster path)
   void setAddrWindow(int32_t x, int32_t y, int32_t w, int32_t h);
   void setPanelAddrWindow(int32_t x, int32_t y, int32_t w, int32_t h);   // RAW panel rows (PicoCalc FILL)
-  void startWrite() { _hsc = _hscale ? 7 : 0; }     // 7:8 groups restart at the window origin
+  void startWrite() {                               // 7:8 groups restart at the window origin
+    _hsc = _hscale ? 7 : 0; _smoothOn = _smooth; _prevValid = false; _heldY = -1; _rowBlend = 0;
+  }
   void writeColor(uint16_t color, uint32_t len);
-  void endWrite() { _hsc = 0; _hscale = false; }
+  void endWrite() { _hsc = 0; _hscale = _smooth = _smoothOn = false; }
   // PicoCalc Apple II SCREEN: FILL (display_picocalc.h): for the next startWrite()..endWrite() only,
   // every 7th writeColor() pixel goes out twice, so a 280-wide raster fills a 320-wide window.
   void setHScale78(bool on) { _hscale = on; }
+  // ...and SCREEN: SMOOTH (display_picocalc.h): blend the 7:8 inserted pixels and the marked rows.
+  void setSmooth(bool on) { _smooth = on; }
+  void setRowBlend(uint8_t mode) { _rowBlend = mode; }
 
   // text (1:1 bitmap fonts from src/shared/uitext.h, same as the PicoCalc)
   void    setTextDatum(uint8_t d) { _datum = d; }
@@ -128,6 +133,11 @@ private:
   int32_t   _winX = 0, _winY = 0, _winW = 0, _winH = 0, _curX = 0, _curY = 0;  // scanline cursor (RAW fb rows)
   bool      _hscale = false;        // setHScale78(): armed for the next startWrite()
   uint8_t   _hsc = 0;               // 7:8 countdown, 0 = off
+  bool      _smooth = false, _smoothOn = false;   // setSmooth(): armed / active in this window
+  bool      _prevValid = false;     // the row above _curY was written in this window
+  int32_t   _heldY = -1;            // row marked setRowBlend(2), waiting for the next one
+  uint8_t   _rowBlend = 0;
+  void      smoothRow(int32_t y);
   // mouse (logical 320x240 coords + pressed)
   volatile int  _mx = 0, _my = 0;
   volatile bool _mdown = false;

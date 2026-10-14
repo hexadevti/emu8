@@ -33,9 +33,34 @@ bool changed(int b, uint32_t sum);
 void frameDone(const char* tag, int bandsSent);
 
 // 256x192 indexed framebuffer -> panel, used by MSX, ColecoVision and SMS. 1:1 at (ox, top), or
-// with fill the whole 320x240 logical screen scaled 5:4 (each 8-line band becomes 10 rows). hideLeft8
+// with fill the whole 320x240 logical screen scaled 5:4 bilinear (writeSmoothBand256). hideLeft8
 // paints source pixels 0..7 black (SMS left-column blanking). Returns the number of bands sent.
 int pushIndexed256(const uint8_t* fb, const uint16_t* pal, uint8_t mask, int ox, int top,
                    bool fill, bool hideLeft8, uint32_t modeKey, bool force);
+
+// ---- SCREEN: SMOOTH (the PicoCalc's FILL): bilinear upscaling in quarter steps ----------------
+// RGB565 blends. avg565 is the exact per-channel floor average (the low bit of each channel is
+// masked off before the shift, so no carry crosses a channel); q3_565 weighs a 3/4, b 1/4;
+// blendQ weighs b q/4 (q 0..4).
+inline uint16_t avg565(uint16_t a, uint16_t b) { return (uint16_t)((((a ^ b) & 0xF7DE) >> 1) + (a & b)); }
+inline uint16_t q3_565(uint16_t a, uint16_t b) { return avg565(a, avg565(a, b)); }
+inline uint16_t blendQ(uint16_t a, uint16_t b, int q) {
+  return q <= 0 ? a : q == 1 ? q3_565(a, b) : q == 2 ? avg565(a, b) : q == 3 ? q3_565(b, a) : b;
+}
+
+// 4 -> 5. Output pixel k samples source 0.8k - 0.1 (pixel centres) = 0, 0.7, 1.5, 2.3, 3.1, rounded
+// to quarters:  s0 | s0/4 + 3s1/4 | (s1 + s2)/2 | 3s2/4 + s3/4 | s3.  A group never reads outside its
+// 4 source pixels, and vertically outside its 4 source lines -- so an 8-line band (2 groups) maps
+// to exactly 10 rows from its own lines only, and dirty-band bookkeeping is unchanged.
+inline void smooth5(uint16_t c0, uint16_t c1, uint16_t c2, uint16_t c3, uint16_t* o) {
+  o[0] = c0; o[1] = q3_565(c1, c0); o[2] = avg565(c1, c2); o[3] = q3_565(c2, c3); o[4] = c3;
+}
+// Row k (0..4) of a 5-row group: source line kRowMain[k] of the group's 4, blended with
+// kRowOther[k] by kRowW[k] (0 none, 1 = main 3/4, 2 = half each) -- smooth5's table, vertically.
+extern const uint8_t kRowMain[5], kRowOther[5], kRowW[5];
+// One output row (n source pixels -> n*5/4) from RGB565 lines m and t blended by w (as kRowW).
+void writeSmoothRow45(const uint16_t* m, const uint16_t* t, int w, int n);
+// 8 lines of a 256-wide indexed picture -> 10 rows of 320, through writeColor().
+void writeSmoothBand256(const uint8_t* band, const uint16_t* pal, uint8_t mask, bool hideLeft8);
 
 }  // namespace dband
