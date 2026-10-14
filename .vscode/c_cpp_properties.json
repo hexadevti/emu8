@@ -328,6 +328,39 @@
       ],
       "cStandard": "c17",
       "cppStandard": "c++17"
+    },
+    {
+      "name": "6502 Dev Studio",
+      "includePath": [
+        "c:\\Users\\lucia\\repos\\emu8",
+        "c:\\Users\\lucia\\.vscode\\extensions\\hexadevti.6502-dev-studio-0.1.0\\apps\\_libA2",
+        "c:\\Users\\lucia\\.vscode\\extensions\\hexadevti.6502-dev-studio-0.1.0\\toolchain\\win32-x64\\include"
+      ],
+      "defines": [
+        "__CC65__",
+        "__CC65_STD_C89__=0",
+        "__CC65_STD_C99__=1",
+        "__CC65_STD__=2",
+        "__OPT__",
+        "__OPT_i__",
+        "__OPT_r__",
+        "__OPT_s__",
+        "__fastcall__=",
+        "__cdecl__=",
+        "__near__=",
+        "__far__="
+      ],
+      "cStandard": "c99",
+      "compilerPath": "",
+      "intelliSenseMode": "clang-x64",
+      "browse": {
+        "path": [
+          "c:\\Users\\lucia\\repos\\emu8",
+          "c:\\Users\\lucia\\.vscode\\extensions\\hexadevti.6502-dev-studio-0.1.0\\apps\\_libA2",
+          "c:\\Users\\lucia\\.vscode\\extensions\\hexadevti.6502-dev-studio-0.1.0\\toolchain\\win32-x64\\include"
+        ],
+        "limitSymbolsToIncludedHeaders": false
+      }
     }
   ],
   "version": 4

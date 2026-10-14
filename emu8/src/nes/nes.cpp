@@ -110,7 +110,7 @@ static void nesPushFrame(const uint16_t *pal) {
   bool forceAll = (pal != lastPal) || (nowMs - lastPushMs > 100) || ((pushCount++ & 63) == 0);
   lastPal = pal; lastPushMs = nowMs;
 
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
   // SCREEN: FILL (Settings): 256x240 scaled 5:4 on both axes to 320x300 on the RAW 320x320 panel
   // (rows 10..309), so it reaches into the letterbox bars. Held off while the boot hint owns rows
   // 280..319. Each 8-line band becomes exactly 10 output rows, so the band digests carry over;

@@ -322,6 +322,7 @@ static void rebootInto(int p) {
 int dbgPlatform()      { return currentPlatform; }
 int dbgPlatformCount() { return PLATFORM_ZX + 1; }   // unnamed ids inside (SD manager, retired 4) are skipped
 const char *dbgPlatformName(int p) {
+  if (p == PLATFORM_PCXT && !desktopDeviceHasPcxt()) return "";   // simulated RP2040: no PC-XT
   switch (p) {
     case PLATFORM_APPLE2: return "Apple II"; case PLATFORM_C64:  return "Commodore 64";
     case PLATFORM_NES:    return "NES";      case PLATFORM_ATARI: return "Atari 2600";

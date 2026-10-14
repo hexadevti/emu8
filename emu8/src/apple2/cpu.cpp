@@ -158,10 +158,29 @@ bool debugPaused = false;
 bool debugStep = false;
 uint16_t debugAddressBreak = 0;
 
+// What the IIe RESET line clears in the MMU/IOU (80STORE, RAMRD, RAMWRT, INTCXROM, ALTZP,
+// SLOTC3ROM, 80COL, ALTCHARSET), plus DHGR off as the ROM's RESET handler does via $C05F.
+// Without this a reset (or reboot into another disk) kept 80STORE/80COL/AN3 from the previous
+// program, so the next one's HGR<->DHGR switching started from the wrong state.
+static void appleSwitchReset()
+{
+  Store80On_Off = false;
+  RAMReadOn_Off = false;
+  RAMWriteOn_Off = false;
+  IntCXRomOn_Off = false;
+  AltZPOn_Off = false;
+  SlotC3RomOn_Off = false;
+  AltCharSetOn_Off = false;
+  Cols40_80 = true;        // 80COL off
+  DHiResOn_Off = false;    // AN3 set
+  IOUDisOn_Off = true;
+}
+
 void cpuReset()
 {
   IIEMemoryBankReadRAM_ROM = false;
-  
+  appleSwitchReset();
+
   PC = read16(0xFFFC);
   STP = 0xFD;
 }
@@ -209,6 +228,7 @@ IRAM_ATTR unsigned char pull8() {
 
 //int joyCount = 0;
 IRAM_ATTR void cpuLoop() {
+  appleSwitchReset();
   // Load the reset vector
   PC = read16(0xFFFC);
   STP = 0xFD;

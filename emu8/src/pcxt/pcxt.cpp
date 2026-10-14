@@ -855,7 +855,7 @@ static void pcxtRenderGraphicsDesktop(fabgl::GraphicsAdapter::Emulation emu) {
 }
 #endif
 
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
 // ---- PicoCalc: CGA streamed straight to the 320x320 panel (no canvas; see display_picocalc.h) ----
 // Text uses the BIOS's own IBM 8x8 font. 80 columns get 4 px each: glyph columns are OR'd in pairs,
 // so single-pixel strokes survive the halving. 25 rows are 9 panel px (8 glyph rows + row 7 again,
@@ -996,7 +996,7 @@ static int      pcRenderGfx = -1;
 
 void pcxtForceRedraw() {
   pcRenderSig = 1; pcRenderGfx = -1;
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
   pcPcForce = true;
 #endif
 }   // after a menu/clear: force a repaint
@@ -1010,7 +1010,7 @@ bool pcxtRenderFrame() {
 
   // Signature of everything that affects the picture (video bytes + mode/colour/cursor/blink).
   uint32_t sig = 2166136261u;
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
   // byte-wise (the 6845 offset may be odd -> M0+ faults on unaligned words) and wrapped to 16KB
   if (gfx) { const uint8_t* vm = g_pcxtMachine.cgaBase(); for (int i = 0; i < 16000; i++) sig = (sig ^ vm[i]) * 16777619u; }
   else     { for (int i = 0; i < 4000; i++) sig = (sig ^ pcVb(i)) * 16777619u; }
@@ -1032,7 +1032,7 @@ bool pcxtRenderFrame() {
   if (sig == pcRenderSig && !modeChanged) return false;   // unchanged -> skip render + flush
   pcRenderSig = sig;
 
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
   if (modeChanged) { pcRenderGfx = (int)gfx; pcPcForce = true; }
   if (gfx) pcxtRenderGraphicsPico(emu);
   else     pcxtRenderTextPico();

@@ -5,6 +5,8 @@
 
 #include "ui_imgui.h"
 #include "debug_bridge.h"            // uniform debug facade over the cores (regs / memory / exec control)
+#include "device.h"                  // which board is simulated (Device menu, panel presentation)
+#include "picocalc_sim.h"            // emu8-picocalc: the device picture with clickable keys
 #include "imgui.h"
 #include "imgui_internal.h"          // DockBuilder* for the one-time default layout
 #include "imgui_memory_editor.h"     // vendored hex viewer/editor (imgui_club)
@@ -25,6 +27,13 @@
 // The active emulator-video content rect inside the 320x240 framebuffer (cores set it each frame via
 // displaySetVideoRect/Fill). "Crop borders" samples just this sub-rect. Defined in display_sdl.cpp.
 void desktopGetVideoRect(int *l, int *t, int *w, int *h);
+bool desktopUiModeActive();   // display_sdl.cpp — the frame is UI (menus / splash), not emulator video
+bool desktopVideoStretch();   // display_sdl.cpp — the core asked for a full-width stretch in SCREEN FILL
+#if defined(EMU_SIM_PICOCALC)
+static const bool kSimPicoCalc = true;
+#else
+static const bool kSimPicoCalc = false;
+#endif
 
 extern bool running;     // globals.cpp — cleared on Quit (kept light; we don't pull in all of emu.h here)
 
@@ -45,8 +54,9 @@ static std::string g_cfgPath, g_iniPath;
 static void resolvePersistPaths() {
   if (!g_cfgPath.empty()) return;
   std::string base = desktopBaseDir();
-  g_cfgPath = base + "emu8.cfg";
-  g_iniPath = base + "imgui.ini";
+  // emu8-picocalc keeps its own window size + layout (its window holds a tall picture of the device)
+  g_cfgPath = base + (kSimPicoCalc ? "emu8-picocalc.cfg" : "emu8.cfg");
+  g_iniPath = base + (kSimPicoCalc ? "imgui-picocalc.ini" : "imgui.ini");
 }
 
 // --- shared SDL handles (owned by display_sdl.cpp) ---
@@ -54,7 +64,10 @@ static SDL_Window   *g_win = nullptr;
 static SDL_Renderer *g_ren = nullptr;
 
 // --- view options (wired to the View menu) ---
-static bool g_filterLinear = true;    // emulator image scaling: linear (smooth) vs nearest (crisp pixels)
+// emulator image scaling: linear (smooth) vs nearest (crisp pixels). The PicoCalc simulator starts
+// crisp, like the real panel, and saves it under its own key so an older smooth setting is not kept.
+static bool g_filterLinear = !kSimPicoCalc;
+static const char *const kFilterKey = kSimPicoCalc ? "panelFilterLinear" : "filterLinear";
 static bool g_cropToVideo  = false;   // show only the active video rect (drop the cores' black borders)
 static bool g_showDemo     = false;   // ImGui demo window (dev aid)
 static bool g_buildLayout  = false;   // build the default dock layout once (only when no imgui.ini yet)
@@ -184,7 +197,7 @@ void desktopUiLoadConfig()
     if (strcmp(key, "winW") == 0) g_cfgWinW = v;
     else if (strcmp(key, "winH") == 0) g_cfgWinH = v;
     else if (strcmp(key, "memCols") == 0) g_memEdit.Cols = (v >= 4 && v <= 64) ? v : 16;
-    CFG("filterLinear", g_filterLinear); CFG("cropToVideo", g_cropToVideo);
+    CFG(kFilterKey, g_filterLinear); CFG("cropToVideo", g_cropToVideo);
     CFG("showCtrl", g_showCtrl);   CFG("showCpu", g_showCpu);   CFG("showIo", g_showIo);
     CFG("showDisasm", g_showDisasm); CFG("showBp", g_showBp);   CFG("showMem", g_showMem);
     CFG("showHeat", g_showHeat);   CFG("showDisk", g_showDisk);
@@ -363,6 +376,14 @@ static void buildMenuBar()
     ImGui::Separator();
     if (ImGui::MenuItem("Reset (reboot)")) dbgReset();
     if (ImGui::MenuItem("Quit")) { desktopUiSaveState(); running = false; SDL_Quit(); std::exit(0); }
+    ImGui::EndMenu();
+  }
+
+  if (ImGui::BeginMenu("Device")) {
+    // Each entry restarts the app as that board (the PicoCalc ones run emu8-picocalc.exe).
+    for (int d = 0; d < DEV_COUNT; d++)
+      if (ImGui::MenuItem(desktopDeviceInfo(d).name, nullptr, d == desktopDevice(), desktopDeviceAvailable(d)))
+        desktopSwitchDevice(d);
     ImGui::EndMenu();
   }
 
@@ -799,11 +820,69 @@ static void buildHeatPanel()
 }
 
 // --- emulator display window ----------------------------------------------------------------------
+// Where the framebuffer lands on the simulated panel (panel pixels), like src/shared/display_gfx.cpp
+// does on the S3 / P4: UI frames are stretched over the whole panel, emulator video is centred 1:1,
+// or with SCREEN FILL the active video rect is scaled to the panel height (full width if the core
+// asked for a stretch). Frames bigger than the panel (PC-XT) are fitted.
+static void panelPlacement(int fbW, int fbH, int pw, int ph, SDL_Rect &src, SDL_FRect &dst)
+{
+  src = SDL_Rect{0, 0, fbW, fbH};
+  if (desktopUiModeActive() && fbW == 320 && fbH == 240) { dst = SDL_FRect{0, 0, (float)pw, (float)ph}; return; }
+  int l, t, w, h; desktopGetVideoRect(&l, &t, &w, &h);
+  if (screenFill && w > 0 && h > 0 && l >= 0 && t >= 0 && l + w <= fbW && t + h <= fbH) {
+    src = SDL_Rect{l, t, w, h};
+    float dw = desktopVideoStretch() ? (float)pw : (float)w * ph / h;
+    if (dw > pw) dw = (float)pw;
+    dst = SDL_FRect{(pw - dw) * 0.5f, 0, dw, (float)ph};
+    return;
+  }
+  float s = 1.0f;
+  if (fbW > pw || fbH > ph) s = std::min((float)pw / fbW, (float)ph / fbH);
+  dst = SDL_FRect{(pw - fbW * s) * 0.5f, (ph - fbH * s) * 0.5f, fbW * s, fbH * s};
+}
+
 static void buildDisplayWindow(SDL_Texture *emuTex, int fbW, int fbH)
 {
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
   if (ImGui::Begin("Emulator")) {
-    // source sub-rect of the framebuffer: full 320x240, or just the active video content if cropping
+    const DesktopDeviceInfo &dev = desktopDeviceInfo();
+#if defined(EMU_SIM_PICOCALC)
+    // The PicoCalc picture, with the 320x320 panel in its screen. No touch panel -> no touch target.
+    int gx, gy, gw, gh;
+    if (pcSimSkinDraw(g_ren, emuTex, g_filterLinear, &gx, &gy, &gw, &gh)) {
+      g_dstRect = SDL_Rect{0, 0, 0, 0};
+      ImGui::End();
+      ImGui::PopStyleVar();
+      return;
+    }
+#endif
+    SDL_SetTextureScaleMode(emuTex, g_filterLinear ? SDL_ScaleModeLinear : SDL_ScaleModeNearest);
+    ImVec2 avail = ImGui::GetContentRegionAvail();
+    ImVec2 cur = ImGui::GetCursorScreenPos();
+
+    if ((dev.panelW != 320 || dev.panelH != 240) && !dev.picocalc && !g_cropToVideo) {
+      // S3 / P4: the panel (black) at its own aspect, the framebuffer placed on it like the device does
+      float sc = std::min(avail.x / dev.panelW, avail.y / dev.panelH);
+      float pw = dev.panelW * sc, ph = dev.panelH * sc;
+      ImVec2 p0(cur.x + (avail.x - pw) * 0.5f, cur.y + (avail.y - ph) * 0.5f);
+      ImDrawList *dl = ImGui::GetWindowDrawList();
+      dl->AddRectFilled(p0, ImVec2(p0.x + pw, p0.y + ph), IM_COL32(0, 0, 0, 255));
+      dl->AddRect(ImVec2(p0.x - 1, p0.y - 1), ImVec2(p0.x + pw + 1, p0.y + ph + 1), IM_COL32(70, 70, 78, 255));   // bezel
+      SDL_Rect src; SDL_FRect dst;
+      panelPlacement(fbW, fbH, dev.panelW, dev.panelH, src, dst);
+      ImVec2 d0(p0.x + dst.x * sc, p0.y + dst.y * sc), d1(d0.x + dst.w * sc, d0.y + dst.h * sc);
+      dl->AddImage((ImTextureID)(intptr_t)emuTex, d0, d1,
+                   ImVec2(src.x / (float)fbW, src.y / (float)fbH),
+                   ImVec2((src.x + src.w) / (float)fbW, (src.y + src.h) / (float)fbH));
+      ImGui::Dummy(avail);
+      g_srcRect = src;
+      g_dstRect = SDL_Rect{ (int)d0.x, (int)d0.y, (int)(d1.x - d0.x), (int)(d1.y - d0.y) };
+      ImGui::End();
+      ImGui::PopStyleVar();
+      return;
+    }
+
+    // CYD (and "Crop borders"): the framebuffer itself, aspect-fit
     int sx = 0, sy = 0, sw = fbW, sh = fbH;
     if (g_cropToVideo) {
       int l, t, w, h; desktopGetVideoRect(&l, &t, &w, &h);
@@ -812,15 +891,12 @@ static void buildDisplayWindow(SDL_Texture *emuTex, int fbW, int fbH)
     g_srcRect = SDL_Rect{ sx, sy, sw, sh };
 
     // aspect-fit the source rect into the window's content area, centered (letterbox/pillarbox)
-    ImVec2 avail = ImGui::GetContentRegionAvail();
     float ar = (float)sw / (float)sh;
     float dw = avail.x, dh = dw / ar;
     if (dh > avail.y) { dh = avail.y; dw = dh * ar; }
-    ImVec2 cur = ImGui::GetCursorScreenPos();
     ImVec2 pos = ImVec2(cur.x + (avail.x - dw) * 0.5f, cur.y + (avail.y - dh) * 0.5f);
     ImGui::SetCursorScreenPos(pos);
 
-    SDL_SetTextureScaleMode(emuTex, g_filterLinear ? SDL_ScaleModeLinear : SDL_ScaleModeNearest);
     ImVec2 uv0(sx / (float)fbW, sy / (float)fbH);
     ImVec2 uv1((sx + sw) / (float)fbW, (sy + sh) / (float)fbH);
     ImGui::Image((ImTextureID)(intptr_t)emuTex, ImVec2(dw, dh), uv0, uv1);
@@ -1561,7 +1637,7 @@ void desktopUiFrame(SDL_Texture *emuTex, int fbW, int fbH)
     ImGui::DockBuilderAddNode(dockId, ImGuiDockNodeFlags_DockSpace);
     ImGui::DockBuilderSetNodeSize(dockId, vp->Size);
     ImGuiID rightId, leftId;
-    ImGui::DockBuilderSplitNode(dockId, ImGuiDir_Right, 0.34f, &rightId, &leftId);
+    ImGui::DockBuilderSplitNode(dockId, ImGuiDir_Right, kSimPicoCalc ? 0.5f : 0.34f, &rightId, &leftId);
     ImGui::DockBuilderDockWindow("Emulator", leftId);
     // right column stacked top->bottom: Control, CPU, Memory (all visible at once)
     ImGuiID ctrlId, rest1;
@@ -1583,8 +1659,9 @@ void desktopUiFrame(SDL_Texture *emuTex, int fbW, int fbH)
     ImGui::DockBuilderFinish(dockId);
   }
 
-  // debug hotkeys (F5 pause/resume, F10 step) — handled here so they work over the whole window
-  if (!ImGui::GetIO().WantTextInput) {
+  // debug hotkeys (F5 pause/resume, F10 step) — handled here so they work over the whole window.
+  // Not in emu8-picocalc: F5 and F10 (Shift-F5) are PicoCalc keys there.
+  if (!ImGui::GetIO().WantTextInput && !kSimPicoCalc) {
     if (ImGui::IsKeyPressed(ImGuiKey_F5, false))  dbgSetPaused(!dbgIsPaused());
     if (ImGui::IsKeyPressed(ImGuiKey_F10, false)) dbgStep();
   }

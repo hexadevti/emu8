@@ -339,9 +339,11 @@ typedef enum {
   ESP_RST_UNKNOWN = 0, ESP_RST_POWERON, ESP_RST_EXT, ESP_RST_SW, ESP_RST_PANIC,
   ESP_RST_INT_WDT, ESP_RST_TASK_WDT, ESP_RST_WDT, ESP_RST_DEEPSLEEP, ESP_RST_BROWNOUT, ESP_RST_SDIO
 } esp_reset_reason_t;
-esp_reset_reason_t esp_reset_reason();   // returns ESP_RST_POWERON on desktop -> boot splash shows
+esp_reset_reason_t esp_reset_reason();   // ESP_RST_SW after ESP.restart() (a re-exec), else POWERON
 uint32_t           esp_random();
 void               esp_restart();
+void               desktopResetInit();          // hal.cpp: main() calls it before setup()
+const char        *desktopPlatformOverride();   // EMU_PLATFORM of this process's first boot, or null
 
 typedef int esp_err_t;
 #define ESP_OK   0

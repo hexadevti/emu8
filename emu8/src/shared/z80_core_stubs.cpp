@@ -26,6 +26,7 @@ void msxScanFiles() {}
 void msxBrowseEnter(const char *) {}
 void msxBrowseUp() {}
 bool msxLoadSelected(const char *) { return false; }
+bool msxMountCart(const char *) { return false; }
 void msxUnmountDisk() {}
 bool msxDiskMounted(const char *) { return false; }
 void msxUnloadCart() {}

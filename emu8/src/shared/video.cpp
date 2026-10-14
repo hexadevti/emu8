@@ -1,7 +1,7 @@
 #include "../../emu.h"
 
 #include "bootlogo.h"
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
 #include "dirty_bands.h"
 #endif   // embedded boot-splash logo (RGB565)
 #include <esp_system.h>          // esp_reset_reason()
@@ -10,7 +10,7 @@
 #include "esp_task_wdt.h"        // esp_task_wdt_reconfigure (core 3.x TWDT, replaces disableCore0WDT)
 #endif
 bool splashActive = true; // true until the boot splash times out or is dismissed
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
 // Keyboard-driven splash navigation (this board has no touch panel). input_picocalc.cpp posts
 // one of SPLASH_KEY_* here while splashActive is set, instead of dispatching that key to the
 // core; splashService() consumes it on the next render pass. Single producer (the input pump,
@@ -43,6 +43,12 @@ bool sdManagerBootRequested()
   sdManagerOnBootMagic = 0;
   return yes;
 }
+#if defined(BOARD_DESKTOP)
+// The desktop's ESP.restart() re-execs the program, so there is no RTC memory to survive it:
+// hal.cpp hands these two words to the next process instead.
+void desktopNoinitGet(uint32_t v[2]) { v[0] = splashOnBootMagic; v[1] = sdManagerOnBootMagic; }
+void desktopNoinitSet(const uint32_t v[2]) { splashOnBootMagic = v[0]; sdManagerOnBootMagic = v[1]; }
+#endif
 
 // colors[] / colors16[] are defined in globals.cpp (after tft, for static-init order).
 int flashCount = 0;
@@ -84,7 +90,7 @@ void displaySetVideoFill(int, int, bool) {}
 // to five more for a USB terminal that is usually not coming. THAT was the black screen. So the
 // panel now comes up ahead of both waits and shows one line naming the step the firmware is
 // actually on. The full log still goes to USB CDC, which is where a log belongs.
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
 static bool s_bootProg = false;
 static const int kBootMsgY = 152;      // clear of the logo, which occupies rows 38..119
 
@@ -108,6 +114,9 @@ void bootProgressStep(const char *what)
   tft.setTextDatum(MC_DATUM);
   tft.setTextColor(tft.color565(0, 200, 120), TFT_BLACK);
   tft.drawString(what, DISP_LOGICAL_W / 2, kBootMsgY, 2);
+#if defined(EMU_SIM_PICOCALC)
+  displayFlush();                      // the simulator presents only on flush; the panel shows at once
+#endif
 }
 
 void bootProgressEnd()
@@ -121,6 +130,9 @@ void bootProgressEnd()
     tft.setTextDatum(MC_DATUM);
     tft.setTextColor(tft.color565(255, 70, 70), TFT_BLACK);
     tft.drawString("SD card not found", DISP_LOGICAL_W / 2, kBootMsgY, 2);
+#if defined(EMU_SIM_PICOCALC)
+    displayFlush();
+#endif
     delay(1500);
   }
 }
@@ -142,7 +154,7 @@ void bootProgressEnd() {}
 // It stops short of the right-hand 26px so the Disk II drive light below keeps its corner. That
 // matters more than it looks: the light is redrawn only when DriveMotorON_OFF changes, so erasing
 // it here would leave it dark until the next time the motor happened to switch.
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
 static uint8_t  s_hintState = 0;              // 0 = waiting for the splash, 1 = showing, 2 = done
 static uint32_t s_hintUntil = 0;
 static volatile bool s_hintKeyed = false;     // set from the keyboard task, read here
@@ -159,7 +171,7 @@ static void hintClearBar() { tft.fillPanelRect(0, kHintTop, kHintW, kHintH, TFT_
 static void hintText(const char **keys, const char **joy)
 {
   const bool apple = (currentPlatform == PLATFORM_APPLE2);
-#if defined(BOARD_PICOCALC)   // no F6 key: Shift-F3 arrives as F8 (input_picocalc.cpp)
+#if UI_PICOCALC   // no F6 key: Shift-F3 arrives as F8 (input_picocalc.cpp)
   *keys = apple ? "Ctrl-F1 options   Ctrl-F3 reset   Ct-Sh-F1 systems"
                 : "Ctrl-F1 options   Ctrl-Shift-F1 systems";
 #else
@@ -174,7 +186,7 @@ static void hintText(const char **keys, const char **joy)
     case PLATFORM_MSX:   *joy = "Arrows joystick   Space trigger";             break;
     case PLATFORM_COLECO:*joy = "Arrows  Space/F4 L  X/F5 R  0-9 keypad  -=*  = #"; break;
     case PLATFORM_ZX:    *joy = "Shift=CAPS  Ctrl/Alt=SYMBOL  F12 reset"; break;
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
     case PLATFORM_SMS:   *joy = "Arrows  Space/F4 btn1  X/F5 btn2  Ctrl-F3 pause"; break;
 #endif
     default:             *joy = "Arrows joystick   Space fire";                break;
@@ -349,7 +361,11 @@ static bool splashEnabled(int i)
   if (splashSystems[i].iie > 0 && apple2IIeUnavailable) return false;
   switch (splashSystems[i].platform) {
     case SPLASH_SETUP:      return true;
+#if defined(BOARD_DESKTOP)
+    case PLATFORM_PCXT:     return BOARD_HAS_PCXT_CORE && desktopDeviceHasPcxt();   // not on a simulated RP2040
+#else
     case PLATFORM_PCXT:     return BOARD_HAS_PCXT_CORE;
+#endif
     case PLATFORM_MSX:      return BOARD_HAS_MSX_CORE;
     case PLATFORM_SMS:      return BOARD_HAS_SMS_CORE;
     case PLATFORM_COLECO:   return BOARD_HAS_COLECO_CORE;
@@ -393,7 +409,11 @@ static void splashDrawBtn(int i, bool enabled)
   tft.drawRoundRect(x, y, w, h, 6, active ? TFT_WHITE : tft.color565(70, 78, 92));
   tft.setTextDatum(MC_DATUM);
   tft.setTextColor(enabled ? TFT_WHITE : tft.color565(110, 118, 130), face);
+#if defined(BOARD_PICOCALC) || defined(BOARD_DESKTOP)
+  int lblFont = (tft.textWidth(label, 2) <= w - 6) ? 2 : 1;      // 1:1 bitmap fonts (uitext.h)
+#else
   int lblFont = ((int)strlen(label) * 12 <= w - 2) ? 2 : 1;   // font 2 is 12px/char, font 1 is 6px
+#endif
   tft.drawString(label, x + w / 2, enabled ? y + h / 2 : y + h / 2 - 6, lblFont);
   if (!enabled) {
     tft.setTextColor(tft.color565(110, 118, 130), face);
@@ -411,7 +431,7 @@ static void splashFinish()           // boot the current platform
   if (splashResumeCpu) { splashResumeCpu = false; paused = false; }
 }
 
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
 // Ctrl-F6: show the system menu over the running emulator instead of rebooting into it. The core
 // is paused the way the settings window pauses it, so backing out (Esc, the timeout, or picking
 // the system already running) resumes it exactly where it was; only picking a DIFFERENT system
@@ -485,7 +505,7 @@ static void splashService()
     tft.setSwapBytes(false);
     tft.setTextDatum(MC_DATUM);
     tft.setTextColor(tft.color565(150, 160, 175), TFT_BLACK);
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
     tft.drawString("SELECT SYSTEM    Ctrl-F1: SETUP", 160, SPLASH_SUB_Y, 2);
 #else
     tft.drawString("SELECT SYSTEM", 160, SPLASH_SUB_Y, 2);
@@ -502,7 +522,7 @@ static void splashService()
     return;
   }
 
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
   // No touch panel here, so the splash is driven from the keyboard instead: left/right move
   // the highlight over the enabled platforms, up/down jump between the two rows, Enter commits
   // (the same path a tap takes). Any nav key also restarts the timeout, so browsing the list
@@ -563,7 +583,7 @@ static void sdManagerRender()
       tft.drawString("Waiting for a host...", 160, 146, 2);
     }
     tft.setTextColor(dim, TFT_BLACK);
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
     tft.drawString("Ctrl-F6: back to the system menu", 160, 200, 2);
 #else
     tft.drawString("Tap the screen: back to the system menu", 160, 200, 2);
@@ -613,7 +633,15 @@ void fpsFrameShown()
   if (now - t0 >= 1000) { emuFps = (float)n * 1000.0f / (float)(now - t0); t0 = now; n = 0; }
 }
 
-#if defined(BOARD_PICOCALC)
+// Apple IIe DHGR is AN3 off ($C05E) AND 80COL on ($C00D); with 80COL off the same switches show
+// plain HGR. Programs often leave AN3 set when they drop back to HGR/text, so AN3 alone is not
+// enough. (Tested from renderLoop's per-pass snapshot of the switches, `dhgr` there.)
+// Displayed page. With 80STORE on, PAGE2 ($C055) only banks $0400/$2000 to aux memory for the CPU
+// (how DHGR / 80-col programs write the aux half) -- the IIe keeps SHOWING page 1. Following PAGE2
+// here displayed page 2 ($4000/$0800) mid-setup: the HGR->DHGR garbage.
+static inline bool appleShowPage1() { return Page1_Page2 || (AppleIIe && Store80On_Off); }
+
+#if UI_PICOCALC
 // Apple II dirty bands. The raster below decodes every pixel of all 192 lines each pass, which on
 // the M0+ is ~50ms -- the panel ran at ~18fps even when nothing on screen moved. A band is one
 // text row (b, l) = the 8 scanlines the loop draws per iteration; this hashes exactly the bytes
@@ -627,21 +655,22 @@ static uint32_t appleHashRow(uint32_t h, const unsigned char *p)
   for (int i = 0; i < 0x28; i++) h = (h ^ p[i]) * 16777619u;
   return h;
 }
-static uint32_t appleBandHash(int b, int l, bool gfx, uint16_t textPage, uint16_t graphicsPage)
+static uint32_t appleBandHash(int b, int l, bool gfx, uint16_t textPage, uint16_t graphicsPage,
+                              bool lores, bool dhgr, bool cols40)
 {
   const uint16_t row = (uint16_t)(b * 0x28 + l * 0x80);
   uint32_t h = 2166136261u;
-  if (gfx && LoRes_HiRes) {
+  if (gfx && lores) {
     h = appleHashRow(h ^ 1, ram + textPage + row);
-  } else if (gfx && DHiResOn_Off) {
+  } else if (gfx && dhgr) {
     for (int block = 0; block < 8; block++) {
-      h = appleHashRow(h ^ 2, auxram + (uint16_t)(0x2000 + row + block * 0x400));
-      h = appleHashRow(h, ram + (uint16_t)(0x2000 + row + block * 0x400));
+      h = appleHashRow(h ^ 2, auxram + (uint16_t)(graphicsPage + row + block * 0x400));
+      h = appleHashRow(h, ram + (uint16_t)(graphicsPage + row + block * 0x400));
     }
   } else if (gfx) {
     for (int block = 0; block < 8; block++)
       h = appleHashRow(h ^ 3, ram + (uint16_t)(graphicsPage + row + block * 0x400));
-  } else if (Cols40_80) {
+  } else if (cols40) {
     h = appleHashRow(h ^ 4, ram + textPage + row);
   } else {
     h = appleHashRow(h ^ 5, auxram + (uint16_t)(0x400 + row));
@@ -683,7 +712,7 @@ void renderLoop(void *pvParameters)
     // direct NES draw (nothing in the canvas to flush) but runs normally for UI / menus / C64 / Atari.
     tft.setBypassCanvas(false);
 #endif
-#if defined(BOARD_PICOCALC)
+#if defined(BOARD_PICOCALC) || defined(EMU_SIM_PICOCALC)
     // The settings menu draws on the whole 320x320 panel (optionsui.cpp). Once it has closed, go
     // back to the letterboxed 320x240 and blacken the bars it drew over; the logical area is
     // repainted by the platform code below (showHideOptionsWindow() already set clearScr).
@@ -902,7 +931,7 @@ void renderLoop(void *pvParameters)
       msxRenderFrame();
       if (oskActive()) { displaySetUiMode(true); oskRender(); }   // on-screen keyboard overlays the bottom
       Vertical_blankingOn_Off = true;
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
       vTaskDelay(1);                     // the ~16ms SPI push already paces us; a 10ms nap on top drops frames
 #else
       vTaskDelay(pdMS_TO_TICKS(10));
@@ -922,7 +951,7 @@ void renderLoop(void *pvParameters)
       displaySetVideoFill(32, 256, true);// 256-wide picture starting at x=32
       smsRenderFrame();
       Vertical_blankingOn_Off = true;
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
       vTaskDelay(1);                     // the ~16ms SPI push already paces us; a 10ms nap on top drops frames
 #else
       vTaskDelay(pdMS_TO_TICKS(10));
@@ -941,7 +970,7 @@ void renderLoop(void *pvParameters)
       displaySetVideoFill(32, 256, true);
       colecoRenderFrame();
       Vertical_blankingOn_Off = true;
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
       vTaskDelay(1);
 #else
       vTaskDelay(pdMS_TO_TICKS(10));
@@ -959,7 +988,7 @@ void renderLoop(void *pvParameters)
       zxRenderFrame();
       if (oskActive()) { displaySetUiMode(true); oskRender(); }   // on-screen keyboard overlays the bottom
       Vertical_blankingOn_Off = true;
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
       vTaskDelay(1);
 #else
       vTaskDelay(pdMS_TO_TICKS(10));
@@ -975,7 +1004,7 @@ void renderLoop(void *pvParameters)
     {
 #if BOARD_DISPLAY_GFX
       if (clearScr) { tft.fillScreen(TFT_BLACK); tft.fillPanelBlack(); clearScr = false; pcxtForceRedraw(); }
-#elif defined(BOARD_PICOCALC)
+#elif UI_PICOCALC
       if (clearScr) { clearScr = false; pcxtForceRedraw(); }   // the PicoCalc renderer wipes the panel itself
 #endif
       bool drew = pcxtRenderFrame();
@@ -985,7 +1014,7 @@ void renderLoop(void *pvParameters)
       if (!drew) tft.setBypassCanvas(true);   // nothing changed -> no flush this round (free the bus)
 #endif
       Vertical_blankingOn_Off = true;
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
       vTaskDelay(pdMS_TO_TICKS(drew ? 1 : 20));   // only changed rows are pushed; the push paces us
 #elif defined(BOARD_DESKTOP)
       vTaskDelay(pdMS_TO_TICKS(4));   // desktop: present is vsync-paced; the device's 16-40ms throttle
@@ -1006,7 +1035,7 @@ void renderLoop(void *pvParameters)
     margin_y = oskRasterTop();
     screen_width = 280;
     screen_height = oskRasterHeight();
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
     // SCREEN: FILL (Settings): 280x192 scaled ~8:7 on both axes to 320x220 (rows 10..229) of the 320x240
     // logical screen. Vertically that is the existing coef192 line repeat; horizontally the display
     // doubles every 7th pixel (setHScale78 below). A mode change wipes the screen once, so the
@@ -1027,7 +1056,7 @@ void renderLoop(void *pvParameters)
     float coef140 = screen_width / 140;
 
     int rasterH = (int)screen_height; // matches the line count produced by coef192
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
     // ...only while margin_y is 0 or the scale is 1:1: the line repeat below measures from margin_y,
     // so with FILL (219/192 = 73/64, exact in float) it emits floor(coef192*202)-10 = 220 lines.
     // Size the window by that same expression or the extra line would wrap to the top.
@@ -1038,29 +1067,47 @@ void renderLoop(void *pvParameters)
     // to be the full 320x240 or the surplus wraps back to the window origin and shifts the frame
     // down by the overrun. The 40-col branch used to win this race on an AppleIIe at boot (its
     // window is 320x192 = 61,440 px, 15,360 short of the clear) and cost a 48-row offset.
+    // 80-col text rows are 320 px wide, graphics rows 280. The window width follows whether any
+    // 80-col text row is on screen (full text or the mixed-mode bottom 4 rows) -- NOT the DHGR flag,
+    // which programs leave set across HGR/text switches. In a wide frame the graphics rows (mixed
+    // mode only) pad 20 px each side so every streamed line is exactly 320.
+    // Snapshot the video switches ONCE per pass and use only the snapshot below. The 6502 runs on
+    // the other core and flips them mid-pass; reading them live at several points (window width,
+    // DHGR branch, mode signature, per-band hash and decoder) let one band be hashed as the new mode
+    // but drawn as the old one. On the PicoCalc the dirty bands then saw "unchanged" and kept that
+    // garbage until the 1 s full refresh -- the HGR/TEXT<->DHGR transition. A switch that lands
+    // mid-pass is now simply picked up whole by the next pass (the mode signature differs).
+    const bool vGfx = Graphics_Text, vFull = DisplayFull_Split, vLores = LoRes_HiRes;
+    const bool v40 = Cols40_80, vDhr = DHiResOn_Off;
+    const bool dhgr = AppleIIe && vDhr && !v40;
+    const bool wide80 = AppleIIe && !v40 && (!vGfx || !vFull);
+    const int gfxPad = wide80 ? 20 : 0;
+    {
+      // Wide <-> narrow leaves the 20 px side columns holding stale 80-col text: wipe once.
+      static bool lastWide80 = false;
+      if (wide80 != lastWide80) { lastWide80 = wide80; clearScr = true; }
+    }
     if (OptionsWindow || clearScr)
     tft.setAddrWindow(0, 0, 320, 240);
-    else if (AppleIIe && !Cols40_80 && !DHiResOn_Off)
+    else if (wide80)
     tft.setAddrWindow(0, margin_y, 320, rasterH); // Set the area to draw
-    else if (AppleIIe && DHiResOn_Off && !videoColor)
-    tft.setAddrWindow(margin_x, margin_y, 280, rasterH); // DHiRes mono (centered 280)
     else
     tft.setAddrWindow(margin_x, margin_y, 280, rasterH);
     // fill-screen: stretch the raster to 100% of the panel (no 4:3 aspect, no side bars). Mirror the
     // horizontal extent of the addr window above so we sample exactly the columns the raster filled
-    // (full 320 for the 40-col branch; the centered 280 at margin_x for the graphics/80-col branches).
-    if (!OptionsWindow && AppleIIe && !Cols40_80 && !DHiResOn_Off) displaySetVideoFill(0, 320, true);
-    else                                                           displaySetVideoFill(margin_x, (int)screen_width, true);
-#if defined(BOARD_PICOCALC)
+    // (full 320 for the 80-col branch; the centered 280 at margin_x for the graphics/40-col branches).
+    if (!OptionsWindow && wide80) displaySetVideoFill(0, 320, true);
+    else                          displaySetVideoFill(margin_x, (int)screen_width, true);
+#if UI_PICOCALC
     // FILL: every 280-wide branch widens 7:8 to the full 320. (The 80-col text branch above is
     // already 320 wide; the clear and the menu keep their unscaled 320x240 window.)
-    if (appleFill && !OptionsWindow && !DebugWindow && !clearScr && !(AppleIIe && !Cols40_80 && !DHiResOn_Off)) {
+    if (appleFill && !OptionsWindow && !DebugWindow && !clearScr && !wide80) {
       tft.setAddrWindow(0, margin_y, 320, rasterH);
       tft.setHScale78(true);
     }
 #endif
     tft.startWrite();
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
     appleBands = 0;
 #endif
 
@@ -1071,8 +1118,8 @@ void renderLoop(void *pvParameters)
     // Snapshot the page selection under a brief lock so a CPU page-flip (C054/C055)
     // can't block for a whole frame; the rest of the frame renders from these locals.
     page_lock.lock();
-    ushort textPage = Page1_Page2 ? 0x400 : 0x800;
-    ushort graphicsPage = Page1_Page2 ? 0x2000 : 0x4000;
+    ushort textPage = appleShowPage1() ? 0x400 : 0x800;
+    ushort graphicsPage = appleShowPage1() ? 0x2000 : 0x4000;
     page_lock.unlock();
     unsigned long endTime1 = millis();
     // if (demo) {
@@ -1115,13 +1162,13 @@ void renderLoop(void *pvParameters)
       tft.writeColor(colors[0], (uint32_t)320 * 240);
 #endif
       clearScr = false;
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
       appleForceFull = true;
 #endif
     }
     else if (OptionsWindow || DebugWindow) 
     {
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
       appleForceFull = true;
 #endif
       y=0;
@@ -1149,7 +1196,7 @@ void renderLoop(void *pvParameters)
     }
     else
     {
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
       // Dirty bands (see appleBandHash). Anything that changes how bytes become pixels -- mode
       // switches, colour, FILL, the II+ flash phase -- forces a full frame, and so does a periodic
       // refresh (every 60th pass, ~1s) so nothing drawn over the raster by other code can stick.
@@ -1157,8 +1204,8 @@ void renderLoop(void *pvParameters)
       static uint32_t modeSig = 0;
       static uint8_t  refresh = 0;
       uint32_t ms = 2166136261u;
-      const uint32_t modeBits[] = { Graphics_Text, DisplayFull_Split, LoRes_HiRes, DHiResOn_Off,
-                                    Cols40_80, AppleIIe, videoColor, appleFill,
+      const uint32_t modeBits[] = { vGfx, vFull, vLores, vDhr,
+                                    v40, AppleIIe, videoColor, appleFill,
                                     (uint32_t)(!AppleIIe && inversed), (uint32_t)rasterH,
                                     (uint32_t)margin_y };
       for (uint32_t v : modeBits) ms = (ms ^ v) * 16777619u;
@@ -1166,8 +1213,8 @@ void renderLoop(void *pvParameters)
       if (fullFrame) refresh = 0;
       modeSig = ms;
       appleForceFull = false;
-      const int winX = (AppleIIe && !Cols40_80 && !DHiResOn_Off) || appleFill ? 0 : margin_x;
-      const int winW = (AppleIIe && !Cols40_80 && !DHiResOn_Off) || appleFill ? 320 : 280;
+      const int winX = wide80 || appleFill ? 0 : margin_x;
+      const int winW = wide80 || appleFill ? 320 : 280;
       const int rasterEnd = margin_y + rasterH;
       bool skipped = false;
 #endif
@@ -1175,11 +1222,11 @@ void renderLoop(void *pvParameters)
       {
         for (int l = 0; l < 8; l++)
         {
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
           {
-            const bool gfx = (Graphics_Text && DisplayFull_Split) || (Graphics_Text && !DisplayFull_Split && (b < 2 || (b == 2 && l < 4)));
-            if (gfx && !LoRes_HiRes && !DHiResOn_Off) graphicsPage = Page1_Page2 ? 0x2000 : 0x4000;
-            const uint32_t h = appleBandHash(b, l, gfx, textPage, graphicsPage);
+            const bool gfx = (vGfx && vFull) || (vGfx && !vFull && (b < 2 || (b == 2 && l < 4)));
+            if (gfx && !vLores) graphicsPage = appleShowPage1() ? 0x2000 : 0x4000;
+            const uint32_t h = appleBandHash(b, l, gfx, textPage, graphicsPage, vLores, dhgr, v40);
             if (!fullFrame && h == bandSig[b * 8 + l]) {
               // Advance the line bookkeeping exactly as drawing the band's 8 lines would.
               y += 8;
@@ -1196,9 +1243,9 @@ void renderLoop(void *pvParameters)
             }
           }
 #endif
-          if ((Graphics_Text && DisplayFull_Split) || (Graphics_Text && !DisplayFull_Split && (b < 2 || (b == 2 && l < 4))))
+          if ((vGfx && vFull) || (vGfx && !vFull && (b < 2 || (b == 2 && l < 4))))
           {
-            if (LoRes_HiRes)
+            if (vLores)
             {
               for (int j = 0; j < 8; j++)
               {
@@ -1216,6 +1263,7 @@ void renderLoop(void *pvParameters)
                   bool lastLine = false;
                   bool lastCol = false;
                   // End Upscale
+                  if (gfxPad) tft.writeColor(TFT_BLACK, gfxPad);   // mixed-mode 80-col frame: center in 320
                   for (int c = 0; c < 0x28; c++)
                   {
                     for (int k = 0; k < 7; k++)
@@ -1231,93 +1279,50 @@ void renderLoop(void *pvParameters)
                       x++;
                     }
                   }
+                  if (gfxPad) tft.writeColor(TFT_BLACK, gfxPad);   // mixed-mode 80-col frame: center in 320
                   repeat_y++;
                   y_upscaled++;
                 }
                 y++;
               }
             }
-            else if (DHiResOn_Off)
+            else if (dhgr)
             {
-              static bool line[0x50 * 7]; // 560 DHGR bits; static avoids per-scanline malloc churn
+              // A DHGR scanline is 80 bytes, alternating aux/main, 7 bits each (bit 0 first) = 560
+              // bits. Four bytes (aux, main, aux, main) are exactly 28 bits = 7 colour pixels of 4 bits,
+              // so each pair of byte columns decodes straight from one word -- no per-bit expansion.
+              // The first bit of a pixel is its colour's MSB, hence the nibble reversal.
+              static const uint8_t rev4[16] = { 0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15 };
 
               for (int block = 0; block < 8; block++)
               {
                 // Init Upscale
                 int repeat_y = 0;
                 uint16_t upscaleCoef_y = floor(coef192 * (float)(y+1));
-                //Serial.printf("upscaleCoef_y=%d screen_width=%f (float)(y+1)=%f last_y=%d\n",upscaleCoef_y, screen_width, (float)(y+1), last_y);
                 uint16_t repeatTimes_y = upscaleCoef_y - last_y;
-                //Serial.printf("y=%d repeatTimes_y=%d\n", y, repeatTimes_y);
                 last_y = upscaleCoef_y;
+                const uint16_t rowAddr = (uint16_t)(graphicsPage + (b * 0x28) + (l * 0x80) + block * 0x400);
+                const unsigned char *aux = auxram + rowAddr;
+                const unsigned char *mn  = ram + rowAddr;
                 while (repeat_y < repeatTimes_y)
                 {
-                  int lineId = 0;
-                  x_upscaled = margin_x;
-                  x = margin_x;
-                  last_x = margin_x;
-                  uint16_t lastPixel = 0;
-                  bool lastLine = false;
-                  bool lastCol = false;
-                  char bottomChr;
                   // End Upscale
-                  for (ushort c = 0; c < 0x50; c++)
+                  if (gfxPad) tft.writeColor(TFT_BLACK, gfxPad);   // mixed-mode 80-col frame: center in 320
+                  for (int c = 0; c < 0x28; c += 2)
                   {
-                    char chr;
-                    if (c % 2 == 0)
-                    {
-                      chr = auxram[(ushort)((0x2000 + (b * 0x28) + (l * 0x80) + c / 2) + block * 0x400)];
-                    }
-                    else
-                    {
-                      chr = ram[(ushort)((0x2000 + (b * 0x28) + (l * 0x80) + (c - 1) / 2) + block * 0x400)];
-                    }
-
-                    bool blockline[8];
-                    for (int i = 0; i < 8; i++)
-                      blockline[7 - i] = (chr & (1 << i)) != 0;
-
-                    bool fillLine = videoColor;
-                    fillLine = true; // TFT renders both color & mono from line[] after the row
-                    if (fillLine)
-                    {
-                      for (int i = 7; i > 0; i--)
-                      {
-                        *(line + lineId) = blockline[i];
-                        lineId++;
-                      }
-                    }
-                    else
-                    {
-                      for (int i = 7; i > 0; i--)
-                      {
-                        // Init Upscale
-                        int repeat_x = 0;
-                        uint16_t upscaleCoef_x = floor(coef560 * (float)(x+1));
-                        //Serial.printf("upscaleCoef_x=%d screen_width=%f (float)(x+1)=%f last_x=%d\n",upscaleCoef_x, screen_width, (float)(x+1), last_x);
-                        bool downScale = upscaleCoef_x < last_x;
-                        uint8_t repeatTimes_x = upscaleCoef_x - last_x;
-                        //Serial.printf("x=%d repeatTimes_x=%d\n", x, repeatTimes_x);
-                        last_x = upscaleCoef_x;
-                        while (repeat_x < repeatTimes_x)
-                        {
-                          repeat_x++;
-                        }
-                        x++;
-                      }
+                    uint32_t w = (uint32_t)(aux[c] & 0x7f)            | (uint32_t)(mn[c] & 0x7f) << 7 |
+                                 (uint32_t)(aux[c + 1] & 0x7f) << 14 | (uint32_t)(mn[c + 1] & 0x7f) << 21;
+                    if (videoColor) {
+                      // 7 colour pixels (140 per line) x2 = 280 px to match the window
+                      for (int p = 0; p < 7; p++, w >>= 4)
+                        tft.writeColor(colors16[rev4[w & 0xf]], 2);
+                    } else {
+                      // the 28 mono bits downsampled 2:1 (every other bit) = 14 px, 280 per line
+                      for (int p = 0; p < 14; p++, w >>= 2)
+                        tft.writeColor((w & 1) ? TFT_WHITE : TFT_BLACK, 1);
                     }
                   }
-                  if (videoColor) {
-                    // 140 DHGR color pixels (4 bits each) x2 = 280 px to match the window
-                    for (int i = 0; i < 0x50 * 7; i += 4) {
-                      int color = (line[i] ? 8 : 0) + (line[i + 1] ? 4 : 0) + (line[i + 2] ? 2 : 0) + (line[i + 3] ? 1 : 0);
-                      tft.writeColor(colors16[color], 2);
-                    }
-                  } else {
-                    // 560 mono DHGR bits downsampled 2:1 = 280 px to match the window
-                    for (int i = 0; i < 0x50 * 7; i += 2)
-                      tft.writeColor(line[i] ? TFT_WHITE : TFT_BLACK, 1);
-                  }
+                  if (gfxPad) tft.writeColor(TFT_BLACK, gfxPad);   // mixed-mode 80-col frame: center in 320
                   repeat_y++;
                   y_upscaled++;
                 }
@@ -1333,7 +1338,7 @@ void renderLoop(void *pvParameters)
                 // per frame: with a slow free-running renderer the latched page can be the
                 // one the CPU is redrawing during page-flip animation, which flickers.
                 // Reading it per scanline keeps us on the currently-shown (completed) page.
-                graphicsPage = Page1_Page2 ? 0x2000 : 0x4000;
+                graphicsPage = appleShowPage1() ? 0x2000 : 0x4000;
                 // Init Upscale
                 int repeat_y = 0;
                 uint16_t repeatTimes_y = 1;
@@ -1349,6 +1354,7 @@ void renderLoop(void *pvParameters)
                   bool lastLine = false;
                   bool lastCol = false;
                   // End Upscale
+                  if (gfxPad) tft.writeColor(TFT_BLACK, gfxPad);   // mixed-mode 80-col frame: center in 320
                   for (ushort c = 0; c < 0x28; c++)
                   {
                     if (c == 0x27)
@@ -1449,6 +1455,7 @@ void renderLoop(void *pvParameters)
                       }
                     }
                   }
+                  if (gfxPad) tft.writeColor(TFT_BLACK, gfxPad);   // mixed-mode 80-col frame: center in 320
                   repeat_y++;
                   y_upscaled++;
                 }
@@ -1456,7 +1463,7 @@ void renderLoop(void *pvParameters)
               }
             }
           }
-          else if (Cols40_80) // Text modes
+          else if (v40) // Text modes
           {
             for (int i = 0; i < 8; i++) // char lines
             {
@@ -1517,7 +1524,7 @@ void renderLoop(void *pvParameters)
               y++;
             }
           }
-          else if (AppleIIe && !Cols40_80)
+          else if (AppleIIe && !v40)
           {
             for (int i = 0; i < 8; i++)
             {
@@ -1606,12 +1613,12 @@ void renderLoop(void *pvParameters)
     
     unsigned long endTime2 = millis();
     tft.endWrite();
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
     dband::frameDone("Apple", appleBands);   // counts the frame (fpsFrameShown) and logs every 5s
 #else
     fpsFrameShown();
 #endif
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
     // Disk II drive light. It sits in the bottom letterbox bar, BELOW the 320x240 emulated
     // screen, which is the one piece of panel the Apple raster does not own -- so it can never
     // land on top of the picture, and the clear-screen path above (which writes exactly
@@ -1637,7 +1644,7 @@ void renderLoop(void *pvParameters)
     if (oskActive()) { displaySetUiMode(true); oskRender(); }
     Vertical_blankingOn_Off = true;
     unsigned long endTime3 = millis();
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
     // Pace to ~60 passes/s (the real Apple's refresh). With dirty bands an unchanged screen costs
     // almost nothing, so a fixed nap would spin; a full redraw still gets only a 1ms yield.
     {
@@ -1649,7 +1656,7 @@ void renderLoop(void *pvParameters)
 #endif
     unsigned long endTime4 = millis();
     tft.invertDisplay(true);
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
     // II+ FLASH text by time, not by pass count: the pass rate now varies from ~18 to 60/s.
     {
       static unsigned long lastFlip = 0;

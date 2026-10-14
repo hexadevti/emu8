@@ -172,18 +172,23 @@ function Build-Desktop {
   New-Item -ItemType Directory -Force $pkg | Out-Null
   $bwin = Join-Path $work 'desktop-build'
   Copy-Item (Join-Path $bwin 'emu8.exe') $pkg
+  Copy-Item (Join-Path $bwin 'emu8-picocalc.exe') $pkg
   Get-ChildItem $bwin -Filter '*.dll' | Copy-Item -Destination $pkg
   New-Item -ItemType Directory -Force (Join-Path $pkg 'sdcard\roms') | Out-Null
   @"
 emu8 v$Version -- Windows desktop build (SDL2)
 
-Run emu8.exe. The emulated SD card is the sdcard\ folder next to it: put disk/cartridge images
+Run emu8.exe. Device menu: pick the board to simulate -- CYD (320x240), ESP32-S3 (480x272),
+ESP32-P4 (1024x600), or the PicoCalc RP2040 / RP2350 (emu8-picocalc.exe: the device drawn on screen,
+its keys clickable; your PC keyboard types on it too). Or start with --device=<cyd|s3|p4|picocalc-rp2040|picocalc-rp2350>.
+
+The emulated SD card is the sdcard\ folder next to it: put disk/cartridge images
 there (any sub-folder), and download the system ROMs listed under "ROM sources"
 (https://github.com/hexadevti/emu8#rom-sources) into sdcard\roms\ exactly as on a real card --
 the Apple II, C64, MSX, ColecoVision, ZX Spectrum and PC-XT cores need them. Set EMU_SD_DIR to use a different folder, and
 EMU_PLATFORM=<apple2|c64|nes|atari|msx|sms|coleco|zx|pcxt> to boot a system directly.
 
-Settings persist to eeprom.bin / imgui.ini next to the .exe.
+Settings persist to eeprom.bin / imgui.ini (imgui-picocalc.ini) / emu8-device.cfg next to the .exe.
 Keys: F10 settings + file browser, F11 / F12 platform reset / menu.
 
 This build is primarily a debug/development target; the ESP32 / PicoCalc firmware is the main product.

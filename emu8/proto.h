@@ -8,8 +8,8 @@ void logSetup();
 void printLog(String txt);
 void printLog(const char *txt);   // no heap copy: a running C64 has little to spare
 // Boot progress screen: the panel comes up before the emulator does and names the step the
-// firmware is on, so the seconds spent waiting for the mainboard rail, waiting for a USB
-// terminal, reading ROMs and scanning the card are not a black screen. No-ops off the PicoCalc.
+// firmware is on, so the seconds spent waiting for the mainboard rail, reading ROMs and
+// scanning the card are not a black screen. No-ops off the PicoCalc.
 void bootProgressBegin();               // panel up + logo + the first step
 void bootProgressStep(const char *what);// replace the status line ("Loading iie.bin", ...)
 void bootProgressEnd();                 // hand the panel to the render loop
@@ -156,7 +156,7 @@ extern bool splashActive;             // true until the boot splash times out or
 bool menuOpen();                      // settings window or system menu up: every audio path outputs silence
 void rebootToSdManager();            // video.cpp: restart into SD Manager mode (one boot)
 bool sdManagerBootRequested();        // this boot is the SD Manager one the splash asked for (consumes it)
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
 // Keyboard-driven splash navigation: the PicoCalc has no touch panel, so input_picocalc.cpp
 // swallows left/right/Enter while splashActive and posts one of these instead. Defined in
 // video.cpp, which consumes and clears it on the next render pass.
@@ -168,6 +168,9 @@ bool sdManagerBootRequested();        // this boot is the SD Manager one the spl
 #define SPLASH_KEY_BACK   (5)          // Esc: leave the menu, keep the running system
 extern volatile int8_t splashKeyEvent;
 void splashOpen();                     // Ctrl-F6: the system menu over the running emulator, no reboot
+#endif
+#if defined(BOARD_DESKTOP)
+bool desktopDeviceHasPcxt();           // src/desktop/device.cpp: false while simulating the RP2040 PicoCalc
 #endif
 void splashRepaint();                  // redraw the system menu (general settings closed over it)
 #if BOARD_ROM_IN_FLASH
@@ -320,6 +323,7 @@ void msxSetInput(uint8_t joyMask);        // joystick -> MSX joystick (PSG port 
 bool msxLoadSelected(const char *path);   // settings: load a .rom cartridge + reset the MSX
 void msxScanFiles();                      // settings: rescan SD root for *.rom / *.dsk
 void msxApplyDiskRom();
+bool msxMountCart(const char *path);            // settings Ctrl-Enter: insert a .rom cart, no reset
 bool msxMountDisk(const char *path, bool run);   // settings: MOUNT (live swap) / MOUNT & RUN (boot) a .dsk
 void msxUnmountDisk();                         // settings: UNMOUNT the .dsk (no reset)
 bool msxDiskMounted(const char *path);         // settings: is this .dsk the mounted one?

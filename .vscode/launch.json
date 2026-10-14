@@ -1,12 +1,13 @@
 {
   // F5 debug for the DESKTOP (SDL2) build — runs the same emulator code as the devices, under gdb.
   // Requires the Microsoft C/C++ extension (ms-vscode.cpptools) for the "cppdbg" type.
-  // Pick the platform via the EMU_PLATFORM env below (apple2|c64|nes|atari|msx|sms|pcxt).
+  // Both boot the platform saved last (build/emu8-eeprom.cfg / emu8-picocalc-eeprom.cfg, with all options);
+  // switch platform from the in-app menu. The first launch ever shows the platform-picker splash.
   // The MinGW bin dir is prepended to PATH so SDL2.dll + the libstdc++/libgcc/winpthread DLLs load.
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug emu8 (desktop, choose platform)",
+      "name": "Debug emu8 (desktop)",
       "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceFolder}/build/emu8.exe",
@@ -14,8 +15,28 @@
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}/build",
       "environment": [
-        { "name": "PATH", "value": "C:\\msys64\\mingw32\\bin;${env:PATH}" },
-        { "name": "EMU_PLATFORM", "value": "${input:platform}" }
+        { "name": "PATH", "value": "C:\\msys64\\mingw32\\bin;${env:PATH}" }
+      ],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "C:\\msys64\\mingw32\\bin\\gdb.exe",
+      "setupCommands": [
+        { "description": "Enable pretty-printing for gdb", "text": "-enable-pretty-printing", "ignoreFailures": true }
+      ],
+      "preLaunchTask": "desktop: build"
+    },
+    {
+      // The PicoCalc simulator (emu8-picocalc.exe): device skin with clickable keys. Boots the
+      // PicoCalc model saved last (emu8-device.cfg; default RP2040).
+      "name": "Debug emu8-picocalc (PicoCalc skin)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/emu8-picocalc.exe",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}/build",
+      "environment": [
+        { "name": "PATH", "value": "C:\\msys64\\mingw32\\bin;${env:PATH}" }
       ],
       "externalConsole": false,
       "MIMode": "gdb",
@@ -46,15 +67,6 @@
       "webRoot": "${workspaceFolder}/tools/sdmanager/web",
       "preLaunchTask": "sdmanager: dev server",
       "postDebugTask": "sdmanager: stop dev server"
-    }
-  ],
-  "inputs": [
-    {
-      "id": "platform",
-      "type": "pickString",
-      "description": "Which platform to boot?",
-      "options": ["apple2", "c64", "nes", "atari", "msx", "sms", "pcxt"],
-      "default": "msx"
     }
   ]
 }
