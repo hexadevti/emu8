@@ -209,7 +209,7 @@ static void zxOutLine(int r, uint16_t* dst) {
   for (int x = zx::BORDER_X + 256; x < zx::OUT_W; x++) dst[x] = bc;
 }
 
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
 // Checksum of everything that draws 8-line band b: the paper lines' bitmap bytes and their one
 // attribute row (bands line up with character rows: BORDER_Y is a multiple of 8), the FLASH phase
 // when any of those attributes flashes, and -- 1:1 only -- the border colour of each row.
@@ -287,7 +287,7 @@ void zxRenderFrame() {
   const int outH = osk ? oskRasterHeight() : zx::OUT_H;
 #endif
   const int outTop = 0;
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
   // SCREEN: FILL drops the border and scales the 256x192 paper 5:4 to the whole 320x240 screen.
   extern bool screenFill;
   const bool fill = screenFill && !osk;

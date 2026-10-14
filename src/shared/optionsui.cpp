@@ -1,6 +1,14 @@
 #include "../../emu.h"
 #include "filebrowser.h"
 
+// The PicoCalc's 320x320 keyboard-driven menu. The desktop build can simulate it
+// (-DEMU8_SIM_PICOCALC=ON, see CMakeLists.txt) so layout changes can be checked without the board.
+#if defined(BOARD_PICOCALC) || defined(EMU_SIM_PICOCALC)
+#define OUI_PICOCALC 1
+#else
+#define OUI_PICOCALC 0
+#endif
+
 // optionsui.ino - Modern, touch-driven settings window.
 //
 // Replaces the old Apple II text-grid options screen with a styled, clickable UI
@@ -13,7 +21,7 @@
 // disk/HD file lists, setDiskFile/setHdFile, saveEEPROM, ESP.restart), so PS/2 and
 // touch stay interchangeable. PS/2 changes call optionsUiMarkDirty() to refresh it.
 
-#if defined(BOARD_PICOCALC)
+#if OUI_PICOCALC
 // ---- Layout (320 x 320) ----
 // The PicoCalc panel is square: the emulators letterbox into its middle 320x240, but the menu
 // switches the display to full-panel mode (tft.setFullPanel) and spends the extra 80 rows on a
@@ -107,7 +115,7 @@ static int ouiGenCount();
 // HELP is deliberately left OUT of the ring optionsUiNav() walks, so the analog stick behaves
 // exactly as before -- on those boards HELP is a tap away. The keyboard navigation does reach
 // it, because the PicoCalc has no touchscreen.
-#if defined(BOARD_PICOCALC)
+#if OUI_PICOCALC
 static int optionsUiFocus = OUI_FOC_FILES;   // the top of this board's page (see the layout)
 #else
 static int optionsUiFocus = 0;
@@ -343,7 +351,7 @@ static void ouiDrawToggle(int idx, const char *label, const char *value, uint16_
   tft.drawString(label, x + 8, y + 5, 1);
   tft.setTextDatum(BL_DATUM);
   tft.setTextColor(valColor, OUI_CARD);
-  tft.drawString(value, x + 8, y + OUI_TG_H - 5, 2);
+  tft.drawString(value, x + 8, y + OUI_TG_H - 7, 2);
 }
 
 // Blank a toggle slot (so stale Apple labels don't linger on the C64 screen).
@@ -535,7 +543,7 @@ static void ouiDrawFiles()
       // Every browser can now be inside a subdirectory, so every row gets the same treatment:
       // ".." as-is, "[name]" for a directory, otherwise the basename with the path stripped.
       std::string nm = ouiDisplayName(files[idx]);
-#if defined(BOARD_PICOCALC)
+#if OUI_PICOCALC
       // Proportional list font: truncate by measured width, not character count.
       const int maxw = (mntA || mntC) ? 262 : 286;   // leave room for the A:/C: chip on mounted rows
       if (tft.textWidth(nm.c_str(), OUI_FB_FONT) > maxw) {
@@ -604,7 +612,7 @@ static void ouiActBtn(int x, int w, const char *label, uint16_t face, uint16_t t
   if (optionsUiFocus == focusId) ouiFocusRing(x, y, w, h, 6);
 }
 
-#if defined(BOARD_PICOCALC)
+#if OUI_PICOCALC
 // Keyboard-only board: while the file list has the focus, the action-button row is replaced by
 // the keys that act on the highlighted row (the buttons are unreachable from there anyway -- the
 // arrows are browsing the list). Drawn as runs of {key, what it does} pairs, keys in green.
@@ -632,7 +640,7 @@ static void ouiDrawFileHints()
                                            ? "load & run" : "mount";
   const char *ctrlAct  = dir               ? NULL
                        : ouiIsPcxt()       ? "mount C:"
-                       : ouiMsxDsk()       ? (ouiMsxDskCur() ? "unmount" : "mount")
+                       : ouiIsMsx()        ? "mount"
                        : ouiIsC64()        ? "mount & run"
                        : (currentPlatform == PLATFORM_APPLE2) ? "mount + reboot" : NULL;
   const bool delAct = !dir && ouiCurMounted();   // Del: unmount the highlighted (loaded) entry
@@ -663,7 +671,7 @@ static void ouiDrawFileHints()
 
 static void ouiDrawActions()
 {
-#if defined(BOARD_PICOCALC)
+#if OUI_PICOCALC
   if (optionsUiFocus == OUI_FOC_FILES) { ouiDrawFileHints(); return; }
 #endif
   bool canMount = !ouiFiles().empty();
@@ -682,7 +690,7 @@ static void ouiDrawActions()
   snprintf(sig, sizeof(sig), "B|%d|%d|%d|%d|%d|%d|%d", (int)currentPlatform, (int)canMount, (int)curA, (int)curC,
            (int)msxDsk, (int)cur, actFocus ? f : -1);
   if (!ouiChanged(ouiSigAct, ouiHash(sig))) return;
-#if defined(BOARD_PICOCALC)
+#if OUI_PICOCALC
   tft.fillRect(0, OUI_ACT_TOP, 320, OUI_ACT_H, OUI_BG);   // wipe the hint panel from the gaps
 #endif
 
@@ -824,7 +832,7 @@ static void ouiDrawHelp()
 
   int y = OUI_TITLE_H + 6;
   ouiHelpHdr(y, "GLOBAL");
-#if defined(BOARD_PICOCALC)
+#if OUI_PICOCALC
   ouiHelpRow(y, "Ctrl-F1",       "Open / close menu");
   ouiHelpRow(y, "Ctrl-Shift-F1", "System menu");
   ouiHelpRow(y, "Ctrl-Shift-F3", "Hard reset (same system)");
@@ -845,7 +853,7 @@ static void ouiDrawHelp()
     ouiHelpRow(y, "Arrows",      "D-pad");
     ouiHelpRow(y, "X / Z",       "A / B");
     ouiHelpRow(y, "Enter / Tab", "Start / Select");
-#if !defined(BOARD_PICOCALC)   // no gamepad port on this board; see the note at the Apple section
+#if !OUI_PICOCALC   // no gamepad port on this board; see the note at the Apple section
     ouiHelpHdr(y, "NES  -  GAMEPAD");
     ouiHelpRow(y, "D-pad",       "D-pad");
     ouiHelpRow(y, "A / B",       "A / B");
@@ -854,7 +862,7 @@ static void ouiDrawHelp()
   } else if (ouiIsAtari()) {
     ouiHelpHdr(y, "ATARI  -  KEYBOARD");
     ouiHelpRow(y, "Arrows",    "Joystick");
-#if defined(BOARD_PICOCALC)
+#if OUI_PICOCALC
     ouiHelpRow(y, "F5 / Space", "Fire");
     ouiHelpRow(y, "F3 / Enter", "Reset switch");
     ouiHelpRow(y, "F4 / Tab",   "Select switch");
@@ -863,7 +871,7 @@ static void ouiDrawHelp()
     ouiHelpRow(y, "Enter",     "Reset switch");
     ouiHelpRow(y, "Tab",       "Select switch");
 #endif
-#if !defined(BOARD_PICOCALC)   // no gamepad port on this board; see the note at the Apple section
+#if !OUI_PICOCALC   // no gamepad port on this board; see the note at the Apple section
     ouiHelpHdr(y, "ATARI  -  GAMEPAD");
     ouiHelpRow(y, "D-pad", "Joystick");
     ouiHelpRow(y, "A / B", "Fire / Select");
@@ -876,7 +884,7 @@ static void ouiDrawHelp()
     ouiHelpRow(y, "Arr+Space", "Joystick (JOY on)");
     ouiHelpRow(y, "Enter",      "Files: mount");
     ouiHelpRow(y, "Ctrl-Enter", "Files: mount + run");
-#if !defined(BOARD_PICOCALC)   // no gamepad port on this board; see the note at the Apple section
+#if !OUI_PICOCALC   // no gamepad port on this board; see the note at the Apple section
     ouiHelpHdr(y, "C64  -  GAMEPAD");
     ouiHelpRow(y, "D-pad", "Stick");
     ouiHelpRow(y, "A",     "Fire");
@@ -886,20 +894,22 @@ static void ouiDrawHelp()
     ouiHelpRow(y, "Keys",      "MSX layout");
     ouiHelpRow(y, "Arrows",    "Cursor / Joystick");
     ouiHelpRow(y, "Space",     "Trigger / Space");
-#if !defined(BOARD_PICOCALC)   // no gamepad port on this board; see the note at the Apple section
+    ouiHelpRow(y, "Ctrl-Enter", "Files: mount only");
+    ouiHelpRow(y, "Del",        "Files: unmount");
+#if !OUI_PICOCALC   // no gamepad port on this board; see the note at the Apple section
     ouiHelpHdr(y, "MSX  -  GAMEPAD");
     ouiHelpRow(y, "D-pad", "Stick");
     ouiHelpRow(y, "A / B", "Trigger A / B");
 #endif
   } else if (ouiIsSms()) {
-#if !defined(BOARD_PICOCALC)   // no gamepad port on this board; see the note at the Apple section
+#if !OUI_PICOCALC   // no gamepad port on this board; see the note at the Apple section
     ouiHelpHdr(y, "MASTER SYSTEM  -  GAMEPAD");
     ouiHelpRow(y, "D-pad",  "D-pad");
     ouiHelpRow(y, "A / B",  "Button 1 / 2");
 #endif
     ouiHelpHdr(y, "SMS  -  KEYBOARD");
     ouiHelpRow(y, "Arrows", "D-pad");
-#if defined(BOARD_PICOCALC)
+#if OUI_PICOCALC
     ouiHelpRow(y, "F4 / F5",  "Button 1 / 2");
     ouiHelpRow(y, "Space / X","Button 1 / 2");
     ouiHelpRow(y, "Ctrl-F3",  "PAUSE");
@@ -909,7 +919,7 @@ static void ouiDrawHelp()
     ouiHelpRow(y, "F12",    "Reset");
 #endif
   } else if (ouiIsColeco()) {
-#if !defined(BOARD_PICOCALC)   // no gamepad port on this board; see the note at the Apple section
+#if !OUI_PICOCALC   // no gamepad port on this board; see the note at the Apple section
     ouiHelpHdr(y, "COLECO  -  GAMEPAD");
     ouiHelpRow(y, "D-pad",  "Stick");
     ouiHelpRow(y, "A / B",  "Left / right fire");
@@ -917,7 +927,7 @@ static void ouiDrawHelp()
 #endif
     ouiHelpHdr(y, "COLECO  -  KEYBOARD");
     ouiHelpRow(y, "Arrows", "Stick");
-#if defined(BOARD_PICOCALC)
+#if OUI_PICOCALC
     ouiHelpRow(y, "Space/F4", "Left fire");
     ouiHelpRow(y, "X / F5",   "Right fire");
 #else
@@ -928,7 +938,7 @@ static void ouiDrawHelp()
     ouiHelpRow(y, "- / =",  "Keypad * / #");
     ouiHelpRow(y, "F12",    "Reset");
   } else if (ouiIsZx()) {
-#if !defined(BOARD_PICOCALC)   // no gamepad port on this board; see the note at the Apple section
+#if !OUI_PICOCALC   // no gamepad port on this board; see the note at the Apple section
     ouiHelpHdr(y, "ZX SPECTRUM  -  GAMEPAD");
     ouiHelpRow(y, "D-pad",  "Kempston stick");
     ouiHelpRow(y, "A / B",  "Kempston fire");
@@ -944,7 +954,7 @@ static void ouiDrawHelp()
     ouiHelpHdr(y, "PC-XT  -  KEYBOARD");
     ouiHelpRow(y, "Keys",   "Type into DOS");
     ouiHelpRow(y, "F12",    "Reboot PC");
-#if !defined(BOARD_PICOCALC)   // no gamepad port on this board; see the note at the Apple section
+#if !OUI_PICOCALC   // no gamepad port on this board; see the note at the Apple section
     ouiHelpHdr(y, "PC-XT  -  GAMEPAD");
     ouiHelpRow(y, "D-pad",  "Arrow keys");
     ouiHelpRow(y, "A / B",  "Enter / Esc");
@@ -953,14 +963,14 @@ static void ouiDrawHelp()
     ouiHelpHdr(y, "APPLE  -  KEYBOARD");
     ouiHelpRow(y, "Keys",   "Type into Apple");
     ouiHelpRow(y, "Arrows", "Cursor / paddles");
-#if defined(BOARD_PICOCALC)
+#if OUI_PICOCALC
     ouiHelpRow(y, "F4 / F5", "Button 0 / 1");
     ouiHelpRow(y, "Ctrl-F3", "Reset the Apple");
 #else
     ouiHelpRow(y, "Alt / AltGr", "Button 0 / 1");
     ouiHelpRow(y, "F11",    "Reset");
 #endif
-#if !defined(BOARD_PICOCALC)
+#if !OUI_PICOCALC
     // Omitted on the PicoCalc: it has no gamepad port (see the "no USB gamepad" line in
     // input_picocalc.cpp), so this section documented hardware that cannot be attached -- and
     // the page used to have only 240 rows, which this section and the row added above overran.
@@ -972,7 +982,7 @@ static void ouiDrawHelp()
 
   tft.setTextDatum(BC_DATUM);
   tft.setTextColor(OUI_LBL, OUI_BG);
-#if defined(BOARD_PICOCALC)
+#if OUI_PICOCALC
   tft.drawString("Press any key to close", 160, OUI_SCR_H - 4, 1);
 #else
   tft.drawString("Tap anywhere to close", 160, 236, 1);
@@ -989,7 +999,7 @@ static void ouiDrawHelp()
 #define OUI_RS_FOOT   (OUI_SCR_H - 32)
 #define OUI_RS_ROWS   ((OUI_RS_FOOT - 2 - OUI_RS_LIST) / OUI_FB_ROWH)
 #define OUI_RS_FIXED  2           // mode 2 rows above the files: "use default", "no ROM"
-#if defined(BOARD_PICOCALC)
+#if OUI_PICOCALC
 #define OUI_RS_LBLW   84          // label column (mode 1)
 #else
 #define OUI_RS_LBLW   64
@@ -1021,7 +1031,7 @@ static int ouiRomCount()
 
 static int ouiRomTextW(const char *s, int font)
 {
-#if defined(BOARD_PICOCALC)
+#if OUI_PICOCALC || defined(BOARD_DESKTOP)
   return tft.textWidth(s, font);
 #else
   return (int)strlen(s) * (font == 2 ? 8 : 6);   // GLCD font 1 is 6px a cell; font 2 averages ~8
@@ -1367,7 +1377,7 @@ static void ouiGenHelpPage()
   tft.drawString("X", cx + cw / 2, OUI_TITLE_H / 2, 2);
 
   int y = OUI_TITLE_H + 6;
-#if defined(BOARD_PICOCALC)
+#if OUI_PICOCALC
   ouiHelpHdr(y, "SYSTEM MENU  (Ctrl-Shift-F1)");
   ouiHelpRow(y, "Arrows / Enter", "Pick / start a system");
   ouiHelpRow(y, "Esc",            "Back to the running one");
@@ -1394,7 +1404,7 @@ static void ouiGenHelpPage()
 
   tft.setTextDatum(BC_DATUM);
   tft.setTextColor(OUI_LBL, OUI_BG);
-#if defined(BOARD_PICOCALC)
+#if OUI_PICOCALC
   tft.drawString("Press any key to close", 160, OUI_SCR_H - 4, 1);
 #else
   tft.drawString("Tap anywhere to close", 160, 236, 1);
@@ -1521,7 +1531,7 @@ void optionsUiOpenGeneral()
 {
   if (OptionsWindow) return;
   OptionsWindow = true;
-#if defined(BOARD_PICOCALC)
+#if OUI_PICOCALC
   tft.setFullPanel(true);
 #endif
   ouiHelpOpen = false; ouiRomClose();
@@ -1546,7 +1556,7 @@ bool optionsUiGeneralOpen() { return ouiGenMode != 0; }
 
 void optionsUiRender()
 {
-#if defined(BOARD_PICOCALC)
+#if OUI_PICOCALC
   // Normally already on from optionsUiOpen(); if anything switched it off, repaint all of it.
   if (tft.setFullPanel(true)) { optionsUiFirstDraw = true; optionsUiDirty = true; }
 #endif
@@ -1822,6 +1832,19 @@ static void ouiMsxMount(bool run)
   if (msxMountDisk(files[shownFile].c_str(), run)) showHideOptionsWindow();
 }
 
+// MSX Ctrl-Enter: mount the highlighted .dsk / .rom without running it -- never a reset, never a
+// toggle back out (Del is the unmount). Already mounted: nothing to do but close.
+static void ouiMsxMountOnly()
+{
+  std::vector<std::string> &files = ouiFiles();
+  if (files.empty() || shownFile >= files.size()) return;
+  if (ouiIsDir(files[shownFile])) { ouiBrowse(files[shownFile]); return; }  // dir row -> navigate
+  const char *path = files[shownFile].c_str();
+  if (ouiCurMounted()) { showHideOptionsWindow(); return; }
+  OuiLoadMute mute;
+  if (ouiMsxDsk() ? msxMountDisk(path, false) : msxMountCart(path)) showHideOptionsWindow();
+}
+
 // Apple "MOUNT + REBOOT": apply the highlighted image as the boot device, save, then restart.
 static void ouiMountReboot()
 {
@@ -2071,8 +2094,8 @@ void optionsUiKeyEnter(bool ctrl)
   if (f == OUI_FOC_FILES && ctrl) {
     if (ouiIsPcxt()) ouiPcMountC();
     else if (currentPlatform == PLATFORM_APPLE2) ouiMountReboot();
-    else if (ouiMsxDsk()) ouiMsxMount(false);   // MSX .dsk: live MOUNT / UNMOUNT
-    else ouiMount(true);  // C64/NES/Atari/MSX/SMS: no reboot variant, Ctrl-Enter = LOAD & RUN
+    else if (ouiIsMsx()) ouiMsxMountOnly();      // MSX: mount only (.dsk live, .rom at next reset); Del unmounts
+    else ouiMount(true);  // C64/NES/Atari/SMS: no reboot variant, Ctrl-Enter = LOAD & RUN
     return;
   }
 
@@ -2182,7 +2205,7 @@ void optionsUiPoll()
 
 void optionsUiOpen()
 {
-#if defined(BOARD_PICOCALC)
+#if OUI_PICOCALC
   tft.setFullPanel(true);   // before the scans below: their progress bar draws in the list area
 #endif
   if (ouiIsC64() && c64Files.empty()) loadC64FilesSync();   // populate the .prg browser

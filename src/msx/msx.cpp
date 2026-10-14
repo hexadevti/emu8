@@ -261,7 +261,7 @@ void msxRenderFrame() {
   const int outTop = oskRasterTop();      // 0 when the keyboard is open, else 24 (centered)
   const int outH   = oskRasterHeight();   // keyboard-top (112) when open, else 192 (1:1)
   const int belowY = outTop + outH;
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
   // PicoCalc: SPI is the bottleneck (50MHz, ~16ms for the 256x192 picture alone), so the black
   // borders -- another ~28K pixels -- are painted only when something may have drawn over them
   // (a menu closed -> clearScr) or the raster moved, not every frame.
@@ -288,7 +288,7 @@ void msxRenderFrame() {
     tft.fillRect(0, outTop, M_OX, outH, TFT_BLACK);                   // left border
     tft.fillRect(M_OX + M_W, outTop, 320 - (M_OX + M_W), outH, TFT_BLACK); // right border
   }
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
   // Fill or 1:1: only the 8-line bands that changed since the last push go out (dirty_bands.h).
   if (fill || outH == M_H) {
     const int sent = dband::pushIndexed256(msx::framebuffer, pal, 0x0F, M_OX, outTop, fill, false,
@@ -337,7 +337,10 @@ void msxSetInput(uint8_t joyMask) { msx::setJoystick(joyMask); }
 
 // ---- settings hooks ----
 // Load a .rom/.mx1 cartridge into slot 1 (and remove any disk).
-static bool msxLoadCart(const char* path) {
+// live: settings Ctrl-Enter "mount only" -- the cart goes into slot 1 of the running machine and
+// the disk and disk ROM stay as they are (Disk BASIC hooks point into that ROM); the BIOS starts
+// the cartridge at the next reset, as when one is plugged into a real MSX that is switched on.
+static bool msxLoadCart(const char* path, bool live = false) {
   File f = FSTYPE.open(path, FILE_READ);
   if (!f) { sprintf(buf, "MSX: cannot open %s", path); printLog(buf); return false; }
   int len = f.size();
@@ -359,12 +362,14 @@ static bool msxLoadCart(const char* path) {
   g_cartBuf = cb;
 #endif
   msxCartLoadImage(1, cb, len);
-  msxDiskClose();                                  // flush + close any disk write-back handle
-  msx::diskEject(); g_diskPath = "";               // disk off when a cart is inserted
   g_cartPath = path;
-  msxDiskRomUpdate();                              // ...and its ROM, unless DISK ROM is ON
-  if (g_diskBuf) { free(g_diskBuf); g_diskBuf = nullptr; }
-  sprintf(buf, "MSX: cart %s (%dK) loaded", path, len / 1024);
+  if (!live) {
+    msxDiskClose();                                // flush + close any disk write-back handle
+    msx::diskEject(); g_diskPath = "";             // disk off when a cart is inserted
+    msxDiskRomUpdate();                            // ...and its ROM, unless DISK ROM is ON
+    if (g_diskBuf) { free(g_diskBuf); g_diskBuf = nullptr; }
+  }
+  sprintf(buf, "MSX: cart %s (%dK) %s", path, len / 1024, live ? "inserted (starts at next reset)" : "loaded");
   printLog(buf);
   return true;
 }
@@ -511,6 +516,13 @@ bool msxLoadSelected(const char* path) {
   else { printLog("MSX: unsupported file (use .rom/.mx1 cart or .dsk disk)"); return false; }
   if (ok) { selectedMsxFileName = path; msxResetReq = true; }
   return ok;
+}
+
+// Settings Ctrl-Enter on a .rom/.mx1: insert it without a reset (see msxLoadCart).
+bool msxMountCart(const char* path) {
+  if (!msxLoadCart(path, true)) return false;
+  selectedMsxFileName = path;
+  return true;
 }
 
 void msxScanFiles() { loadMsxFilesSync(); }

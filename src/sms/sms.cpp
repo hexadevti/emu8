@@ -153,7 +153,7 @@ void smsRenderFrame() {
   const int outTop = oskRasterTop();
   const int outH   = oskRasterHeight();
   const int belowY = outTop + outH;
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
   // PicoCalc: SPI is the bottleneck (50MHz, ~16ms for the 256x192 picture alone), so the black
   // borders -- another ~28K pixels -- are painted only when something may have drawn over them
   // (a menu closed -> clearScr) or the raster moved, not every frame.
@@ -178,7 +178,7 @@ void smsRenderFrame() {
     tft.fillRect(0, outTop, S_OX, outH, TFT_BLACK);
     tft.fillRect(S_OX + S_W, outTop, 320 - (S_OX + S_W), outH, TFT_BLACK);
   }
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
   // Fill or 1:1: only the 8-line bands that changed since the last push go out (dirty_bands.h).
   if (fill || outH == S_H) {
     const int sent = dband::pushIndexed256(sms::framebuffer, pal, 0x1F, S_OX, outTop, fill, hideLeft8,

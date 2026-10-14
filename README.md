@@ -409,6 +409,15 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DEMU_SANITIZE=thread
 cmake --build build -j && ./build/emu8
 ```
 
+**Devices.** The *Device* menu (or `--device=<id>`) picks the board the desktop build behaves like:
+`cyd` (320×240), `s3` (ESP32-S3 JC4827W543, 480×272), `p4` (ESP32-P4 JC1060P470, 1024×600),
+`picocalc-rp2040` or `picocalc-rp2350`. The ESP32 boards run in `emu8.exe`; the PicoCalc ones run in
+`emu8-picocalc.exe`, built from the same sources with the PicoCalc's keyboard-driven menus and its
+320×320 panel shown inside a picture of the device (`docs/picocalc.png`). Every key in the picture can
+be clicked (Shift / Ctrl / Alt latch for the next key), and the PC keyboard acts as the PicoCalc's,
+with the same hotkeys as on the device. Switching device restarts the app as that board; the last one
+used is remembered in `emu8-device.cfg`.
+
 Runtime: put ROM/disk images under `./sdcard` (the emulated SD card; override with `EMU_SD_DIR`);
 settings persist to `./eeprom.bin`. `F10` opens the settings/file-browser menu, `F11`/`F12` are the
 platform reset/menu keys. `ESP.restart()` maps to a process exit, so set `EMU_PLATFORM=<name>` to boot

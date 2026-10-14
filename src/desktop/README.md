@@ -21,6 +21,9 @@ src/desktop/
   audio_sdl.cpp        [TODO] ampBegin/ampWriteDac8/ampWriteMono + speaker over SDL2 audio
   input_sdl.cpp        [TODO] SDL keysym -> HID -> usbKeyboardReport(); gamepad/mouse -> joy/touch
   main.cpp             [TODO] SDL_Init -> setup() -> CPU thread -> renderLoop() on main thread
+  device.{h,cpp}       the simulated board (--device=, Device menu); re-execs emu8 <-> emu8-picocalc
+  picocalc_kbd.cpp     emu8-picocalc: the PicoCalc keyboard (STM32 key codes -> HID + device hotkeys)
+  picocalc_skin.cpp    emu8-picocalc: docs/picocalc.png (picocalc_skin_png.S) with clickable keys
   pcxt_stub.cpp        [TODO] empty PC-XT entry points (fabgl port deferred to Phase 3)
 CMakeLists.txt (repo root)
 ```

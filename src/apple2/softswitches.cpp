@@ -15,53 +15,33 @@ char processSoftSwitches(ushort address, char value, bool Read_Write)   // defau
     else
       Store80On_Off = false;
     break;
-  case 0xc001:
-    if (!Read_Write)
-      Store80On_Off = true;
-    break;
-  case 0xc002:
-    RAMReadOn_Off = false;
-    break;
-  case 0xc003:
-    RAMReadOn_Off = true;
-    break;
-  case 0xc004:
-    RAMWriteOn_Off = false;
-    break;
-  case 0xc005:
-    RAMWriteOn_Off = true;
-    break;
-  case 0xc006:
-    IntCXRomOn_Off = false;
-    break;
-  case 0xc007:
-    IntCXRomOn_Off = true;
-    break;
-  case 0xc008:
-    AltZPOn_Off = false;
-    break;
-  case 0xc009:
-    AltZPOn_Off = true;
-    break;
-  case 0xc00a:
-    SlotC3RomOn_Off = false;
-    break;
-  case 0xc00b:
-    SlotC3RomOn_Off = true;
-    break;
-  case 0xc00c:
-    if (!Read_Write)
-      Cols40_80 = true; // Apple IIc IIe
-    break;
-  case 0xc00d:
-    if (!Read_Write)
-      Cols40_80 = false; // Apple IIc IIe
-    break;
-  case 0xc00e:
-    AltCharSetOn_Off = false;
-    break;
+  // $C001-$C00F are write-only MMU/IOU switches on the IIe; reading them returns the keyboard
+  // latch (same as $C000). Acting on reads flipped RAMRD/RAMWRT/ALTZP/... whenever a program
+  // polled the keyboard through a mirror or did a read-modify-write, so the CPU's view of
+  // main/aux memory drifted from the program's -- DHGR data landed in the wrong bank.
+  case 0xc001: case 0xc002: case 0xc003: case 0xc004: case 0xc005: case 0xc006: case 0xc007:
+  case 0xc008: case 0xc009: case 0xc00a: case 0xc00b: case 0xc00c: case 0xc00d: case 0xc00e:
   case 0xc00f:
-    AltCharSetOn_Off = true;
+    if (Read_Write)
+      return keyboard_read();
+    switch (address)
+    {
+    case 0xc001: Store80On_Off = true; break;
+    case 0xc002: RAMReadOn_Off = false; break;
+    case 0xc003: RAMReadOn_Off = true; break;
+    case 0xc004: RAMWriteOn_Off = false; break;
+    case 0xc005: RAMWriteOn_Off = true; break;
+    case 0xc006: IntCXRomOn_Off = false; break;
+    case 0xc007: IntCXRomOn_Off = true; break;
+    case 0xc008: AltZPOn_Off = false; break;
+    case 0xc009: AltZPOn_Off = true; break;
+    case 0xc00a: SlotC3RomOn_Off = false; break;
+    case 0xc00b: SlotC3RomOn_Off = true; break;
+    case 0xc00c: Cols40_80 = true; break;    // 80COL off
+    case 0xc00d: Cols40_80 = false; break;   // 80COL on
+    case 0xc00e: AltCharSetOn_Off = false; break;
+    case 0xc00f: AltCharSetOn_Off = true; break;
+    }
     break;
   case 0xC010:
     keyboardStrobe();
@@ -139,18 +119,17 @@ char processSoftSwitches(ushort address, char value, bool Read_Write)   // defau
   case 0xc057:
     LoRes_HiRes = false;
     break;
-  case 0xc058:
-    Cols40_80 = true;
-    break;
-  case 0xc059:
-    Cols40_80 = false;
-    break;
+  // $C058/$C059 are annunciator AN0 (game I/O), not 80COL -- 80COL is only $C00C/$C00D. Treating
+  // them as 80COL flipped the text width under programs that touch the annunciators while
+  // setting up DHGR, so they are deliberately ignored here.
+  // AN3: on a IIe these always switch DHGR. IOUDIS ($C07E/$C07F) only exists on the IIc, and
+  // gating on it here meant any program that wrote $C07F silently lost DHGR switching.
   case 0xc05e:
-    if (IOUDisOn_Off)
+    if (AppleIIe || IOUDisOn_Off)
       DHiResOn_Off = true;
     break;
   case 0xc05f:
-    if (IOUDisOn_Off)
+    if (AppleIIe || IOUDisOn_Off)
       DHiResOn_Off = false;
     break;
   case 0xc061:

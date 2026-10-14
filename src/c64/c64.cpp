@@ -97,7 +97,7 @@ bool c64RenderLoadWarning() {
     tft.setTextColor(tft.color565(220, 40, 40), TFT_BLACK); tft.drawString("C64: NOT ENOUGH MEMORY", 8, 8, 2);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.drawString("No 64K block free for the C64's RAM.", 8, 40, 1);
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
     tft.drawString("Ctrl-Shift-F1: pick another system.", 8, 56, 1);
 #else
     tft.drawString("Ctrl-F6: pick another system.", 8, 56, 1);
@@ -273,7 +273,7 @@ static void c64RenderBitmap() {
   }
   c64LastFrame = f;
   c64VidBeamUs += micros() - tb;
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
   // Only even frames reach the panel (25 fps). With every frame sent, Ghostbusters II flickered
   // about once a second and its scroller shook; showing the even frames alone was steady on the
   // device, the odd frames alone were not.

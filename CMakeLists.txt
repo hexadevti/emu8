@@ -6,7 +6,7 @@
 #   WSL/Linux (sanitizers rail):
 #     cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DEMU_SANITIZE=thread && cmake --build build
 cmake_minimum_required(VERSION 3.16)
-project(emu8_desktop C CXX)
+project(emu8_desktop C CXX ASM)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -80,56 +80,86 @@ set(IMGUI_SRC
 # Compile the Arduino sketch as a C++ translation unit (copied so the compiler accepts the name).
 configure_file(${REPO}/emu8.ino ${CMAKE_BINARY_DIR}/emu8_ino.cpp COPYONLY)
 
-add_executable(emu8
-  ${CMAKE_BINARY_DIR}/emu8_ino.cpp
-  ${REPO}/globals.cpp
-  ${CORE_SRC}
-  ${DESKTOP_SRC}
-  ${IMGUI_SRC}
-  ${PCXT_SRC})
-
-# ImGui headers (imgui.h) + its SDL backends. PRIVATE: only the desktop target uses them.
-target_include_directories(emu8 PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
-
-# arduino_shim MUST come first so #include <Arduino.h>/SD.h/EEPROM.h/SPI.h/FS.h/BLEDevice.h and
-# "driver/i2s.h" etc. resolve to the shim instead of the real (absent) libraries.
-target_include_directories(emu8 BEFORE PRIVATE
-  ${REPO}/src/desktop/arduino_shim
-  ${REPO})
-
-target_compile_definitions(emu8 PRIVATE BOARD_DESKTOP)
-
-# --- Emulated SD card location. Dev builds point at the repo's sdcard/ (absolute, so it is found from
-#     any working directory). -DEMU_PORTABLE=ON (release packages) uses sdcard/ next to emu8.exe. ---
-option(EMU_PORTABLE "Use sdcard/ next to the executable instead of the repo's sdcard/" OFF)
-if(NOT EMU_PORTABLE)
-  target_compile_definitions(emu8 PRIVATE EMU_DEFAULT_SD_DIR="${REPO}/sdcard")
-endif()
-# The codebase is full of Arduino-isms; keep it building (warnings on, not fatal).
-target_compile_options(emu8 PRIVATE -Wno-write-strings -Wno-narrowing)
+# Dear ImGui doesn't depend on the board defines: build it once and share it between both executables.
+add_library(emu8_imgui OBJECT ${IMGUI_SRC})
+target_include_directories(emu8_imgui PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 
 # --- SDL2 + threads. We use SDL_MAIN_HANDLED (main.cpp), so SDL2main is NOT needed (avoids the
 #     MinGW SDL2main/SDL2 link-order trap). ---
 find_package(SDL2 REQUIRED)
 find_package(Threads REQUIRED)
-target_link_libraries(emu8 PRIVATE Threads::Threads)
 if(TARGET SDL2::SDL2)
-  target_link_libraries(emu8 PRIVATE SDL2::SDL2)
+  target_link_libraries(emu8_imgui PRIVATE SDL2::SDL2)
 else()
-  target_include_directories(emu8 PRIVATE ${SDL2_INCLUDE_DIRS})
-  target_link_libraries(emu8 PRIVATE ${SDL2_LIBRARIES})
+  target_include_directories(emu8_imgui PRIVATE ${SDL2_INCLUDE_DIRS})
 endif()
 
-# Copy the MinGW + SDL2 runtime DLLs next to emu8.exe so it runs standalone (double-click / F5)
-# WITHOUT needing C:\msys64\mingw32\bin on PATH. (libgcc may be _dw2 or _sjlj depending on the build.)
-if(WIN32)
-  get_filename_component(MINGW_BIN "${CMAKE_CXX_COMPILER}" DIRECTORY)
-  foreach(dll SDL2.dll libstdc++-6.dll libwinpthread-1.dll
-              libgcc_s_dw2-1.dll libgcc_s_sjlj-1.dll libgcc_s_seh-1.dll)
-    if(EXISTS "${MINGW_BIN}/${dll}")
-      add_custom_command(TARGET emu8 POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${MINGW_BIN}/${dll}" "$<TARGET_FILE_DIR:emu8>"
-        VERBATIM)
-    endif()
-  endforeach()
-endif()
+# zlib decodes the PicoCalc picture; linked statically so no extra DLL ships.
+find_library(EMU_ZLIB NAMES libz.a z REQUIRED)
+
+option(EMU_PORTABLE "Use sdcard/ next to the executable instead of the repo's sdcard/" OFF)
+
+# --- The two desktop executables, built from the same sources (see src/desktop/device.h):
+#       emu8           the ESP32 boards (CYD, ESP32-S3 JC4827W543, ESP32-P4 JC1060P470)
+#       emu8-picocalc  the PicoCalc (RP2040 / RP2350): EMU_SIM_PICOCALC for EVERY translation unit
+#                      (320x320 panel, keyboard-driven menus, docs/picocalc.png with clickable keys)
+#     The Device menu switches between them (re-exec). ---
+function(emu8_add_desktop_target name sim)
+  add_executable(${name}
+    ${CMAKE_BINARY_DIR}/emu8_ino.cpp
+    ${REPO}/globals.cpp
+    ${CORE_SRC}
+    ${DESKTOP_SRC}
+    ${PCXT_SRC}
+    $<TARGET_OBJECTS:emu8_imgui>)
+
+  # ImGui headers (imgui.h) + its SDL backends.
+  target_include_directories(${name} PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+
+  # arduino_shim MUST come first so #include <Arduino.h>/SD.h/EEPROM.h/SPI.h/FS.h/BLEDevice.h and
+  # "driver/i2s.h" etc. resolve to the shim instead of the real (absent) libraries.
+  target_include_directories(${name} BEFORE PRIVATE
+    ${REPO}/src/desktop/arduino_shim
+    ${REPO})
+
+  target_compile_definitions(${name} PRIVATE BOARD_DESKTOP)
+  if(sim)
+    target_compile_definitions(${name} PRIVATE EMU_SIM_PICOCALC EMU_SKIN_PNG="${REPO}/docs/picocalc.png")
+    # the device picture, .incbin'd (rebuilt when the PNG changes)
+    target_sources(${name} PRIVATE ${REPO}/src/desktop/picocalc_skin_png.S)
+    set_property(SOURCE ${REPO}/src/desktop/picocalc_skin_png.S APPEND PROPERTY OBJECT_DEPENDS ${REPO}/docs/picocalc.png)
+  endif()
+
+  # --- Emulated SD card location. Dev builds point at the repo's sdcard/ (absolute, so it is found
+  #     from any working directory). -DEMU_PORTABLE=ON (release packages) uses sdcard/ next to the exe.
+  if(NOT EMU_PORTABLE)
+    target_compile_definitions(${name} PRIVATE EMU_DEFAULT_SD_DIR="${REPO}/sdcard")
+  endif()
+  # The codebase is full of Arduino-isms; keep it building (warnings on, not fatal).
+  target_compile_options(${name} PRIVATE -Wno-write-strings -Wno-narrowing)
+
+  target_link_libraries(${name} PRIVATE Threads::Threads ${EMU_ZLIB})
+  if(TARGET SDL2::SDL2)
+    target_link_libraries(${name} PRIVATE SDL2::SDL2)
+  else()
+    target_include_directories(${name} PRIVATE ${SDL2_INCLUDE_DIRS})
+    target_link_libraries(${name} PRIVATE ${SDL2_LIBRARIES})
+  endif()
+
+  # Copy the MinGW + SDL2 runtime DLLs next to the exe so it runs standalone (double-click / F5)
+  # WITHOUT needing C:\msys64\mingw32\bin on PATH. (libgcc may be _dw2 or _sjlj depending on the build.)
+  if(WIN32)
+    get_filename_component(MINGW_BIN "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    foreach(dll SDL2.dll libstdc++-6.dll libwinpthread-1.dll
+                libgcc_s_dw2-1.dll libgcc_s_sjlj-1.dll libgcc_s_seh-1.dll)
+      if(EXISTS "${MINGW_BIN}/${dll}")
+        add_custom_command(TARGET ${name} POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E copy_if_different "${MINGW_BIN}/${dll}" "$<TARGET_FILE_DIR:${name}>"
+          VERBATIM)
+      endif()
+    endforeach()
+  endif()
+endfunction()
+
+emu8_add_desktop_target(emu8 OFF)
+emu8_add_desktop_target(emu8-picocalc ON)

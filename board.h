@@ -27,6 +27,16 @@
 
 #pragma once
 
+// UI_PICOCALC: the PicoCalc's keyboard-driven user interface (no touch panel: splash navigation from
+// the keyboard, Ctrl-function-key hotkeys, the boot hint bar, its function-row key meanings). Set
+// on the real board and on the desktop PicoCalc simulator (emu8-picocalc, EMU_SIM_PICOCALC), so the
+// simulator behaves like the device. Hardware/performance code keeps testing BOARD_PICOCALC.
+#if defined(BOARD_PICOCALC) || defined(EMU_SIM_PICOCALC)
+#define UI_PICOCALC 1
+#else
+#define UI_PICOCALC 0
+#endif
+
 #if defined(BOARD_DESKTOP)
 
 // ===================== Desktop (Windows/Linux, SDL2) — DEBUG TARGET =====================

@@ -189,7 +189,7 @@ static C64Pos c64FKey(uint8_t kc, bool *shifted)
   switch (kc) {
     case HID_KEY_F1: n = 1; break;
     case HID_KEY_F2: n = 2; break;
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
     case HID_KEY_F12: n = 3; break;
 #else
     case HID_KEY_F3: n = 3; break;
@@ -222,7 +222,7 @@ static void c64KeyUp(uint8_t kc)
 // reports both shifts as one modifier bit (input_picocalc.cpp), so the plain `shift` flag covers left
 // and right. Space still fires. Other boards have a full keyboard within reach of the arrows and
 // keep SHIFT for typing only.
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
 #define C64_SHIFT_IS_FIRE 1
 #else
 #define C64_SHIFT_IS_FIRE 0
@@ -321,7 +321,7 @@ static bool atariKey(uint8_t kc, bool down)   // returns true if it was an Atari
     case HID_KEY_X:           atariFire   = down; return true;
     case HID_KEY_TAB:         atariSelect = down; return true;
     case HID_KEY_ENTER:       atariReset  = down; return true;
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
     // PicoCalc function row (input_picocalc.cpp sends its F3 as HID F12): F5 = fire,
     // F3 = Reset switch, F4 = Select switch.
     case HID_KEY_F5:          atariFire   = down; return true;
@@ -409,7 +409,7 @@ static void smsApplyJoystick(const uint8_t *keys)   // b0 up b1 down b2 left b3 
   if (kbContains(keys, HID_KEY_ARROW_RIGHT)) m &= ~0x08;
   if (kbContains(keys, HID_KEY_SPACE) || kbContains(keys, HID_KEY_Z)) m &= ~0x10;   // button 1
   if (kbContains(keys, HID_KEY_X))           m &= ~0x20;                            // button 2
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
   // PicoCalc: the F4/F5 keys sit right above the arrows, so they make the natural fire buttons
   // (input_picocalc.cpp passes them through as bare HID F4/F5).
   if (kbContains(keys, HID_KEY_F4))          m &= ~0x10;                            // button 1 / start
@@ -567,7 +567,7 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
     }
     if (currentPlatform == PLATFORM_SMS) {
       if (kc == HID_KEY_F11) { smsPauseButton(); continue; }   // SMS PAUSE -> NMI
-#if !defined(BOARD_PICOCALC)   // the PicoCalc's bare F3 arrives as F12 and sits by F4/F5 (buttons)
+#if !UI_PICOCALC   // the PicoCalc's bare F3 arrives as F12 and sits by F4/F5 (buttons)
       if (kc == HID_KEY_F12) { smsHardReset();   continue; }   // soft power-cycle
 #endif
     }

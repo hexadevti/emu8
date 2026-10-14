@@ -7,23 +7,10 @@ void logSetup() {
     Serial.setRxBufferSize(2 * SDSERIAL_MAX_PAYLOAD);
 #endif
     Serial.begin(115200);
-#if defined(BOARD_PICOCALC)
-    // arduino-pico services USB CDC from a FreeRTOS task that only starts once the scheduler is
-    // running, so the host is still MID-ENUMERATION when setup() begins. Anything that faults in
-    // those first few milliseconds takes core 0 down with it -- including the USB task -- and the
-    // port never appears at all ("USB device not recognized"), which hides the very crash we need
-    // to read. Idling here lets enumeration finish first, and waiting for the host to actually
-    // open the port means the boot log is not lost to a terminal that attaches too late.
-    // Serial goes truthy when the host OPENS the port, not when it enumerates, so with no
-    // terminal listening this loop never exits early and costs the full budget on EVERY boot.
-    // It was 5000ms during bring-up and that was most of a visibly slow start. Enumeration is
-    // the part that actually needs covering and it takes a few hundred ms, so 1500 covers it
-    // with room to spare and still catches a terminal that is already open. Waiting longer than
-    // this to let someone ATTACH one never worked anyway -- opening a terminal by hand takes
-    // more than five seconds. Raise it with -DBOOT_SERIAL_WAIT_MS=... when chasing a boot fault.
-  #ifndef BOOT_SERIAL_WAIT_MS
-  #define BOOT_SERIAL_WAIT_MS 1500
-  #endif
+#if defined(BOARD_PICOCALC) && defined(BOOT_SERIAL_WAIT_MS)
+    // No wait for a USB terminal on a normal boot: the serial log is a debugging aid and must
+    // never hold up startup. When chasing a boot fault, build with -DBOOT_SERIAL_WAIT_MS=1500 so
+    // USB enumeration finishes (and an already-open terminal attaches) before the first log line.
     uint32_t t0 = millis();
     while (!Serial && (millis() - t0) < BOOT_SERIAL_WAIT_MS) delay(10);
     if (Serial) delay(200);   // let the host finish opening before the first line goes out

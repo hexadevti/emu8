@@ -12,6 +12,7 @@
 
 #include "../../emu.h"
 #include "ui_imgui.h"
+#include "picocalc_sim.h"
 #include <SDL.h>
 #include <cstring>
 #include <vector>
@@ -170,9 +171,38 @@ static void desktopTypeInject() {
   SDL_PushEvent(&e);
 }
 
+// Offline mouse self-test: EMU_DBG_CLICK="x,y;x,y;..." pushes REAL SDL mouse events (window pixels),
+// one click every 20 frames from EMU_DBG_CLICK_AT (default 120): e.g. the PicoCalc picture's keys.
+static void desktopClickInject() {
+  static const char *s = getenv("EMU_DBG_CLICK");
+  if (!s || !*s) return;
+  static long fr = -1; fr++;
+  static long at = []{ const char *e = getenv("EMU_DBG_CLICK_AT"); return e ? atol(e) : 120L; }();
+  static int x = 0, y = 0;
+  if (fr < at) return;
+  long ph = (fr - at) % 20;
+  if (ph != 0 && ph != 8) return;
+  Uint32 win = 0;                                  // the ImGui backend ignores events for other windows
+  for (Uint32 id = 1; id < 8 && !win; id++) if (SDL_GetWindowFromID(id)) win = id;
+  SDL_Event e; memset(&e, 0, sizeof(e));
+  if (ph == 0) {
+    if (!*s || sscanf(s, "%d,%d", &x, &y) != 2) { s = ""; return; }
+    s = strchr(s, ';'); s = s ? s + 1 : "";
+    e.type = SDL_MOUSEMOTION; e.motion.windowID = win; e.motion.x = x; e.motion.y = y;
+    SDL_PushEvent(&e);
+    memset(&e, 0, sizeof(e));
+    e.type = SDL_MOUSEBUTTONDOWN; e.button.state = SDL_PRESSED;
+  } else {
+    e.type = SDL_MOUSEBUTTONUP; e.button.state = SDL_RELEASED;
+  }
+  e.button.windowID = win; e.button.button = SDL_BUTTON_LEFT; e.button.clicks = 1; e.button.x = x; e.button.y = y;
+  SDL_PushEvent(&e);
+}
+
 void desktopPumpInput() {
   desktopScriptInput();
   desktopTypeInject();
+  desktopClickInject();
   SDL_Event e;
   bool kbChanged = false;
   while (SDL_PollEvent(&e)) {
@@ -188,6 +218,16 @@ void desktopPumpInput() {
         SDL_Quit();
         std::exit(0);
         break;
+#if defined(EMU_SIM_PICOCALC)
+      // emu8-picocalc: the host keyboard plays the PicoCalc's keyboard (picocalc_kbd.cpp), which
+      // sends its own HID reports, exactly as on the device.
+      case SDL_KEYDOWN:
+        if (!uiKb) pcSimHostKey(e.key.keysym.scancode, true, e.key.repeat != 0);
+        break;
+      case SDL_KEYUP:
+        pcSimHostKey(e.key.keysym.scancode, false, false);
+        break;
+#else
       case SDL_KEYDOWN:
         if (!e.key.repeat && !uiKb) { pressAdd((uint8_t)e.key.keysym.scancode); kbChanged = true; }
         break;
@@ -195,6 +235,7 @@ void desktopPumpInput() {
         pressRemove((uint8_t)e.key.keysym.scancode);
         kbChanged = true;
         break;
+#endif
       case SDL_MOUSEMOTION:
         if (!uiMouse) tft.setMouseState(e.motion.x, e.motion.y, (e.motion.state & SDL_BUTTON_LMASK) != 0);
         break;
@@ -211,7 +252,14 @@ void desktopPumpInput() {
   // Always re-send the keyboard report (cheap; usbKeyboardReport diffs internally and also needs to
   // see modifier-only changes for the PC-XT path).
   (void)kbChanged;
+#if defined(EMU_SIM_PICOCALC)
+  // Only the headless scripts (EMU_TAP / EMU_HOLD_FROM) use this report here; the keyboard has its own.
+  bool scripted = !g_pressed.empty();
+  for (int i = 0; i < 6; i++) scripted |= g_lastReport[i] != 0;
+  if (scripted) sendKeyboardReport();
+#else
   sendKeyboardReport();
+#endif
   pollController();
 }
 

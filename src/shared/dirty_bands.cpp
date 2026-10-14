@@ -1,6 +1,6 @@
 // dirty_bands.cpp - see dirty_bands.h.
 #include "../../emu.h"
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC   // the device and the desktop PicoCalc simulator
 
 #include "dirty_bands.h"
 #include <stdio.h>
@@ -110,4 +110,4 @@ int pushIndexed256(const uint8_t* fb, const uint16_t* pal, uint8_t mask, int ox,
 
 }  // namespace dband
 
-#endif  // BOARD_PICOCALC
+#endif  // UI_PICOCALC

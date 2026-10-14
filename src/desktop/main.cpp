@@ -7,20 +7,24 @@
 //
 // Pick the platform with EMU_PLATFORM (apple2|c64|nes|atari|msx|sms|coleco|pcxt|zx) to boot straight in
 // and skip the splash (see eprom.cpp + hal.cpp esp_reset_reason). SD card = ./sdcard (EMU_SD_DIR).
+// Pick the simulated board with --device=cyd|s3|p4|picocalc-rp2040|picocalc-rp2350 (device.h).
 #if defined(BOARD_DESKTOP)
 
 #define SDL_MAIN_HANDLED          // we provide a normal main() — no SDL2main / WinMain hijack
 #include <SDL.h>
 #include <thread>
 #include "../../emu.h"
+#include "device.h"
 
 void setup();   // emu8.ino
 void loop();    // emu8.ino
 
 extern char **g_emuArgv;   // hal.cpp: ESP.restart() re-execs this binary for a true reboot
 
-int main(int /*argc*/, char **argv) {
+int main(int argc, char **argv) {
   g_emuArgv = argv;                      // so the "Reboot" button can re-exec instead of exit
+  desktopDeviceInit(argc, argv);         // which board to simulate; may exec the sibling exe (device.h)
+  desktopResetInit();                    // soft reset / EMU_PLATFORM handed over by ESP.restart() (hal.cpp)
   setvbuf(stdout, nullptr, _IONBF, 0);   // live logs (debug tool; also visible if killed)
   setvbuf(stderr, nullptr, _IONBF, 0);
   SDL_SetMainReady();

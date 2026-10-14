@@ -71,7 +71,7 @@ void atariRenderFrame() {
   int h = rows < A_MINH ? A_MINH : (rows > A_H ? A_H : rows);
   int oy = (240 - h) / 2;
   const uint16_t *pal = videoColor ? atari::atariPalette : atari::atariPaletteGray;
-#if defined(BOARD_PICOCALC)
+#if UI_PICOCALC
   // SCREEN: FILL (Settings): stretch the field vertically to all 240 lines (nearest neighbour), so
   // the picture is 4:3 like on a TV instead of a 320x192 strip with 24px bars. ~25% more SPI time.
   extern bool screenFill;

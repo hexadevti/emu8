@@ -1,6 +1,6 @@
 // display_picocalc.cpp -- ClockworkPi PicoCalc (RP2350) display backend: ST7365P/ILI9488 320x320
 // panel on spi1, driven with the raw pico-sdk SPI + one dedicated DMA channel. Text is rendered
-// with the bundled FreeSans9pt7b GFX font (same as the desktop backend) so this file needs NO
+// with the bitmap fonts in src/shared/uitext.h (same as the desktop backend) so this file needs NO
 // graphics library at all -- no Adafruit_GFX, no Arduino_GFX, no TFT_eSPI.
 //
 // The whole file is inside `#if defined(BOARD_PICOCALC)`: arduino-cli compiles every .cpp under
@@ -44,20 +44,7 @@
 #define PICOCALC_LCD_18BIT 0
 #endif
 
-// --- GFX font structs (Adafruit layout) so the bundled font header compiles standalone ---
-typedef struct {
-  uint16_t bitmapOffset;
-  uint8_t  width, height, xAdvance;
-  int8_t   xOffset, yOffset;
-} GFXglyph;
-typedef struct {
-  uint8_t  *bitmap;
-  GFXglyph *glyph;
-  uint16_t  first, last;
-  uint8_t   yAdvance;
-} GFXfont;
-#include "../shared/fonts/FreeSans9pt7b.h"
-static const GFXfont *UIFONT = &FreeSans9pt7b;
+#include "../shared/uitext.h"      // menu fonts + renderer, shared with the desktop backend
 
 extern DisplayGFX tft;
 extern void picocalcPumpInput();   // input_picocalc.cpp: drains the I2C keyboard into usbKeyboardReport()
@@ -538,115 +525,24 @@ void DisplayGFX::pxFlush() {
 }
 
 // ============================== text ==========================================================
-// FreeSans9pt7b for all sizes, ported from the desktop backend so the two look identical. Three
-// sizes are picked by the TFT_eSPI font number:
-//   font 2 (and up, except 3) -- titles/buttons, 1:1;
-//   font 3                    -- the settings file list, 4/5 (a size between the other two that
-//                                only this board has; the CYD's TFT_eSPI has no font 3);
-//   font 1                    -- the dense option/label rows that use the device 6x8, 2/3.
-// Scaled glyphs are box-filtered: each output pixel gets the fraction of its area that the source
-// glyph covers. With a known background (setTextColor(fg, bg)) that fraction blends fg into bg,
-// which keeps strokes one pixel thin and smooth instead of the fat 2px strokes an OR-downsample
-// leaves. Without a background there is nothing to blend into, so any coverage paints fg (the old
-// OR-downsample, so transparent text never loses a thin stroke).
-static inline void fontScale(uint8_t font, int &num, int &den) {
-  if (font == 3)     { num = 4; den = 5; }
-  else if (font >= 2) { num = 1; den = 1; }
-  else               { num = 2; den = 3; }
-}
-static inline int scN(int v, int num, int den) { return (v * num) / den; }
-
-// Is the glyph pixel (sx,sy) set? (Adafruit GFX bitmaps stream row-major, MSB first.)
-static inline bool glyphBit(const uint8_t *bmp, int gw, int sx, int sy) {
-  int idx = sy * gw + sx;
-  return (bmp[idx >> 3] & (0x80 >> (idx & 7))) != 0;
-}
-
-// fg over bg at alpha a/256, per RGB565 channel.
-static inline uint16_t blend565(uint16_t fg, uint16_t bg, int a) {
-  const int b = 256 - a;
-  uint16_t r = (uint16_t)((((fg >> 11) & 0x1F) * a + ((bg >> 11) & 0x1F) * b) >> 8);
-  uint16_t g = (uint16_t)((((fg >> 5)  & 0x3F) * a + ((bg >> 5)  & 0x3F) * b) >> 8);
-  uint16_t l = (uint16_t)((( fg        & 0x1F) * a + ( bg        & 0x1F) * b) >> 8);
-  return (uint16_t)((r << 11) | (g << 5) | l);
-}
-
-static void strMetrics(const char *s, int num, int den, int &bw, int &minYO, int &maxYExt) {
-  bw = 0; minYO = 0; maxYExt = 0; bool any = false;
-  for (const char *p = s; *p; p++) {
-    uint8_t c = (uint8_t)*p;
-    if (c < UIFONT->first || c > UIFONT->last) { bw += scN(UIFONT->yAdvance / 2, num, den); continue; }
-    const GFXglyph *g = &UIFONT->glyph[c - UIFONT->first];
-    bw += scN(g->xAdvance, num, den);
-    int yo = scN(g->yOffset, num, den), ext = scN(g->yOffset + g->height, num, den);
-    if (!any || yo  < minYO)   minYO   = yo;
-    if (!any || ext > maxYExt) maxYExt = ext;
-    any = true;
-  }
-  if (!any) { minYO = scN(-(int)UIFONT->yAdvance + 4, num, den); maxYExt = 0; }
-}
-
+// Fixed-cell bitmap fonts drawn 1:1 by the renderer in src/shared/uitext.h (the desktop backend
+// uses the same one, so the two look identical). Font 1 = 6x10, font 3 = 7x13 (the settings file
+// list), font 2 = 7x13 bold. Lit pixels go through pxRun(), which merges each glyph row into one
+// panel write per horizontal run.
 int16_t DisplayGFX::textWidth(const char *s, uint8_t font) {
-  if (!s) return 0;
-  int num, den, bw, minYO, maxYExt;
-  fontScale(font, num, den);
-  strMetrics(s, num, den, bw, minYO, maxYExt);
-  return (int16_t)bw;
+  return (int16_t)uiTextWidth(s, font);
 }
 
 int16_t DisplayGFX::drawString(const char *s, int32_t x, int32_t y, uint8_t font) {
   if (!s) return 0;
-  int num, den;
-  fontScale(font, num, den);
-
-  int bw, minYO, maxYExt;
-  strMetrics(s, num, den, bw, minYO, maxYExt);
-  int bh = maxYExt - minYO;
-  const uint8_t horiz = _datum % 3, vert = _datum / 3;
-  int boxLeft = x, boxTop = y;
-  if (horiz == 1) boxLeft = x - bw / 2; else if (horiz == 2) boxLeft = x - bw;
-  if (vert  == 1) boxTop  = y - bh / 2; else if (vert  == 2) boxTop  = y - bh;
-  if (_textHasBg) fillRect(boxLeft, boxTop, bw, bh > 0 ? bh : 1, _textBg);
-
-  // Box filter in "sub-units": output pixel o spans [o*den, (o+1)*den), source pixel s spans
-  // [s*num, (s+1)*num), so overlaps are exact integers and a fully covered pixel sums to den*den.
-  const int full = den * den;
-  int baseline = boxTop - minYO;   // output rows = baseline + scaled(yOffset) + outRow
-  int cursorX = boxLeft;
-  for (const char *p = s; *p; p++) {
-    uint8_t c = (uint8_t)*p;
-    if (c < UIFONT->first || c > UIFONT->last) { cursorX += scN(UIFONT->yAdvance / 2, num, den); continue; }
-    const GFXglyph *g = &UIFONT->glyph[c - UIFONT->first];
-    const uint8_t *bmp = UIFONT->bitmap + g->bitmapOffset;
-    int ow  = (g->width  * num + den - 1) / den;   // scaled glyph box (round up so nothing is lost)
-    int oh  = (g->height * num + den - 1) / den;
-    int ox0 = cursorX  + scN(g->xOffset, num, den);
-    int oy0 = baseline + scN(g->yOffset, num, den);
-    for (int oy = 0; oy < oh; oy++) {
-      const int y0 = oy * den, y1 = y0 + den;
-      int sy1 = (y1 + num - 1) / num; if (sy1 > g->height) sy1 = g->height;
-      for (int ox = 0; ox < ow; ox++) {
-        const int x0 = ox * den, x1 = x0 + den;
-        int sx1 = (x1 + num - 1) / num; if (sx1 > g->width) sx1 = g->width;
-        int cov = 0;
-        for (int sy = y0 / num; sy < sy1; sy++) {
-          const int vy = (y1 < (sy + 1) * num ? y1 : (sy + 1) * num) - (y0 > sy * num ? y0 : sy * num);
-          for (int sx = x0 / num; sx < sx1; sx++) {
-            if (!glyphBit(bmp, g->width, sx, sy)) continue;
-            cov += vy * ((x1 < (sx + 1) * num ? x1 : (sx + 1) * num) - (x0 > sx * num ? x0 : sx * num));
-          }
-        }
-        if (cov <= 0) continue;
-        if (!_textHasBg || cov >= full) { pxRun(ox0 + ox, oy0 + oy, _textFg); continue; }
-        const int a = cov * 256 / full;
-        if (a < 24) continue;       // a sliver of a neighbouring stroke: leave the background
-        pxRun(ox0 + ox, oy0 + oy, blend565(_textFg, _textBg, a));
-      }
-    }
-    cursorX += scN(g->xAdvance, num, den);
-  }
+  int32_t left, top;
+  uiTextOrigin(s, x, y, _datum, font, left, top);
+  const int w = uiTextWidth(s, font);
+  if (_textHasBg && w > 0) fillRect(left, top, w, uiTextCellH(font), _textBg);
+  const uint16_t fg = _textFg;
+  uiTextDraw(s, left, top, font, [this, fg](int32_t px, int32_t py) { pxRun(px, py, fg); });
   pxFlush();
-  return (int16_t)bw;
+  return (int16_t)w;
 }
 
 // Same glyph walk, but addressing the raw panel so it can write into the letterbox bars. The

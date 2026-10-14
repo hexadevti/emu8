@@ -185,17 +185,17 @@ bool apple2RenderLoadWarning() {
       tft.drawString("Apple II: NOT ENOUGH RAM", 8, 8, 2);
       tft.setTextColor(TFT_WHITE, TFT_BLACK);
       tft.drawString("This board could not allocate the", 8, 40, 1);
-      tft.drawString("Apple II memory map (~131 KB).", 8, 54, 1);
-      tft.drawString("See the serial log for which block", 8, 68, 1);
-      tft.drawString("failed.", 8, 82, 1);
+      tft.drawString("Apple II memory map (~131 KB).", 8, 56, 1);
+      tft.drawString("See the serial log for which block", 8, 72, 1);
+      tft.drawString("failed.", 8, 88, 1);
     } else {
       tft.setTextColor(tft.color565(220, 40, 40), TFT_BLACK);
       tft.drawString("Apple II: ROMs NOT FOUND", 8, 8, 2);
       tft.setTextColor(TFT_WHITE, TFT_BLACK);
       tft.drawString("Put AppleWin's Apple2_Plus.rom, DISK2.rom", 8, 40, 1);
-      tft.drawString("Apple2e_Enhanced.rom, MouseInterface.rom,", 8, 54, 1);
-      tft.drawString("HDDRVR.BIN in /roms on the SD card,", 8, 68, 1);
-      tft.drawString("or pick other files in SETTINGS > ROMS.", 8, 82, 1);
+      tft.drawString("Apple2e_Enhanced.rom, MouseInterface.rom,", 8, 56, 1);
+      tft.drawString("HDDRVR.BIN in /roms on the SD card,", 8, 72, 1);
+      tft.drawString("or pick other files in SETTINGS > ROMS.", 8, 88, 1);
     }
     tft.setTextDatum(MC_DATUM);
     drawn = true;
