@@ -5,9 +5,9 @@
 //   ./sms_host game.sms 300 out.ppm-> run 300 frames, write out.ppm
 //
 // Build (the SMS machine is Arduino-free, so it links straight against the same Z80 core as MSX):
-//   g++ -O2 -I. -DSMS_HOST_BOOT -o sms_host host/sms_host.cpp src/z80/z80.cpp \
-//       src/sms/sms_machine.cpp src/sms/sms_vdp.cpp src/sms/sms_cart.cpp src/sms/sms_io.cpp \
-//       src/sms/sms_psg.cpp src/sms/sms_globals.cpp
+//   g++ -O2 -Iemu8 -DSMS_HOST_BOOT -o sms_host host/sms_host.cpp emu8/src/z80/z80.cpp \
+//       emu8/src/sms/sms_machine.cpp emu8/src/sms/sms_vdp.cpp emu8/src/sms/sms_cart.cpp emu8/src/sms/sms_io.cpp \
+//       emu8/src/sms/sms_psg.cpp emu8/src/sms/sms_globals.cpp
 //
 // CPU correctness is already covered by host/msx_host.cpp (same core runs ZEXDOC/ZEXALL); this harness
 // exercises the SMS mapper, VDP command port, and Mode 4 renderer.

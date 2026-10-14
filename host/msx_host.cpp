@@ -5,13 +5,13 @@
 //   ./msx_host path/to/zexdoc.com   -> CP/M test-runner (ZEXDOC / ZEXALL) - the gold-standard check
 //   ./msx_host path/to/bios.rom [cart.rom]  -> boot the MSX1 machine, dump the VDP text screen (M2)
 //
-// Build:  g++ -O2 -I. -o msx_host host/msx_host.cpp src/z80/z80.cpp
-//   (later, for the boot mode:  ... src/z80/z80.cpp src/msx/msx_machine.cpp src/msx/msx_vdp.cpp ...)
+// Build:  g++ -O2 -Iemu8 -o msx_host host/msx_host.cpp emu8/src/z80/z80.cpp
+//   (later, for the boot mode:  ... emu8/src/z80/z80.cpp emu8/src/msx/msx_machine.cpp emu8/src/msx/msx_vdp.cpp ...)
 //
 // The built-in self-test is a sanity net (gross-bug catcher), NOT a substitute for ZEXALL: its
 // expected values are hand-derived, so run real ZEXALL once a host compiler is available.
 
-#include "../src/z80/z80.h"
+#include "../emu8/src/z80/z80.h"
 #include <cstdint>
 #include <cstdio>
 #include <cstring>

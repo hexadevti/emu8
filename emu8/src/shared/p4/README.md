@@ -55,7 +55,7 @@ arduino-cli board details --fqbn esp32:esp32:esp32p4   # confirm the FQBN menu o
 ```
 
 Then build/flash from **Terminal → Run Task…** → *Arduino: Build [& Upload] (JC1060P470)*
-(adjust the upload COM port in [`.vscode/tasks.json`](../../../.vscode/tasks.json), default `COM6`).
+(adjust the upload COM port in [`.vscode/tasks.json`](../../../../.vscode/tasks.json), default `COM6`).
 
 ---
 

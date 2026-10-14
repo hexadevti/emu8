@@ -47,7 +47,7 @@ plus the experimental **PC-XT** target that is still in development:
 
 emu8 builds for **four boards** from the same source tree — the target is selected at *compile time*
 by a single macro (`-DBOARD_JC4827W543` / `-DBOARD_JC1060P470` / `-DBOARD_PICOCALC`), defined per
-build task. The hardware abstraction lives in [`board.h`](board.h) as capability macros (display
+build task. The hardware abstraction lives in [`board.h`](emu8/board.h) as capability macros (display
 backend, audio path, input path, touch bus) that the shared code switches on.
 
 | | **ESP32 CYD** (default) | **Guition JC4827W543** | **Guition JC1060P470** | **ClockworkPi PicoCalc** |
@@ -66,11 +66,11 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
 > ES8311 audio, SD_MMC, and USB host via a vendored IDF-5-patched EspUsbHost fork). It is built against Arduino-ESP32
 > **core 3.x** (IDF 5.x) on an *isolated* toolchain (its own `ARDUINO_DIRECTORIES_DATA/USER` at
 > `~/.emu6502-p4`, outside the repo), so the CYD/S3 builds stay on 2.0.17 and unchanged. It needs the
-> JD9165 `esp_lcd` vendor driver dropped in — see [`src/shared/p4/README.md`](src/shared/p4/README.md)
+> JD9165 `esp_lcd` vendor driver dropped in — see [`src/shared/p4/README.md`](emu8/src/shared/p4/README.md)
 > for the one-time setup, status notes, and fallback levers.
 
 > **ClockworkPi PicoCalc** — built with the earlephilhower **arduino-pico** core (not Arduino-ESP32);
-> the ESP-only APIs the shared code uses are shimmed in [`src/picocalc/pico_shim/`](src/picocalc/pico_shim/).
+> the ESP-only APIs the shared code uses are shimmed in [`src/picocalc/pico_shim/`](emu8/src/picocalc/pico_shim/).
 > There are two build tasks, one per mainboard: **PicoCalc** (Pico 2 / RP2350) and **PicoCalc RP2040**
 > (original Pico). The board has no memory-mapped PSRAM, so ROM and cartridge images are kept in spare
 > on-board flash. On the RP2040 the PC-XT core is not available (not enough heap for DOS); the
@@ -338,7 +338,7 @@ arduino-cli lib install "GFX Library for Arduino"
 
 Build/upload commands live in [`.vscode/tasks.json`](.vscode/tasks.json) — one pair of tasks per board.
 The board is selected purely by *which task you run*: the JC4827W543 tasks add
-`-DBOARD_JC4827W543`, which flips [`board.h`](board.h) to the ESP32-S3 / Arduino_GFX / USB / I2S
+`-DBOARD_JC4827W543`, which flips [`board.h`](emu8/board.h) to the ESP32-S3 / Arduino_GFX / USB / I2S
 configuration. The CYD tasks pass no such define and produce the original ESP32 + TFT_eSPI firmware.
 
 In VS Code: **Terminal → Run Task…** then pick the build (or build & upload) task for your board.
@@ -350,8 +350,8 @@ In VS Code: **Terminal → Run Task…** then pick the build (or build & upload)
 arduino-cli compile \
   --fqbn esp32:esp32:esp32:PSRAM=disabled,PartitionScheme=huge_app,CPUFreq=240,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=921600,LoopCore=1,EventsCore=1,DebugLevel=none \
   --build-property compiler.optimization_flags=-O2 \
-  .
-arduino-cli upload -p COM4 --fqbn esp32:esp32:esp32:PSRAM=disabled,PartitionScheme=huge_app,CPUFreq=240,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=921600,LoopCore=1,EventsCore=1,DebugLevel=none .
+  emu8
+arduino-cli upload -p COM4 --fqbn esp32:esp32:esp32:PSRAM=disabled,PartitionScheme=huge_app,CPUFreq=240,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=921600,LoopCore=1,EventsCore=1,DebugLevel=none emu8
 ```
 
 ### Guition JC4827W543 / ESP32-S3 (COM5)
@@ -361,8 +361,8 @@ arduino-cli compile \
   --fqbn esp32:esp32:esp32s3:PSRAM=opi,PartitionScheme=huge_app,CPUFreq=240,FlashMode=qio,FlashSize=4M,UploadSpeed=921600,USBMode=default,CDCOnBoot=default,DebugLevel=none \
   --build-property compiler.optimization_flags=-O2 \
   --build-property compiler.cpp.extra_flags=-DBOARD_JC4827W543 \
-  .
-arduino-cli upload -p COM5 --fqbn esp32:esp32:esp32s3:PSRAM=opi,PartitionScheme=huge_app,CPUFreq=240,FlashMode=qio,FlashSize=4M,UploadSpeed=921600,USBMode=default,CDCOnBoot=default,DebugLevel=none .
+  emu8
+arduino-cli upload -p COM5 --fqbn esp32:esp32:esp32s3:PSRAM=opi,PartitionScheme=huge_app,CPUFreq=240,FlashMode=qio,FlashSize=4M,UploadSpeed=921600,USBMode=default,CDCOnBoot=default,DebugLevel=none emu8
 ```
 
 > The JC4827W543 has no auto-reset circuit: to upload, hold **BOOT**, tap **RST**, release **BOOT**;
@@ -418,7 +418,7 @@ a platform directly (also the deterministic choice for gdb).
 to `Ready.`. Per-platform polish (upscale options, gamepad maps) is ongoing; the **PC-XT / fabgl**
 runtime on desktop is **Phase 3** (currently a stub — selecting it on desktop is inert, though it runs
 on the device). Full setup, toolchain and status notes live in
-[`src/desktop/README.md`](src/desktop/README.md).
+[`src/desktop/README.md`](emu8/src/desktop/README.md).
 
 ---
 
@@ -499,7 +499,7 @@ for details and [`PROTOCOL.md`](tools/sdmanager/PROTOCOL.md) for the wire format
 ## Display configuration (CYD / TFT_eSPI)
 
 The CYD build configures TFT_eSPI at **library** level, so before building you must make the library
-use this repo's [`User_Setup.h`](User_Setup.h):
+use this repo's [`User_Setup.h`](emu8/User_Setup.h):
 
 1. Locate the installed `TFT_eSPI` library folder (e.g. `Documents/Arduino/libraries/TFT_eSPI`).
 2. Replace its `User_Setup.h` with the one from this repo (back up the original first).
@@ -508,14 +508,14 @@ Key settings: `ILI9341_2_DRIVER`, `TFT_WIDTH 240`, `TFT_HEIGHT 320`, `SPI_FREQUE
 (drop to 55/40 MHz on display corruption), backlight `TFT_BL 27` active-HIGH.
 
 The JC4827W543 display needs **no** `User_Setup.h` — Arduino_GFX is configured in code
-([`src/shared/display_gfx.cpp`](src/shared/display_gfx.cpp)) with the QSPI pin map from
-[`board.h`](board.h).
+([`src/shared/display_gfx.cpp`](emu8/src/shared/display_gfx.cpp)) with the QSPI pin map from
+[`board.h`](emu8/board.h).
 
 ---
 
 ## Pin assignments (CYD)
 
-### Display — ILI9341 (in [`User_Setup.h`](User_Setup.h))
+### Display — ILI9341 (in [`User_Setup.h`](emu8/User_Setup.h))
 
 | Signal | GPIO | | Signal | GPIO |
 | --- | --- | --- | --- | --- |
@@ -524,7 +524,7 @@ The JC4827W543 display needs **no** `User_Setup.h` — Arduino_GFX is configured
 | SCLK | 14 | | Touch CS (XPT2046) | 33 |
 | CS | 15 | | Touch IRQ | 36 |
 
-### Emulator peripherals & storage (in [`board.h`](board.h))
+### Emulator peripherals & storage (in [`board.h`](emu8/board.h))
 
 | Function | GPIO | | Function | GPIO |
 | --- | --- | --- | --- | --- |
@@ -536,7 +536,7 @@ The JC4827W543 display needs **no** `User_Setup.h` — Arduino_GFX is configured
 | Status LED | 17 | | | |
 
 The JC4827W543 pin map (QSPI display, I2S amp, shared HSPI touch+SD) is documented inline in
-[`board.h`](board.h).
+[`board.h`](emu8/board.h).
 
 ---
 
@@ -560,30 +560,36 @@ can destroy the board. The connector is **JST 1.25 mm**, not the common JST-PH 2
 
 ## Project structure
 
-The code is organised as separate translation units under `src/` — a shared layer plus one folder per
+The firmware is the Arduino sketch in [`emu8/`](emu8/), organised as separate translation units under `emu8/src/` — a shared layer plus one folder per
 emulated system. The top-level sketch wires them together:
 
 | Path | Purpose |
 | --- | --- |
-| [`emu8.ino`](emu8.ino) | `setup()` / `loop()` — per-platform init and the main dispatch |
-| [`board.h`](board.h) | Board selection (CYD vs JC4827W543), capability macros, pin map |
-| [`emu.h`](emu.h) · [`proto.h`](proto.h) · [`globals.cpp`](globals.cpp) | Shared state (`extern`), prototypes, definitions |
-| [`rom.h`](rom.h) | Embedded Apple II/IIe ROMs |
-| [`User_Setup.h`](User_Setup.h) | TFT_eSPI configuration (CYD) |
-| [`src/shared/`](src/shared/) | Display (TFT_eSPI + Arduino_GFX backends), video/splash, SD, EEPROM, options UI, touch keyboard, USB gamepad + USB keyboard, joystick, audio, logging |
-| [`src/apple2/`](src/apple2/) | 6502 CPU, memory, language card, soft switches, Disk II, ProDOS HD, mouse |
-| [`src/c64/`](src/c64/) | 6510, VIC-II, SID, CIA, keyboard, disk, `.crt` loader, ROMs |
-| [`src/nes/`](src/nes/) | 2A03 CPU, PPU, APU, iNES loader, mappers 0–4 |
-| [`src/atari/`](src/atari/) | 6507 CPU, TIA, RIOT, cartridge bank-switching, audio |
-| [`src/z80/`](src/z80/) | Shared Z80 CPU core (MSX1, SMS, ColecoVision, ZX Spectrum) |
-| [`src/msx/`](src/msx/) | MSX1 — TMS9918 VDP, AY-3-8910 PSG, 8255 PPI, slot/BIOS, disk |
-| [`src/zx/`](src/zx/) | ZX Spectrum 48K — ULA screen/border, keyboard, beeper, Kempston, SNA/Z80 loaders, TAP/TZX tape trap |
-| [`src/sms/`](src/sms/) | Sega Master System — 315-5124 VDP (Mode 4), SN76489 PSG, Sega mapper, cart loader |
-| [`src/pcxt/`](src/pcxt/) | PC-XT — fabgl i8086 machine, CGA, PC speaker, disk mount (in development) |
-| [`src/desktop/`](src/desktop/) | SDL2 desktop debug build — Arduino/FreeRTOS shims, SDL display/audio/input backends (see its [README](src/desktop/README.md)) |
+| [`emu8.ino`](emu8/emu8.ino) | `setup()` / `loop()` — per-platform init and the main dispatch |
+| [`board.h`](emu8/board.h) | Board selection (CYD, JC4827W543, PicoCalc), capability macros, pin map |
+| [`emu.h`](emu8/emu.h) · [`proto.h`](emu8/proto.h) · [`globals.cpp`](emu8/globals.cpp) | Shared state (`extern`), prototypes, definitions |
+| [`rom.h`](emu8/rom.h) | Embedded Apple II/IIe ROMs |
+| [`User_Setup.h`](emu8/User_Setup.h) | TFT_eSPI configuration (CYD) |
+| [`src/shared/`](emu8/src/shared/) | Display (TFT_eSPI + Arduino_GFX backends), video/splash, SD, SD-over-serial, EEPROM, options UI, file browser, touch keyboard, USB gamepad + USB keyboard, joystick, audio, logging, fonts |
+| [`src/apple2/`](emu8/src/apple2/) | 6502 CPU, memory, language card, soft switches, Disk II, ProDOS HD, mouse |
+| [`src/c64/`](emu8/src/c64/) | 6510, VIC-II, SID, CIA, keyboard, disk, `.crt` loader, ROMs |
+| [`src/nes/`](emu8/src/nes/) | 2A03 CPU, PPU, APU, iNES loader, mappers 0–4 |
+| [`src/atari/`](emu8/src/atari/) | 6507 CPU, TIA, RIOT, cartridge bank-switching, audio |
+| [`src/z80/`](emu8/src/z80/) | Shared Z80 CPU core (MSX1, SMS, ColecoVision, ZX Spectrum) |
+| [`src/msx/`](emu8/src/msx/) | MSX1 — TMS9918 VDP, AY-3-8910 PSG, 8255 PPI, slot/BIOS, disk |
+| [`src/zx/`](emu8/src/zx/) | ZX Spectrum 48K — ULA screen/border, keyboard, beeper, Kempston, SNA/Z80 loaders, TAP/TZX tape trap |
+| [`src/sms/`](emu8/src/sms/) | Sega Master System — 315-5124 VDP (Mode 4), SN76489 PSG, Sega mapper, cart loader |
+| [`src/coleco/`](emu8/src/coleco/) | ColecoVision — machine, audio |
+| [`src/pcxt/`](emu8/src/pcxt/) | PC-XT — fabgl i8086 machine, CGA, PC speaker, disk mount (in development) |
+| [`src/picocalc/`](emu8/src/picocalc/) | ClockworkPi PicoCalc (RP2040) port — display, keyboard input, audio, UF2 loader, ROM-in-flash, Pico SDK shims |
+| [`src/desktop/`](emu8/src/desktop/) | SDL2 desktop debug build — Arduino/FreeRTOS shims, SDL display/audio/input backends (see its [README](emu8/src/desktop/README.md)) |
+| [`CMakeLists.txt`](CMakeLists.txt) | CMake build for the SDL2 desktop debug build |
+| [`third_party/imgui/`](third_party/imgui/) | Dear ImGui (desktop debug UI) |
 | [`host/`](host/) | Off-device debug harnesses (MSX / SMS cores on a PC, SD serial server) |
+| [`tools/`](tools/) | Release packaging, desktop runner, PicoCalc deploy/flash scripts, ROM extraction |
 | [`tools/sdmanager/`](tools/sdmanager/) | SD card manager over USB serial: web app, Windows app (Electron), Python CLI, protocol spec + tests |
-| [`data/`](data/) · [`resources/`](resources/) | Sample disk images / test files |
+| [`docs/screenshots/`](docs/screenshots/) | README screenshots |
+| `sdcard/` · `software/` *(git-ignored)* | Local SD card image for the desktop build (`sdcard/roms/` for system ROMs) and a scratch folder of disk/cart images for testing |
 
 ---
 
