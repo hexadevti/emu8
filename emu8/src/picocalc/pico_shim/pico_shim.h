@@ -220,8 +220,35 @@ extern PicoEspClass ESP;    // the single instance lives in pico_shim.cpp
 // before the macro exists. The library global stays linked but is never begin()-ed, and the
 // macro is harmless next to the EEPROM_SIZE / *EEPROMaddress names in emu.h (different tokens).
 // ---------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------
+// The flash this firmware can actually reach.
+//
+// The linker places the EEPROM sector and the (unused) flash-filesystem partition at the very
+// end of the chip the FQBN names: 2MB on the RP2040, 4MB on the RP2350. That holds when the
+// firmware owns the whole chip. On the RP2350 the UF2 Loader (github.com/pelrun/uf2loader)
+// instead runs each app from a flash partition, remapped through the QMI address translation
+// so it starts at XIP_BASE: the app sees only the partition, the linker's end-of-flash sector
+// lies past it, and reading there faults (the "Reading settings" hang on the Pico 2 / 2W).
+// flash_range_erase/program, for their part, take PHYSICAL offsets, which under the loader
+// are not the XIP offset either.
+//
+// picoFlashRelocate() moves a linker end-of-flash address down by however much the visible
+// window is short, keeping every area at the same distance from its end; picoFlashOffset()
+// turns an XIP address into the physical offset flash_range_* want. Both are the identity on
+// the RP2040 and on an RP2350 that owns its whole chip.
+// ---------------------------------------------------------------------------------------
+uintptr_t picoFlashRelocate(const void *linkAddr);
+uint32_t  picoFlashOffset(uintptr_t xipAddr);
+bool      picoFlashMapOk();          // false: the window is too small for the settings areas
+void      picoFlashLogMap();         // one log line: where the window is and where settings sit
+
 class PicoEEPROMClass : public EEPROMClass {
 public:
+  // Hide the library's begin()/commit(): same behaviour, but on the relocated sector and with
+  // the physical offset (see above). When the window cannot hold it, the settings live in RAM
+  // only for this boot rather than the boot faulting on an unmapped read.
+  void   begin(size_t size);
+  bool   commit();
   bool   readBool(int address)                { return read(address) != 0; }
   int8_t readChar(int address)                { return (int8_t)read(address); }
   size_t writeBool(int address, bool value)   { write(address, value ? 1 : 0); return 1; }

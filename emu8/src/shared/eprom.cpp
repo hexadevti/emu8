@@ -91,6 +91,9 @@ void eepromFactoryReset()
 
 void epromSetup() {
     
+#if defined(BOARD_PICOCALC)
+  picoFlashLogMap();   // under the RP2350 UF2 Loader the settings move into the app's partition
+#endif
   EEPROM.begin(EEPROM_SIZE);
   //delay(3000);
   readStringFromEEPROM(NewDeviceConfigEEPROMaddress, &NewDeviceConfig);
