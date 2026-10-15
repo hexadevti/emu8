@@ -55,3 +55,22 @@ uint32_t FRC1Timer(void);   // free-running counter at PIT_FRC1_FREQUENCY (5 MHz
 #ifdef __cplusplus
 }
 #endif
+
+// --- save states ----------------------------------------------------------
+// Each chip lists its state ONCE in a snapshot(PcSnap &) member that both saves and loads (same
+// field order both ways), so the two can never drift apart. The emu8 glue
+// (src/pcxt/pcxt_snapshot.cpp) points `move`/`mark` at its snapshot file; nothing here depends on it.
+// Fields go through fixed-width types so every build (ESP32, RP2350, desktop x64) shares one format.
+struct PcSnap {
+  void (*move)(void * ctx, void * p, size_t n);   // write (saving) or read (loading) n bytes at p
+  void (*mark)(void * ctx, const char * tag);     // 4-char section marker (verified on load)
+  void * ctx;
+  bool   loading;
+
+  void bytes(void * p, size_t n)                  { move(ctx, p, n); }
+  void tag(const char * t)                        { mark(ctx, t); }
+  template <class T> void val(T & v)              { bytes(&v, sizeof(v)); }
+  void flag(bool & b)                             { uint8_t v = b ? 1 : 0; val(v); if (loading) b = v != 0; }
+  void i32(int & v)                               { int32_t x = v; val(x); if (loading) v = x; }
+  template <class E> void e32(E & e)              { int32_t x = (int32_t)e; val(x); if (loading) e = (E)x; }
+};

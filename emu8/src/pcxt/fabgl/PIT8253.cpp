@@ -304,5 +304,29 @@ void PIT8253::tick()
 }
 
 
+
+void PIT8253::snapshot(PcSnap & s)
+{
+  for (int i = 0; i < 3; ++i) {
+    TimerInfo & t = m_timer[i];
+    s.flag(t.BCD);
+    s.val(t.mode);
+    s.val(t.RLMode);
+    s.val(t.resetHolding);
+    s.val(t.resetCount);
+    s.val(t.count);
+    s.val(t.latch);
+    s.flag(t.LSBToggle);
+    s.flag(t.out);
+    s.flag(t.gate);
+    s.flag(t.running);
+    s.flag(t.ctrlSet);
+  }
+  s.val(m_acc);
+  if (s.loading)
+    m_lastTickTime = FRC1Timer();   // the paused time is not owed: count on from now
+}
+
+
 } // namespace fabgl
 #endif // !(BOARD_PICOCALC && RP2040)

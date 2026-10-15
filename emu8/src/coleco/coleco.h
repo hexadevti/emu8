@@ -17,6 +17,8 @@
 #include <stdint.h>
 #include "../z80/z80.h"
 
+struct SnapIO;   // src/shared/snapshot.h (save states; only the snapshot code includes it)
+
 namespace coleco {
 
 static const int VDP_W = 256, VDP_H = 192;       // TMS9918A active display
@@ -42,6 +44,7 @@ uint8_t ioIn(uint16_t port);
 void    ioOut(uint16_t port, uint8_t v);
 void    runFrame();                 // one 60 Hz frame: per-scanline Z80 time, VBlank -> NMI
 void    cartSetImage(const uint8_t* data, int len);
+void    machineSnapshot(SnapIO &io);  // save state: MegaCart bank, controller mode, NMI level
 
 // ---- controllers ----
 // Direction/fire mask, active-LOW like the SMS/MSX paths: b0 up b1 down b2 left b3 right
@@ -60,6 +63,7 @@ void colecoPsgSetup();
 void colecoSetInput(uint8_t joyMask);
 void colecoSetKeypad(int key);
 void colecoHardReset();
+void colecoCancelReset();           // drop a queued reset (after a snapshot load)
 bool colecoLoadSelected(const char* path);
 void colecoScanFiles();
 bool colecoRenderLoadWarning();

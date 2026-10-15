@@ -18,6 +18,7 @@
 #include "fabgl/machine.h"
 #include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
 #include "../shared/speedmeter.h"     // live 8086 MHz-equiv for the settings title
+#include "../shared/snapshot.h"       // pcxtMouseSnapshot (save states, pcxt_snapshot.cpp)
 #include <string>
 
 // 1 MB main RAM (PSRAM) + 64 KB CGA/video window (internal: read every frame).
@@ -427,6 +428,31 @@ static bool pcInt33Service() {
       return true;
     default: return true;   // ack everything else so no call ever vectors to a null handler
   }
+}
+
+// Save state of the INT 33h driver above (called by pcxtSnapshot, pcxt_snapshot.cpp, CPU parked):
+// the app's installed handler, a callback in flight (and the context it must restore), latched
+// button counts, ranges and the cursor. Ints go through int32_t so every build shares the format.
+template <class T> static void pcSnapV(SnapIO& io, volatile T& v) { T x = v; io.val(x); if (io.loading) v = x; }
+static void pcSnapI(SnapIO& io, volatile int& v)  { int32_t x = v; io.val(x); if (io.loading) v = x; }
+static void pcSnapB(SnapIO& io, volatile bool& v) { bool x = v; io.flag(x); if (io.loading) v = x; }
+
+void pcxtMouseSnapshot(SnapIO& io) {
+  pcSnapI(io, pcMouseX); pcSnapI(io, pcMouseY); pcSnapI(io, pcMouseBtns);
+  pcSnapI(io, pcMouseAccX); pcSnapI(io, pcMouseAccY); pcSnapB(io, pcMouseShown);
+  pcSnapI(io, pcMouseMinX); pcSnapI(io, pcMouseMaxX); pcSnapI(io, pcMouseMinY); pcSnapI(io, pcMouseMaxY);
+  pcSnapI(io, pcBtnPrev);
+  for (int b = 0; b < 3; b++) {
+    pcSnapI(io, pcBtnPressCnt[b]); pcSnapI(io, pcBtnRelCnt[b]);
+    pcSnapI(io, pcBtnPressX[b]); pcSnapI(io, pcBtnPressY[b]);
+    pcSnapI(io, pcBtnRelX[b]);   pcSnapI(io, pcBtnRelY[b]);
+  }
+  pcSnapV(io, pcCbSeg); pcSnapV(io, pcCbOff); pcSnapV(io, pcCbMask);
+  pcSnapV(io, pcEvCond); pcSnapB(io, pcEvPending); pcSnapB(io, pcInCb);
+  pcSnapV(io, pcCbRetCS); pcSnapV(io, pcCbRetIP); pcSnapV(io, pcCbAge);
+  pcSnapV(io, pcSavAX); pcSnapV(io, pcSavBX); pcSnapV(io, pcSavCX); pcSnapV(io, pcSavDX);
+  pcSnapV(io, pcSavSI); pcSnapV(io, pcSavDI); pcSnapV(io, pcSavBP); pcSnapV(io, pcSavDS);
+  pcSnapV(io, pcSavES); pcSnapV(io, pcSavFL);
 }
 
 // ============================ platform entry points =============================================

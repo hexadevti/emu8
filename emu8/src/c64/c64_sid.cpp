@@ -1,5 +1,6 @@
 #include "../../emu.h"
 #include "c64.h"
+#include "../shared/snapshot.h"
 #include "driver/i2s.h"
 
 // 3-voice SID (6581) approximation -> ESP32 internal DAC (GPIO26) via I2S DMA, an I2S amp on the
@@ -273,6 +274,33 @@ void sidDebugVoice(int v, float *env, uint8_t *state) {
   if (state) *state = voice[v].state;
 }
 #endif
+
+// Snapshot (c64_snapshot.cpp): the register file, each voice's oscillator / noise / envelope, and
+// the filter's two integrators. The synth task keeps running on the other side (silent under the
+// menu); a sample made while this copies is at worst one glitch, never a lasting one. The filter
+// coefficients are recomputed from the registers on the next sample.
+void c64SidSnapshot(SnapIO &io) {
+  io.arr(sidreg);
+  for (int v = 0; v < SID_NVOICES; v++) {
+    Voice &vo = voice[v];
+    uint32_t acc = vo.acc, lfsr = vo.lfsr, pb = vo.prevBit19, env = vo.env;
+    uint16_t out = vo.out;
+    uint8_t st = vo.state;
+    bool pg = vo.prevGate;
+    io.val(acc); io.val(lfsr); io.val(pb); io.val(env); io.val(out); io.val(st); io.flag(pg);
+    if (io.loading && io.ok) {
+      vo.acc = acc & 0xFFFFFF; vo.lfsr = (lfsr & 0x7FFFFF) ? (lfsr & 0x7FFFFF) : 0x7FFFF8;
+      vo.prevBit19 = pb; vo.env = env > ENV_MAX ? ENV_MAX : env;
+      vo.out = out; vo.state = st <= 4 ? st : 0; vo.prevGate = pg;
+    }
+  }
+  int32_t i1 = fIc1, i2 = fIc2;
+  io.val(i1); io.val(i2);
+  if (!io.loading || !io.ok) return;
+  fIc1 = i1; fIc2 = i2;
+  fKey = 0xFFFFFFFF;
+  for (int v = 0; v < SID_NVOICES; v++) gateEdge[v] = 0;
+}
 
 void sidSetup() {
   memset(sidreg, 0, sizeof(sidreg));

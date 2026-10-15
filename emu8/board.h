@@ -91,7 +91,7 @@
 // space instead (see BOARD_HAS_PCXT_CORE). Everything else fits the 520KB SRAM.
 //
 // Toolchain: earlephilhower arduino-pico, FQBN rp2040:rp2040:rpipico2 with arch=arm + os=freertos
-// (FreeRTOS SMP is ARM-only) + freq=200 (see the SPI note below). Pin numbers below are taken from
+// (FreeRTOS SMP is ARM-only) + freq=250 (see the SPI note below). Pin numbers below are taken from
 // clockworkpi/PicoCalc's own sources (Code/picocalc_helloworld/), not from third-party writeups.
 #undef  BOARD_NAME                // arduino-pico passes its own -DBOARD_NAME on the command line
 #if defined(PICO_RP2350)
@@ -132,8 +132,8 @@
 // reachable rates are quantised and asking for 50MHz at the wrong sysclk silently gives less:
 //   RP2350 at the stock 150MHz -> only 75 / 37.5 / 25 are reachable, so 50 becomes 37.5
 //   RP2040 at the stock 133MHz -> 50 becomes 133/4 = 33.25
-// The panel therefore runs at exactly clk_peri/4: the RP2350 build selects freq=200 (50MHz, the
-// rate first proven on this panel) and the RP2040 build freq=250 (62.5MHz) -- see .vscode/tasks.json.
+// The panel therefore runs at exactly clk_peri/4: both the RP2350 and the RP2040 build select
+// freq=250 (62.5MHz) -- see .vscode/tasks.json. (The RP2350 used freq=200, a 50MHz link, before.)
 // A fixed 50MHz would round DOWN to 250/6 = 41.7MHz on the RP2040. The panel push is the frame-rate
 // bottleneck for the Z80 machines, so it gets the full quarter. If the ribbon shows artifacts, use
 // F_CPU / 6 here rather than lowering the sysclk; the interpreters are CPU-bound and want the clock.

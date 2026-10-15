@@ -1,4 +1,5 @@
 #include "../../emu.h"
+#include "snapshot.h"
 #include "filebrowser.h"
 
 // The PicoCalc's 320x320 keyboard-driven menu. The desktop build can simulate it
@@ -95,6 +96,7 @@ static void ouiCloseHelp();
 static bool ouiActTwoButtons();             // action row layout (defined with the keyboard navigation)
 static uint8_t ouiRomMode        = 0;       // ROMS page: 0 closed, 1 ROM list, 2 SD browser for one ROM
 static uint8_t ouiGenMode        = 0;       // general settings (over the system menu): 0 closed, see ouiDrawGeneral
+static uint8_t ouiSnapMode       = 0;       // snapshot page (Ctrl-Shift-F5): 0 closed, 1 the list
 static int ouiGenCount();
 
 // Joystick focus: left/right moves between controls; the focused one gets a white
@@ -151,7 +153,7 @@ static int ouiScreenSlot()
 static String &ouiPcA() { return selectedPcFileName; }
 static String &ouiPcC() { return selectedPcHdFileName; }
 
-static std::vector<std::string> &ouiFiles()
+static FileList &ouiFiles()
 {
   if (ouiIsC64()) return c64Files;
   if (ouiIsNES()) return nesFiles;
@@ -184,7 +186,7 @@ static bool ouiIsDir(const std::string &e) { return e == ".." || (!e.empty() && 
 static bool ouiMsxDsk()
 {
   if (!ouiIsMsx()) return false;
-  std::vector<std::string> &fl = ouiFiles();
+  FileList &fl = ouiFiles();
   if (shownFile >= fl.size() || ouiIsDir(fl[shownFile])) return false;
   const std::string &n = fl[shownFile];
   return n.size() > 4 && strcasecmp(n.c_str() + n.size() - 4, ".dsk") == 0;
@@ -195,14 +197,14 @@ static bool ouiMsxDskCur() { return ouiMsxDsk() && msxDiskMounted(ouiFiles()[sho
 // UNMOUNT, and Del unmounts it from the list on every platform.
 static bool ouiCurMounted()
 {
-  std::vector<std::string> &fl = ouiFiles();
+  FileList &fl = ouiFiles();
   return shownFile < fl.size() && !ouiIsDir(fl[shownFile]) && mediaIsMounted(fl[shownFile].c_str());
 }
 // UNMOUNT the highlighted entry. Stays in settings so the list marker and the button update; a
 // cartridge / program / snapshot restarts the machine (empty) when the window closes.
 static void ouiUnmount()
 {
-  std::vector<std::string> &fl = ouiFiles();
+  FileList &fl = ouiFiles();
   if (shownFile < fl.size() && !ouiIsDir(fl[shownFile]) && mediaUnmount(fl[shownFile].c_str()))
     optionsUiDirty = true;
 }
@@ -256,7 +258,7 @@ static void ouiBrowse(const std::string &entry)
 // ---------------------------------------------------------------------------
 void optionsUiSyncSelection()
 {
-  std::vector<std::string> &files = ouiFiles();
+  FileList &files = ouiFiles();
   std::string sel = ouiSel();
   int idx = -1;
   for (int i = 0; i < (int)files.size(); i++)
@@ -283,6 +285,7 @@ void optionsUiSyncSelection()
 static uint32_t ouiSigTitle, ouiSigCard[8], ouiSigVol, ouiSigHdr, ouiSigRow[OUI_FB_ROWS], ouiSigAct;
 static uint8_t  ouiRingDrawn;         // file-list focus ring as last drawn: 0 off, 1 white, 2 green
 static bool     ouiScrollDrawn;
+static uint32_t ouiSigSnapThumb, ouiSigSnapInfo, ouiSigSnapBtns;   // snapshot page (ouiDrawSnap)
 
 static void ouiInvalidateRows()
 {
@@ -296,6 +299,7 @@ static void ouiInvalidate()
   for (int i = 0; i < 8; i++) ouiSigCard[i] = OUI_SIG_NONE;
   ouiInvalidateRows();
   ouiScrollDrawn = false;
+  ouiSigSnapThumb = ouiSigSnapInfo = ouiSigSnapBtns = OUI_SIG_NONE;
 }
 
 static uint32_t ouiHash(const char *s, uint32_t h = 2166136261u)   // FNV-1a
@@ -482,7 +486,7 @@ static void ouiDrawVolume()
 
 static void ouiDrawFiles()
 {
-  std::vector<std::string> &files = ouiFiles();
+  FileList &files = ouiFiles();
 
   // header: the highlighted entry's problem, when it has one, in place of the list title
   const char *problem = (shownFile < files.size()) ? ouiEntryProblem(shownFile) : nullptr;
@@ -631,7 +635,7 @@ static void ouiHintLine(int y, const char *const *seg, int n)
 
 static void ouiDrawFileHints()
 {
-  std::vector<std::string> &fl = ouiFiles();
+  FileList &fl = ouiFiles();
   const bool dir = shownFile < fl.size() && ouiIsDir(fl[shownFile]);
   // What Enter (inside the list) and Ctrl-Enter do -- mirrors optionsUiKeyEnter / ouiMount.
   const char *enterAct = dir               ? "open folder"
@@ -680,7 +684,7 @@ static void ouiDrawActions()
   uint16_t mt = canMount ? OUI_TXT : OUI_LBL;
   bool curA = false, curC = false;
   if (ouiIsPcxt()) {
-    std::vector<std::string> &fl = ouiFiles();
+    FileList &fl = ouiFiles();
     curA = shownFile < fl.size() && ouiPcA().length() && (fl[shownFile] == std::string(ouiPcA().c_str()));
     curC = shownFile < fl.size() && ouiPcC().length() && (fl[shownFile] == std::string(ouiPcC().c_str()));
   }
@@ -753,6 +757,8 @@ int uiDrawBattery(int rightX, int cy, uint16_t bg)
 }
 #endif
 
+#define OUI_SNAP_BTN_W 50   // touch boards: the title bar's SNAP button, left of X
+
 static void ouiDrawTitle()
 {
   const char *title = ouiIsC64() ? "COMMODORE 64"
@@ -796,6 +802,13 @@ static void ouiDrawTitle()
 #if OUI_PICOCALC
   int bl = uiDrawBattery(rx, OUI_TITLE_H / 2, OUI_TITLE);
   if (bl != rx) rx = bl - 8;
+#else
+  // Touch boards have no Ctrl-Shift-F5: SNAP opens the snapshot page.
+  if (snapSystemName()) {
+    const int sx = cx - OUI_SNAP_BTN_W - 4;
+    ouiSmallBtn(sx, 3, OUI_SNAP_BTN_W, OUI_TITLE_H - 6, "SNAP", tft.color565(40, 130, 75));
+    rx = sx - 8;
+  }
 #endif
   if (mhz[0]) {
     // Too wide for the gap after the title (long names like "ZX SPECTRUM 48K")? Drop the CPU name,
@@ -886,10 +899,11 @@ static void ouiDrawHelp()
   ouiHelpRow(y, "Ctrl-F1",       "Open / close menu");
   ouiHelpRow(y, "Ctrl-Shift-F1", "System menu");
   ouiHelpRow(y, "Ctrl-Shift-F3", "Hard reset (same system)");
+  ouiHelpRow(y, "Ctrl-Shift-F5", "Snapshots: save / load state");
 #else
-  ouiHelpRow(y, "F10",           "Open / close menu");
+  ouiHelpRow(y, "F10 / SEL+START", "Open / close menu");
   ouiHelpRow(y, "Vol +/-",       "Volume (media keys)");
-  ouiHelpRow(y, "Pad SEL+START", "Open / close menu");
+  ouiHelpRow(y, "Ctrl-Shift-F5", "Snapshots: save / load state");
 #endif
   ouiHelpHdr(y, "IN THIS MENU");
   ouiHelpRow(y, "Arrows",        "Browse");
@@ -1048,6 +1062,15 @@ static void ouiDrawHelp()
 #define OUI_RS_LIST   (OUI_TITLE_H + 20)
 #define OUI_RS_FOOT   (OUI_SCR_H - 32)
 #define OUI_RS_ROWS   ((OUI_RS_FOOT - 2 - OUI_RS_LIST) / OUI_FB_ROWH)
+// The snapshot page: the list on the left, the selected one's picture on the right, the buttons
+// along the bottom.
+#define OUI_SN_BTN_H  30
+#define OUI_SN_BTN_Y  (OUI_SCR_H - OUI_SN_BTN_H - 4)
+#define OUI_SN_LIST_W 134                                  // rows; the scroll buttons follow
+#define OUI_SN_ROWS   ((OUI_SN_BTN_Y - 4 - OUI_RS_LIST) / OUI_FB_ROWH)
+#define OUI_SN_TX     (320 - 4 - SNAP_THUMB_W)               // the thumbnail
+#define OUI_SN_TY     (OUI_RS_LIST + 1)
+#define OUI_SN_INFO   (OUI_SN_TY + SNAP_THUMB_H + 5)         // name + message under it
 #define OUI_RS_FIXED  2           // mode 2 rows above the files: "use default", "no ROM"
 #if OUI_PICOCALC
 #define OUI_RS_LBLW   84          // label column (mode 1)
@@ -1060,7 +1083,7 @@ static int      ouiRomTapped = -1;               // touch: row tapped once (a se
 static char     ouiRomMsg[48];                   // footer status line ("" = show the key hints)
 static bool     ouiRomMsgErr = false;
 static uint32_t ouiRomRowSig[OUI_RS_ROWS];
-static std::vector<std::string> ouiRomFiles;
+static FileList ouiRomFiles;
 static FileBrowser ouiRomBrowser = { "ROMS", &ouiRomFiles, nullptr, nullptr, 200, "/" };
 
 // The slots shown in mode 1, in table order.
@@ -1071,9 +1094,12 @@ static int ouiRomSlots(int *out)
   return n;
 }
 
+static int ouiListRows() { return ouiSnapMode ? OUI_SN_ROWS : OUI_RS_ROWS; }
+
 static int ouiRomCount()
 {
   if (ouiGenMode) return ouiGenCount();
+  if (ouiSnapMode) return (int)ouiRomFiles.size();
   if (ouiRomMode == 2) return OUI_RS_FIXED + (int)ouiRomFiles.size();
   int s[ROMSEL_COUNT];
   return ouiRomSlots(s);
@@ -1117,13 +1143,13 @@ static void ouiOpenRoms()
 static void ouiRomClose()
 {
   ouiRomMode = 0; ouiRomSlot = -1;
-  std::vector<std::string>().swap(ouiRomFiles);
+  ouiRomFiles.release();
 }
 
 static void ouiRomKeepVisible()
 {
   if (ouiRomSel < ouiRomFirst) ouiRomFirst = ouiRomSel;
-  else if (ouiRomSel >= ouiRomFirst + OUI_RS_ROWS) ouiRomFirst = ouiRomSel - OUI_RS_ROWS + 1;
+  else if (ouiRomSel >= ouiRomFirst + ouiListRows()) ouiRomFirst = ouiRomSel - ouiListRows() + 1;
 }
 
 static void ouiRomMove(int d)
@@ -1140,13 +1166,14 @@ static void ouiRomMove(int d)
 
 static void ouiRomScroll(int d)
 {
-  int maxFirst = ouiRomCount() - OUI_RS_ROWS;
+  const int rows = ouiListRows();
+  int maxFirst = ouiRomCount() - rows;
   if (maxFirst < 0) maxFirst = 0;
-  ouiRomFirst += d * (OUI_RS_ROWS - 1);
+  ouiRomFirst += d * (rows - 1);
   if (ouiRomFirst > maxFirst) ouiRomFirst = maxFirst;
   if (ouiRomFirst < 0) ouiRomFirst = 0;
   if (ouiRomSel < ouiRomFirst) ouiRomSel = ouiRomFirst;
-  if (ouiRomSel >= ouiRomFirst + OUI_RS_ROWS) ouiRomSel = ouiRomFirst + OUI_RS_ROWS - 1;
+  if (ouiRomSel >= ouiRomFirst + rows) ouiRomSel = ouiRomFirst + rows - 1;
   ouiRomTapped = -1;
   optionsUiDirty = true;
 }
@@ -1162,7 +1189,7 @@ static void ouiRomBrowse(int slot)
   String cur = romPath(slot);
   int sl = cur.lastIndexOf('/');
   ouiRomBrowser.dir = (sl <= 0) ? String("/") : cur.substring(0, sl);
-  std::vector<std::string>().swap(ouiRomFiles);
+  ouiRomFiles.release();
   tft.fillScreen(OUI_BG); ouiInvalidate(); ouiRomRedraw(); optionsUiFirstDraw = false;
   ouiDrawRoms();                             // the scan's progress bar then sits on this page
   fbScan(ouiRomBrowser);
@@ -1180,7 +1207,7 @@ static void ouiRomBack()
     ouiRomMode = 1; ouiRomSel = 0;
     for (int i = 0; i < n; i++) if (s[i] == ouiRomSlot) ouiRomSel = i;
     ouiRomFirst = 0; ouiRomKeepVisible(); ouiRomTapped = -1; ouiRomMsg[0] = 0;
-    std::vector<std::string>().swap(ouiRomFiles);
+    ouiRomFiles.release();
     ouiRomRedraw();
     return;
   }
@@ -1378,14 +1405,16 @@ static void ouiDrawRoms()
 
 // --- General settings: opened with Ctrl-F1 (F10 on a USB keyboard, the SETUP button on a touch
 // panel) from the system menu, so they belong to the device rather than to one system. ---
-//   mode 1  the list: ROM folder, apps folder, reset settings, help
-//   mode 2  a folder picker for the ROM or the apps folder (folders only)
+//   mode 1  the list: ROM folder, apps folder, snapshot folder, reset settings, help
+//   mode 2  a folder picker for one of the three folders (folders only)
 //   mode 3  "erase everything?" confirmation
 //   mode 4  the general help page
 // The list pages' state (ouiRomSel, ouiRomFiles, the footer message...) is shared with the ROMS
 // page, which cannot be open at the same time.
-#define OUI_GEN_ROWS 4
-static int ouiGenTarget = 0;                  // mode 2: 0 = ROM folder, 1 = apps folder
+#define OUI_GEN_ROWS 5
+#define OUI_GEN_RESET 3                       // mode 1 rows after the three folders
+#define OUI_GEN_HELP  4
+static int ouiGenTarget = 0;                  // mode 2: 0 = ROM folder, 1 = apps folder, 2 = snapshot folder
 static bool ouiGenNoFiles(const std::string &) { return false; }   // the picker lists folders only
 static FileBrowser ouiGenBrowser = { "FOLDER", &ouiRomFiles, ouiGenNoFiles, nullptr, 200, "/" };
 
@@ -1399,7 +1428,9 @@ static int ouiGenCount()
   }
 }
 
-static const char *ouiGenCurrent(int target) { return target ? appsBaseDir() : romBaseDir(); }
+static const char *ouiGenCurrent(int target) { return target == 2 ? snapBaseDir() : target ? appsBaseDir() : romBaseDir(); }
+static const char *ouiGenDefault(int target) { return target == 2 ? SNAP_DEFAULT_DIR : target ? "/" : "/roms"; }
+static const char *ouiGenTitle(int target)   { return target == 2 ? "SNAPSHOT FOLDER" : target ? "APPS FOLDER" : "ROM FOLDER"; }
 
 static void ouiGenRow(int idx, char *a, size_t na, char *b, size_t nb, uint16_t &bc)
 {
@@ -1407,12 +1438,13 @@ static void ouiGenRow(int idx, char *a, size_t na, char *b, size_t nb, uint16_t 
     switch (idx) {
       case 0: snprintf(a, na, "ROM FOLDER");  snprintf(b, nb, "%s", romBaseDir());  bc = OUI_ON; break;
       case 1: snprintf(a, na, "APPS FOLDER"); snprintf(b, nb, "%s", appsBaseDir()); bc = OUI_ON; break;
-      case 2: snprintf(a, na, "RESET");       snprintf(b, nb, "Erase all saved settings"); bc = OUI_REBOOT; break;
-      case 3: snprintf(a, na, "HELP");        snprintf(b, nb, "Keys, folders, ROMs"); bc = OUI_LBL; break;
+      case 2: snprintf(a, na, "SNAPSHOTS");   snprintf(b, nb, "%s", snapBaseDir()); bc = OUI_ON; break;
+      case OUI_GEN_RESET: snprintf(a, na, "RESET"); snprintf(b, nb, "Erase all saved settings"); bc = OUI_REBOOT; break;
+      case OUI_GEN_HELP:  snprintf(a, na, "HELP");  snprintf(b, nb, "Keys, folders, ROMs"); bc = OUI_LBL; break;
     }
   } else if (ouiGenMode == 2) {
     if (idx == 0)      { snprintf(b, nb, "< use this folder: %s >", ouiGenBrowser.dir.c_str()); bc = OUI_ON; }
-    else if (idx == 1) { snprintf(b, nb, "< use default: %s >", ouiGenTarget ? "/" : "/roms"); bc = OUI_REBOOT; }
+    else if (idx == 1) { snprintf(b, nb, "< use default: %s >", ouiGenDefault(ouiGenTarget)); bc = OUI_REBOOT; }
     else { snprintf(b, nb, "%s", ouiDisplayName(ouiRomFiles[idx - 2]).c_str()); bc = tft.color565(90, 200, 255); }
   } else if (ouiGenMode == 3) {
     if (idx == 0) { snprintf(b, nb, "No - keep my settings"); bc = OUI_TXT; }
@@ -1456,6 +1488,7 @@ static void ouiGenHelpPage()
   ouiHelpRow(y, "ROM folder",     "System ROMs (default /roms)");
   ouiHelpRow(y, "",               "Names: README, ROM sources");
   ouiHelpRow(y, "Apps folder",    "Where file lists start (/)");
+  ouiHelpRow(y, "Snapshots",      "Save states, one folder/system");
   ouiHelpRow(y, "ROMS page",      "Pick any other ROM file");
   ouiHelpRow(y, "Reset",          "Erase settings, then reboot");
 
@@ -1475,7 +1508,7 @@ static void ouiDrawGeneral()
   const char *title = "GENERAL SETTINGS", *hint = "Enter/tap: open    Esc/X: back to systems";
   if (ouiGenMode == 1) snprintf(hdr, sizeof(hdr), "Saved on this device, for every system");
   else if (ouiGenMode == 2) {
-    title = ouiGenTarget ? "APPS FOLDER" : "ROM FOLDER";
+    title = ouiGenTitle(ouiGenTarget);
     hint  = "Enter/2nd tap: choose    Esc/X: back";
     snprintf(hdr, sizeof(hdr), "Now: %s    Browsing: %s", ouiGenCurrent(ouiGenTarget), ouiGenBrowser.dir.c_str());
   } else {
@@ -1488,7 +1521,7 @@ static void ouiDrawGeneral()
 
 static void ouiGenGoto(uint8_t mode, int sel)
 {
-  if (mode != 2) std::vector<std::string>().swap(ouiRomFiles);
+  if (mode != 2) ouiRomFiles.release();
   ouiGenMode = mode; ouiRomSel = sel; ouiRomFirst = 0; ouiRomTapped = -1;
   ouiRomKeepVisible();
   ouiRomRedraw();
@@ -1499,7 +1532,7 @@ static void ouiGenBrowse(int target)
 {
   ouiGenTarget = target; ouiRomMsg[0] = 0;
   ouiGenBrowser.dir = ouiGenCurrent(target);
-  std::vector<std::string>().swap(ouiRomFiles);
+  ouiRomFiles.release();
   ouiGenGoto(2, 0);
   tft.fillScreen(OUI_BG); ouiInvalidate(); optionsUiFirstDraw = false;
   ouiDrawGeneral();                          // the scan's progress bar then sits on this page
@@ -1514,22 +1547,22 @@ static void ouiGenPick(const char *dir)      // dir == nullptr: back to the defa
   const String d = dir ? dir : "";           // dir may point into the browser, which ouiGenGoto frees
   ouiGenGoto(1, t);
   const char *p = dir ? d.c_str() : nullptr;
-  if (!(t ? setAppsBaseDir(p) : setRomBaseDir(p))) { ouiRomSetMsg("Could not save", true); return; }
-  ouiRomSetMsg(t ? "Apps folder saved - used from next boot" : "ROM folder saved - used from next boot", false);
+  if (!(t == 2 ? setSnapBaseDir(p) : t ? setAppsBaseDir(p) : setRomBaseDir(p))) { ouiRomSetMsg("Could not save", true); return; }
+  ouiRomSetMsg(t == 2 ? "Snapshot folder saved" : t ? "Apps folder saved - used from next boot" : "ROM folder saved - used from next boot", false);
 }
 
 static void ouiGenEnter()
 {
-  if (ouiGenMode == 4) { ouiGenGoto(1, 3); return; }
+  if (ouiGenMode == 4) { ouiGenGoto(1, OUI_GEN_HELP); return; }
   if (ouiGenMode == 1) {
     ouiRomMsg[0] = 0;
-    if (ouiRomSel <= 1)      ouiGenBrowse(ouiRomSel);
-    else if (ouiRomSel == 2) ouiGenGoto(3, 0);             // "No" preselected
-    else                     ouiGenGoto(4, 0);
+    if (ouiRomSel <= 2)                  ouiGenBrowse(ouiRomSel);
+    else if (ouiRomSel == OUI_GEN_RESET) ouiGenGoto(3, 0);             // "No" preselected
+    else                                 ouiGenGoto(4, 0);
     return;
   }
   if (ouiGenMode == 3) {
-    if (ouiRomSel == 0) { ouiGenGoto(1, 2); return; }
+    if (ouiRomSel == 0) { ouiGenGoto(1, OUI_GEN_RESET); return; }
     tft.fillScreen(OUI_BG);
     tft.setTextDatum(MC_DATUM);
     tft.setTextColor(OUI_TXT, OUI_BG);
@@ -1557,8 +1590,8 @@ static bool ouiGenBack()
 {
   switch (ouiGenMode) {
     case 2: ouiGenGoto(1, ouiGenTarget); return true;
-    case 3: ouiGenGoto(1, 2); return true;
-    case 4: ouiGenGoto(1, 3); return true;
+    case 3: ouiGenGoto(1, OUI_GEN_RESET); return true;
+    case 4: ouiGenGoto(1, OUI_GEN_HELP); return true;
     default: return false;
   }
 }
@@ -1604,12 +1637,316 @@ void optionsUiCloseGeneral()
 {
   if (!ouiGenMode) return;
   ouiGenMode = 0;
-  std::vector<std::string>().swap(ouiRomFiles);
+  ouiRomFiles.release();
   OptionsWindow = false;
   splashRepaint();
 }
 
 bool optionsUiGeneralOpen() { return ouiGenMode != 0; }
+
+// --- Snapshot page: Ctrl-Shift-F5 (snapshotWindowToggle) over the paused machine ---
+// The running system's save states, newest first (snapshot.cpp), each with the picture it was
+// taken on. Picking works like the file list: a tap (or Up/Down) only selects -- its picture shows
+// on the right -- and the buttons below act: SAVE always saves a NEW one (S), LOAD loads the
+// selected one and resumes (L), DELETE twice deletes it (D twice). Esc / X resumes.
+// Shares the list pages' state (ouiRomFiles holds the paths, ouiRomSel...) with ROMS / general.
+static int ouiSnapDelArm = -1;               // row D was pressed on once: a second D deletes it
+static uint32_t ouiSnapResumeAt = 0;         // after a load: millis() at which the page closes by itself
+static uint32_t ouiSnapRestartAt = 0;        // its settings were restored: millis() at which to reboot
+
+static int ouiSnapNum(const std::string &e)
+{
+  const size_t sl = e.find_last_of('/');
+  return atoi(e.c_str() + (sl == std::string::npos ? 0 : sl + 1));
+}
+
+static void ouiSnapRescan(int sel)
+{
+  snapList(ouiRomFiles);
+  ouiRomSel = sel; ouiRomFirst = 0; ouiRomTapped = -1; ouiSnapDelArm = -1;
+  if (ouiRomSel > (int)ouiRomFiles.size() - 1) ouiRomSel = (int)ouiRomFiles.size() - 1;
+  if (ouiRomSel < 0) ouiRomSel = 0;
+  ouiRomKeepVisible();
+  ouiRomRedraw();
+}
+
+// "/emu8-snapshot/c64/0007-GIANA.snp" -> num = "0007", name = "GIANA"
+static void ouiSnapName(int idx, char *num, size_t nn, char *name, size_t nm)
+{
+  const std::string &e = ouiRomFiles[idx];
+  const size_t sl = e.find_last_of('/');
+  std::string n = e.substr(sl == std::string::npos ? 0 : sl + 1);
+  if (n.size() > 4) n.erase(n.size() - 4);          // ".snp"
+  const size_t dash = n.find('-');
+  snprintf(num, nn, "%s", n.substr(0, dash).c_str());
+  snprintf(name, nm, "%s", dash == std::string::npos ? snapSystemName() : n.c_str() + dash + 1);
+}
+
+// Up to `maxLines` lines of `s`, broken at spaces to fit `w` pixels in font 1, from (x, y).
+static void ouiSnapWrap(const char *s, int x, int y, int w, int maxLines, uint16_t fg)
+{
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(fg, OUI_BG);
+  std::string rest = s;
+  for (int l = 0; l < maxLines && !rest.empty(); l++) {
+    size_t cut = rest.size();
+    while (cut > 1 && ouiRomTextW(rest.substr(0, cut).c_str(), 1) > w) {
+      size_t sp = rest.rfind(' ', cut - 1);
+      cut = (sp == std::string::npos || sp == 0) ? cut - 1 : sp;
+    }
+    tft.drawString(rest.substr(0, cut).c_str(), x, y + l * 12, 1);
+    rest.erase(0, cut);
+    while (!rest.empty() && rest[0] == ' ') rest.erase(0, 1);
+  }
+}
+
+static void ouiSnapBtn(int x, int w, const char *label, uint16_t face, uint16_t txt)
+{
+  tft.fillRoundRect(x, OUI_SN_BTN_Y, w, OUI_SN_BTN_H, 6, face);
+  tft.drawRoundRect(x, OUI_SN_BTN_Y, w, OUI_SN_BTN_H, 6, OUI_BORDER);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(txt, face);
+  tft.drawString(label, x + w / 2, OUI_SN_BTN_Y + OUI_SN_BTN_H / 2, 2);
+}
+
+static void ouiDrawSnap()
+{
+  // Title bar (the list pages' one).
+  uint32_t tsig = ouiHash("SNAPSHOTS");
+#if OUI_PICOCALC
+  tsig = ouiHash("bat", tsig ^ uiBatterySig());
+#endif
+  if (ouiChanged(ouiSigTitle, tsig)) {
+    tft.fillRect(0, 0, 320, OUI_TITLE_H, OUI_TITLE);
+    tft.setTextDatum(ML_DATUM);
+    tft.setTextColor(OUI_TXT, OUI_TITLE);
+    tft.drawString("SNAPSHOTS", 10, OUI_TITLE_H / 2, 2);
+    int cw = OUI_TITLE_H, cx = 320 - cw;
+#if OUI_PICOCALC
+    uiDrawBattery(cx - 8, OUI_TITLE_H / 2, OUI_TITLE);
+#endif
+    tft.fillRect(cx, 0, cw, OUI_TITLE_H, OUI_RED);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(OUI_TXT, OUI_RED);
+    tft.drawString("X", cx + cw / 2, OUI_TITLE_H / 2, 2);
+  }
+
+  const int count = (int)ouiRomFiles.size();
+  char hdr[96];
+  const String dir = snapDir();
+  if (!count) snprintf(hdr, sizeof(hdr), "None yet - SAVE makes one in %s", dir.c_str());
+  else snprintf(hdr, sizeof(hdr), "%d in %s, newest first", count, dir.c_str());
+  if (ouiChanged(ouiSigHdr, ouiHash(hdr))) {
+    tft.fillRect(0, OUI_RS_HDR, 320, OUI_RS_LIST - OUI_RS_HDR, OUI_BG);
+    tft.setTextDatum(ML_DATUM);
+    tft.setTextColor(OUI_LBL, OUI_BG);
+    tft.drawString(ouiRomFit(hdr, 306, 1).c_str(), 7, OUI_RS_HDR + (OUI_RS_LIST - OUI_RS_HDR) / 2 - 1, 1);
+  }
+
+  // The list: "0007 GIANA", the newest in green, the one armed for delete in red.
+  for (int r = 0; r < OUI_SN_ROWS; r++) {
+    const int idx = ouiRomFirst + r, ry = OUI_RS_LIST + r * OUI_FB_ROWH;
+    char num[16] = "", name[48] = "", rs[96];
+    if (idx < count) ouiSnapName(idx, num, sizeof(num), name, sizeof(name));
+    const bool sel = idx < count && idx == ouiRomSel;
+    snprintf(rs, sizeof(rs), "%d|%d|%d|%s|%s", idx < count, sel, idx == ouiSnapDelArm, num, name);
+    if (!ouiChanged(ouiRomRowSig[r], ouiHash(rs))) continue;
+    const uint16_t bg = sel ? OUI_SEL : OUI_CARD2;
+    tft.fillRect(0, ry, OUI_SN_LIST_W, OUI_FB_ROWH, bg);
+    if (idx >= count) continue;
+    const uint16_t fg = idx == ouiSnapDelArm ? OUI_RED : sel ? OUI_TXT : idx == 0 ? OUI_ON : OUI_TXT;
+    tft.setTextDatum(ML_DATUM);
+    tft.setTextColor(sel ? OUI_TXT : OUI_LBL, bg);
+    tft.drawString(num, 4, ry + OUI_FB_ROWH / 2, 1);
+    const int nx = 4 + ouiRomTextW(num, 1) + 5;
+    tft.setTextColor(fg, bg);
+    tft.drawString(ouiRomFit(name, OUI_SN_LIST_W - 2 - nx, OUI_FB_FONT).c_str(), nx, ry + OUI_FB_ROWH / 2, OUI_FB_FONT);
+  }
+  if (!ouiScrollDrawn) {                   // touch scroll buttons beside the list
+    const int half = OUI_SN_ROWS * OUI_FB_ROWH / 2;
+    ouiSmallBtn(OUI_SN_LIST_W + 2, OUI_RS_LIST, 16, half - 1, "^", OUI_CARD);
+    ouiSmallBtn(OUI_SN_LIST_W + 2, OUI_RS_LIST + half + 1, 16, half - 1, "v", OUI_CARD);
+    ouiScrollDrawn = true;
+  }
+
+  // The selected one's picture.
+  // (FileList::operator[] builds a temporary: keep the string, a c_str() of it would dangle)
+  const std::string selStr = ouiRomSel >= 0 && ouiRomSel < count ? ouiRomFiles[ouiRomSel] : std::string();
+  const char *selPath = selStr.c_str();
+  if (ouiChanged(ouiSigSnapThumb, ouiHash(selPath, 77u))) {
+    tft.fillRect(OUI_SN_TX - 1, OUI_SN_TY - 1, SNAP_THUMB_W + 2, 1, OUI_BORDER);
+    tft.fillRect(OUI_SN_TX - 1, OUI_SN_TY + SNAP_THUMB_H, SNAP_THUMB_W + 2, 1, OUI_BORDER);
+    tft.fillRect(OUI_SN_TX - 1, OUI_SN_TY, 1, SNAP_THUMB_H, OUI_BORDER);
+    tft.fillRect(OUI_SN_TX + SNAP_THUMB_W, OUI_SN_TY, 1, SNAP_THUMB_H, OUI_BORDER);
+    static uint32_t retrySig = OUI_SIG_NONE;
+    static uint8_t retries = 0;
+    const bool drawn = *selPath && snapThumbDraw(selPath, OUI_SN_TX, OUI_SN_TY);
+    if (!drawn && *selPath) {             // a failed read (SD busy right after a save...) tries again
+      if (retrySig != ouiSigSnapThumb) { retrySig = ouiSigSnapThumb; retries = 0; }
+      if (retries < 2) { retries++; ouiSigSnapThumb = OUI_SIG_NONE; optionsUiDirty = true; }
+    }
+    if (!drawn) {
+      tft.fillRect(OUI_SN_TX, OUI_SN_TY, SNAP_THUMB_W, SNAP_THUMB_H, OUI_CARD2);
+      tft.setTextDatum(MC_DATUM);
+      tft.setTextColor(OUI_LBL, OUI_CARD2);
+      tft.drawString(*selPath ? "No picture" : "No snapshots", OUI_SN_TX + SNAP_THUMB_W / 2, OUI_SN_TY + SNAP_THUMB_H / 2, 2);
+    }
+  }
+
+  // Under it: the selected name, then the last result, the delete question, or the keys.
+#if OUI_PICOCALC
+  const char *hint = "S: save   L: load   D: delete   Esc: back";
+#else
+  const char *hint = "Tap a snapshot to see it, then LOAD or DELETE it. SAVE adds a new one.";
+#endif
+  char selName[64] = "";
+  if (*selPath) {
+    char num[16], name[48];
+    ouiSnapName(ouiRomSel, num, sizeof(num), name, sizeof(name));
+    snprintf(selName, sizeof(selName), "%s %s", num, name);
+  }
+  const bool armed = ouiSnapDelArm >= 0 && ouiSnapDelArm == ouiRomSel;
+  const char *msg = ouiRomMsg[0] ? ouiRomMsg : armed ? "Press DELETE (D) again to delete it" : hint;
+  const uint16_t mc = ouiRomMsg[0] ? (ouiRomMsgErr ? OUI_RED : OUI_ON) : armed ? OUI_RED : OUI_LBL;
+  char is[192];
+  snprintf(is, sizeof(is), "%s|%s|%u", selName, msg, (unsigned)mc);
+  if (ouiChanged(ouiSigSnapInfo, ouiHash(is))) {
+    const int ix = OUI_SN_TX - 1, iw = SNAP_THUMB_W + 2;
+    tft.fillRect(ix, OUI_SN_INFO, iw, OUI_SN_BTN_Y - 2 - OUI_SN_INFO, OUI_BG);
+    int y = OUI_SN_INFO;
+    if (selName[0]) {
+      tft.setTextDatum(TL_DATUM);
+      tft.setTextColor(OUI_TXT, OUI_BG);
+      tft.drawString(ouiRomFit(selName, iw, 1).c_str(), ix, y, 1);
+      y += 14;
+    }
+    ouiSnapWrap(msg, ix, y, iw, (OUI_SN_BTN_Y - 2 - y) / 12, mc);
+  }
+
+  // The buttons.
+  const bool busy = ouiSnapResumeAt || ouiSnapRestartAt;
+  const uint32_t bsig = 16u + (count ? 1u : 0u) + (armed ? 2u : 0u) + (busy ? 4u : 0u);
+  if (ouiChanged(ouiSigSnapBtns, bsig)) {
+    const uint16_t off = OUI_CARD, offTxt = OUI_LBL;
+    const bool none = busy || !count;
+    ouiSnapBtn(4,   102, "SAVE (S)",   busy ? off : tft.color565(40, 130, 75), busy ? offTxt : OUI_TXT);
+    ouiSnapBtn(109, 102, "LOAD (L)",   none ? off : OUI_SEL, none ? offTxt : OUI_TXT);
+    ouiSnapBtn(214, 102, armed ? "CONFIRM (D)" : "DELETE (D)",
+               none ? off : armed ? OUI_RED : tft.color565(120, 58, 52), none ? offTxt : OUI_TXT);
+  }
+}
+
+// S: save the machine as the next number, then show it at the top of the list.
+static void ouiSnapSave()
+{
+  const std::string media = ouiSel();
+  const int newest = ouiRomFiles.empty() ? 0 : ouiSnapNum(ouiRomFiles[0]);
+  String saved;
+  const char *err = nullptr;
+  if (!snapSave(newest, media.c_str(), saved, err)) { ouiSnapDelArm = -1; ouiRomSetMsg(err, true); ouiRomRedraw(); return; }
+  ouiSnapRescan(0);
+  const int sl = saved.lastIndexOf('/');
+  char m[64];
+  snprintf(m, sizeof(m), "Saved %s", saved.c_str() + sl + 1);
+  ouiRomSetMsg(m, false);
+}
+
+// L: load the highlighted snapshot and resume the machine from it.
+static void ouiSnapLoadPath(const std::string &path);
+
+static void ouiSnapLoad()
+{
+  ouiSnapDelArm = -1;
+  if (ouiRomSel < 0 || ouiRomSel >= (int)ouiRomFiles.size()) { ouiRomSetMsg("Nothing to load - Enter saves one", true); ouiRomRedraw(); return; }
+  ouiSnapLoadPath(ouiRomFiles[ouiRomSel]);
+}
+
+static void ouiSnapLoadPath(const std::string &path)
+{
+  const char *err = nullptr;
+  bool restart = false;
+  if (!snapLoad(path.c_str(), err, &restart)) {
+    if (restart) {
+      // Its settings (disk, model...) are written: say so, then reboot from optionsUiRender().
+      ouiRomSetMsg("Restoring its disk & settings - restarting", false);
+      ouiRomRedraw();
+      ouiSnapRestartAt = millis() + 400;
+      if (!ouiSnapRestartAt) ouiSnapRestartAt = 1;
+      return;
+    }
+    ouiRomSetMsg(err, true); ouiRomRedraw(); return;
+  }
+  // Say so before resuming: a load taken right after its save resumes on the very same picture,
+  // and a page that just vanished looked like nothing had happened. optionsUiRender() closes it.
+  const size_t sl = path.find_last_of('/');
+  char m[64];
+  snprintf(m, sizeof(m), "Loaded %s", path.c_str() + (sl == std::string::npos ? 0 : sl + 1));
+  ouiRomSetMsg(m, false);
+  ouiRomRedraw();
+  ouiSnapResumeAt = millis() + 1500;
+  if (!ouiSnapResumeAt) ouiSnapResumeAt = 1;
+}
+
+static void ouiSnapDelete()
+{
+  if (ouiRomSel < 0 || ouiRomSel >= (int)ouiRomFiles.size()) return;
+  if (ouiSnapDelArm != ouiRomSel) { ouiSnapDelArm = ouiRomSel; ouiRomMsg[0] = 0; optionsUiDirty = true; return; }
+  const std::string path = ouiRomFiles[ouiRomSel];
+  const bool ok = snapDelete(path.c_str());
+  ouiSnapRescan(ouiRomSel);
+  ouiRomSetMsg(ok ? "Snapshot deleted" : "Could not delete it", !ok);
+}
+
+static void ouiSnapMove(int d)
+{
+  ouiSnapDelArm = -1; ouiRomMsg[0] = 0;
+  ouiRomMove(d);
+}
+
+static void ouiSnapTap(int16_t x, int16_t y)
+{
+  if (y < OUI_TITLE_H && x >= 320 - OUI_TITLE_H) { showHideOptionsWindow(); return; }   // X = resume
+  if (ouiSnapResumeAt || ouiSnapRestartAt) return;   // a load is finishing
+  if (y >= OUI_SN_BTN_Y && y < OUI_SN_BTN_Y + OUI_SN_BTN_H) {                           // the buttons
+    if (x < 107) ouiSnapSave(); else if (x < 212) ouiSnapLoad(); else ouiSnapDelete();
+    return;
+  }
+  const int listH = OUI_SN_ROWS * OUI_FB_ROWH;
+  if (y < OUI_RS_LIST || y >= OUI_RS_LIST + listH || x >= OUI_SN_LIST_W + 20) return;
+  if (x >= OUI_SN_LIST_W) { ouiRomScroll(y < OUI_RS_LIST + listH / 2 ? -1 : 1); return; }
+  const int idx = ouiRomFirst + (y - OUI_RS_LIST) / OUI_FB_ROWH;
+  if (idx >= ouiRomCount() || idx == ouiRomSel) return;
+  ouiRomSel = idx; ouiSnapDelArm = -1; ouiRomMsg[0] = 0;   // select only: LOAD / DELETE act on it
+  optionsUiDirty = true;
+}
+
+// Open the page. The window is already up and the machine paused (snapshotWindowToggle).
+void optionsUiOpenSnap()
+{
+#if OUI_PICOCALC
+  tft.setFullPanel(true);                    // before the scan: its progress bar draws on the page
+#endif
+  ouiHelpOpen = false; ouiRomClose(); ouiEditing = false;
+  ouiSnapMode = 1; ouiRomMsg[0] = 0;
+  tft.fillScreen(OUI_BG); ouiInvalidate(); ouiRomRedraw(); optionsUiFirstDraw = false;
+  ouiSnapRescan(0);
+  optionsUiFirstDraw   = true;
+  optionsUiDirty       = true;
+  optionsUiWaitRelease = true;               // don't treat the opening tap as a click
+  optionsUiPrevDown    = true;
+}
+
+bool optionsUiSnapOpen() { return ouiSnapMode != 0; }
+bool optionsUiSnapRestarting() { return ouiSnapRestartAt != 0; }
+
+// showHideOptionsWindow() closed the window: give the list pages' memory back to the running
+// machine (the C64 on the RP2040 has none to spare).
+void optionsUiClosed()
+{
+  ouiSnapMode = 0; ouiSnapDelArm = -1; ouiSnapResumeAt = 0;
+  ouiRomClose();
+  snapThumbForget();                         // the machine runs on: the picture taken is stale
+}
 
 void optionsUiRender()
 {
@@ -1617,9 +1954,17 @@ void optionsUiRender()
   // Normally already on from optionsUiOpen(); if anything switched it off, repaint all of it.
   if (tft.setFullPanel(true)) { optionsUiFirstDraw = true; optionsUiDirty = true; }
 #endif
+  // A load restored its settings and the message has been drawn: reboot into them.
+  if (ouiSnapRestartAt && !optionsUiDirty && (int32_t)(millis() - ouiSnapRestartAt) >= 0) { snapRestart(); return; }
+  // A snapshot was loaded and its "Loaded ..." line has been on screen long enough: resume.
+  if (ouiSnapResumeAt && !optionsUiDirty && (int32_t)(millis() - ouiSnapResumeAt) >= 0) {
+    showHideOptionsWindow();                 // close + resume (optionsUiClosed clears the timer)
+    return;
+  }
   if (!optionsUiDirty) return;
   if (optionsUiFirstDraw) { tft.fillScreen(OUI_BG); ouiInvalidate(); optionsUiFirstDraw = false; }
   if (ouiGenMode)  { ouiDrawGeneral(); optionsUiDirty = false; return; }
+  if (ouiSnapMode) { optionsUiDirty = false; ouiDrawSnap(); return; }   // (a thumbnail retry re-arms it)
   if (ouiHelpOpen) { ouiDrawHelp(); optionsUiDirty = false; return; }
   if (ouiRomMode)  { ouiDrawRoms(); optionsUiDirty = false; return; }
   ouiDrawTitle();
@@ -1757,7 +2102,7 @@ static void ouiToggle(int idx)
 
 static void ouiScroll(int dir)
 {
-  std::vector<std::string> &files = ouiFiles();
+  FileList &files = ouiFiles();
   int maxStart = (int)files.size() - OUI_FB_ROWS;
   if (maxStart < 0) maxStart = 0;
   int fs = (int)firstShowFile + dir;
@@ -1779,7 +2124,7 @@ struct OuiLoadMute {
 // the LOAD & RUN button). The other loaders always start what they load.
 static void ouiMount(bool run = true)
 {
-  std::vector<std::string> &files = ouiFiles();
+  FileList &files = ouiFiles();
   // Nothing listed (a failed scan): Enter still goes up a level. At the root that is a no-op.
   if (files.empty()) { ouiBrowse(".."); return; }
   if (shownFile >= files.size()) return;
@@ -1790,7 +2135,8 @@ static void ouiMount(bool run = true)
   if (ouiIsC64()) {                       // C64: mount, or mount & run, the highlighted .prg/.d64/.crt
     if (shownFile >= files.size()) return;
     if (ouiEntryProblem(shownFile)) { optionsUiDirty = true; return; }   // greyed: reason is in the header
-    const char *path = files[shownFile].c_str();
+    const std::string pathS = files[shownFile];   // [i] is a temporary: keep the string alive
+    const char *path = pathS.c_str();
     if (!(run ? c64LoadAndRun(path) : c64Mount(path))) {
       // Only a .crt fails here (a .prg/.d64 loads later, at READY). Grey it out with the reason
       // and stay open. If it had already pulled the previous cart out, the machine resets to
@@ -1860,7 +2206,7 @@ static void ouiMount(bool run = true)
 // slot -> eject (stay in settings so the list/buttons update); otherwise mount it -> close settings.
 static void ouiPcMountA()   // A: floppy
 {
-  std::vector<std::string> &files = ouiFiles();
+  FileList &files = ouiFiles();
   if (files.empty() || shownFile >= files.size()) return;
   if (ouiIsDir(files[shownFile])) { ouiBrowse(files[shownFile]); return; }  // dir row -> navigate
   bool isCur = ouiPcA().length() && files[shownFile] == std::string(ouiPcA().c_str());
@@ -1869,7 +2215,7 @@ static void ouiPcMountA()   // A: floppy
 }
 static void ouiPcMountC()   // C: hard disk
 {
-  std::vector<std::string> &files = ouiFiles();
+  FileList &files = ouiFiles();
   if (files.empty() || shownFile >= files.size()) return;
   if (ouiIsDir(files[shownFile])) { ouiBrowse(files[shownFile]); return; }  // dir row -> navigate
   bool isCur = ouiPcC().length() && files[shownFile] == std::string(ouiPcC().c_str());
@@ -1881,7 +2227,7 @@ static void ouiPcMountC()   // C: hard disk
 // (stays in settings so the button flips); MOUNT & RUN boots it. Both close settings on success.
 static void ouiMsxMount(bool run)
 {
-  std::vector<std::string> &files = ouiFiles();
+  FileList &files = ouiFiles();
   if (files.empty() || shownFile >= files.size()) return;
   if (ouiIsDir(files[shownFile])) { ouiBrowse(files[shownFile]); return; }  // dir row -> navigate
   if (!run && ouiMsxDskCur()) { ouiUnmount(); return; }
@@ -1893,10 +2239,11 @@ static void ouiMsxMount(bool run)
 // toggle back out (Del is the unmount). Already mounted: nothing to do but close.
 static void ouiMsxMountOnly()
 {
-  std::vector<std::string> &files = ouiFiles();
+  FileList &files = ouiFiles();
   if (files.empty() || shownFile >= files.size()) return;
   if (ouiIsDir(files[shownFile])) { ouiBrowse(files[shownFile]); return; }  // dir row -> navigate
-  const char *path = files[shownFile].c_str();
+  const std::string pathS = files[shownFile];   // [i] is a temporary: keep the string alive
+  const char *path = pathS.c_str();
   if (ouiCurMounted()) { showHideOptionsWindow(); return; }
   OuiLoadMute mute;
   if (ouiMsxDsk() ? msxMountDisk(path, false) : msxMountCart(path)) showHideOptionsWindow();
@@ -1906,7 +2253,7 @@ static void ouiMsxMountOnly()
 static void ouiMountReboot()
 {
   if (ouiIsC64()) return;                 // C64 has no such button
-  std::vector<std::string> &files = ouiFiles();
+  FileList &files = ouiFiles();
   // A directory row navigates instead: rebooting into a folder is not a thing.
   if (!files.empty() && shownFile < files.size() && ouiIsDir(files[shownFile]))
     { ouiBrowse(files[shownFile]); return; }
@@ -1969,6 +2316,7 @@ static void ouiActMiddle()  // MOUNT C: / MOUNT&RUN / M+REBOOT / LOAD & RUN
 void optionsUiNav(int dir)            // dir: -1 = left, +1 = right
 {
   if (ouiGenMode)  { if (dir < 0) { if (!ouiGenBack()) optionsUiCloseGeneral(); } else ouiGenEnter(); return; }
+  if (ouiSnapMode) { if (dir < 0) showHideOptionsWindow(); else ouiSnapLoad(); return; }
   if (ouiHelpOpen) { ouiCloseHelp(); return; }   // any input dismisses the help overlay
   if (ouiRomMode)  { if (dir < 0) ouiRomBack(); else ouiRomEnter(); return; }   // ROMS page
   for (int i = 0; i < OUI_FOC_COUNT; i++) {
@@ -1981,6 +2329,7 @@ void optionsUiNav(int dir)            // dir: -1 = left, +1 = right
 void optionsUiAdjust(int dir)         // dir: -1 = up, +1 = down
 {
   if (ouiHelpOpen) { ouiCloseHelp(); return; }
+  if (ouiSnapMode) { ouiSnapMove(dir < 0 ? -1 : 1); return; }
   if (ouiRomMode || ouiGenMode) { ouiRomMove(dir < 0 ? -1 : 1); return; }
   int f = optionsUiFocus;
   if (f == OUI_FOC_HELP) return;          // opens on fire, not on up/down
@@ -1992,7 +2341,7 @@ void optionsUiAdjust(int dir)         // dir: -1 = up, +1 = down
     return;
   }
   if (f == OUI_FOC_FILES) {
-    std::vector<std::string> &files = ouiFiles();
+    FileList &files = ouiFiles();
     if (files.empty()) return;
     int idx = (int)shownFile + (dir < 0 ? -1 : 1);
     if (idx < 0) idx = 0;
@@ -2008,6 +2357,7 @@ void optionsUiAdjust(int dir)         // dir: -1 = up, +1 = down
 void optionsUiActivate()              // joystick fire button on the focused control
 {
   if (ouiGenMode)  { ouiGenEnter(); return; }
+  if (ouiSnapMode) { if (ouiSnapResumeAt) showHideOptionsWindow(); else ouiSnapSave(); return; }   // fire = save; joystick right = load
   if (ouiHelpOpen) { ouiCloseHelp(); return; }
   if (ouiRomMode)  { ouiRomEnter(); return; }
   int f = optionsUiFocus;
@@ -2108,6 +2458,11 @@ void optionsUiKeyArrow(int dx, int dy)
 {
   if (ouiGenMode == 4) { ouiGenBack(); return; }   // general help: any key closes it
   if (ouiHelpOpen) { ouiCloseHelp(); return; }
+  if (ouiSnapMode) {                      // Up/Down move, Left/Right page
+    if (dy) ouiSnapMove(dy);
+    else if (dx) ouiSnapMove(dx * OUI_SN_ROWS);
+    return;
+  }
   if (ouiRomMode || ouiGenMode) {         // list pages: Up/Down move, Left/Right page                       // ROMS page: Up/Down move, Left/Right page
     if (dy) ouiRomMove(dy);
     else if (dx) ouiRomMove(dx * OUI_RS_ROWS);
@@ -2135,9 +2490,13 @@ void optionsUiKeyArrow(int dx, int dy)
   optionsUiDirty = true;
 }
 
-void optionsUiKeyEnter(bool ctrl)
+void optionsUiKeyEnter(bool ctrl, bool shift)
 {
   if (ouiGenMode)  { ouiGenEnter(); return; }
+  if (ouiSnapMode) {
+    if (ouiSnapResumeAt) showHideOptionsWindow();   // just loaded: Enter resumes now (S/L/D act)
+    return;
+  }
   if (ouiHelpOpen) { ouiCloseHelp(); return; }
   if (ouiRomMode)  { ouiRomEnter(); return; }
   int f = optionsUiFocus;
@@ -2171,8 +2530,22 @@ void optionsUiKeyEnter(bool ctrl)
 // button without leaving the list, the same on every platform (the PC-XT ejects it from A: and/or
 // C:). The highlight is always drawn, so it works whichever control has the focus; on the ROMS,
 // system-menu and help pages it does nothing.
+// S / L / D on the snapshot page: the SAVE (S) / LOAD (L) / DELETE (D) buttons. Elsewhere: nothing.
+bool optionsUiSnapKey(char c)
+{
+  if (!ouiSnapMode) return false;
+  if (ouiSnapResumeAt) { showHideOptionsWindow(); return true; }   // just loaded: resume now
+  switch (c) {
+    case 's': ouiSnapSave();   break;
+    case 'l': ouiSnapLoad();   break;
+    case 'd': ouiSnapDelete(); break;
+  }
+  return true;
+}
+
 void optionsUiKeyUnmount()
 {
+  if (ouiSnapMode) return;                   // the snapshot page deletes with D
   if (ouiGenMode || ouiHelpOpen || ouiRomMode) return;
   ouiUnmount();
 }
@@ -2182,6 +2555,10 @@ void optionsUiKeyUnmount()
 bool optionsUiKeyEscape()
 {
   if (ouiGenMode)  return ouiGenBack();
+  if (ouiSnapMode) {                         // a pending delete first, then close (= resume)
+    if (ouiSnapDelArm >= 0) { ouiSnapDelArm = -1; optionsUiDirty = true; return true; }
+    return false;
+  }
   if (ouiHelpOpen) { ouiCloseHelp(); return true; }
   if (ouiRomMode)  { ouiRomBack(); return true; }
   if (ouiEditing)  { ouiEditing = false; optionsUiDirty = true; return true; }
@@ -2195,12 +2572,16 @@ static void ouiCloseHelp() { ouiHelpOpen = false; optionsUiFirstDraw = true; opt
 static void ouiHandleTap(int16_t x, int16_t y)
 {
   if (ouiGenMode)  { ouiGenTap(x, y); return; }   // general settings (over the system menu)
+  if (ouiSnapMode) { ouiSnapTap(x, y); return; }  // snapshot page
   // HELP overlay is modal: any tap returns to the settings page.
   if (ouiHelpOpen) { ouiCloseHelp(); return; }
   if (ouiRomMode)  { ouiRomTap(x, y); return; }   // ROMS page is modal too
 
   // close button
   if (y < OUI_TITLE_H && x >= 320 - OUI_TITLE_H) { showHideOptionsWindow(); return; }
+#if !OUI_PICOCALC
+  if (y < OUI_TITLE_H && x >= 320 - OUI_TITLE_H - OUI_SNAP_BTN_W - 4 && snapSystemName()) { optionsUiOpenSnap(); return; }
+#endif
 
   // toggle grid
   if (y >= OUI_TG_TOP && y < OUI_TG_TOP + 2 * OUI_TG_H) {
@@ -2221,7 +2602,7 @@ static void ouiHandleTap(int16_t x, int16_t y)
   if (y >= OUI_FB_LIST && y < OUI_FB_LIST + listH) {
     if (x >= 302) { ouiScroll(y < OUI_FB_LIST + listH / 2 ? -1 : 1); return; }
     if (x < 300) {
-      std::vector<std::string> &files = ouiFiles();
+      FileList &files = ouiFiles();
       int idx = firstShowFile + (y - OUI_FB_LIST) / OUI_FB_ROWH;
       if (idx < (int)files.size()) {
         if (ouiIsDir(files[idx])) ouiBrowse(files[idx]);   // enter dir / go up
@@ -2278,7 +2659,7 @@ void optionsUiOpen()
   // showing another folder, go into the mounted image's folder first.
   {
     const std::string sel = ouiSel();
-    std::vector<std::string> &files = ouiFiles();
+    FileList &files = ouiFiles();
     bool listed = false;
     for (const std::string &f : files) if (f == sel) { listed = true; break; }
     if (!listed && sel.size() > 1 && sel[0] == '/' && sel.back() != '/') {
@@ -2294,6 +2675,8 @@ void optionsUiOpen()
   if (optionsUiFocus != OUI_FOC_VOL && optionsUiFocus != OUI_FOC_FILES) ouiEditing = false;
   ouiHelpOpen          = false;  // always open on the settings page, not the help overlay
   ouiRomClose();                 // ...nor the ROMS page
+  ouiSnapMode          = 0;      // ...nor the snapshot page
+  ouiSnapResumeAt      = 0;
   optionsUiFirstDraw   = true;
   optionsUiDirty       = true;
   optionsUiWaitRelease = true;   // don't treat the opening tap as a click

@@ -7,6 +7,8 @@
 
 #include <cstdint>
 
+struct SnapIO;   // src/shared/snapshot.h (save states, c64_snapshot.cpp)
+
 // PicoCalc: the 6510 hot path (cpuLoop, read8/write8, the CIA tick, the raster step and the opcode
 // tables) runs from SRAM, as the Apple II core's does. From flash it fetched through the 16K XIP
 // cache that both cores share, and the render task's panel code kept evicting it -- the C64 ran at
@@ -148,6 +150,12 @@ uint8_t kbReadCols(uint8_t rowSelect);                // CIA1 $DC00 reverse scan
 void kbSetJoystick(uint8_t mask);                     // active-low joystick bits (port 2)
 void kbSetJoystickPort(uint8_t port, uint8_t mask);   // route joystick to port 1 or 2
 
+// ---- Snapshots (c64_snapshot.cpp; each part lives next to the file-static state it moves) ----
+bool cpuWaitParked(uint32_t ms);      // (c64_cpu.cpp) wait for cpuLoop to idle in its paused spin
+void cpuSnapshot(SnapIO &io);         // (c64_cpu.cpp) registers + cpuLoop's loop state, pacer reset
+void ciaSnapshot(SnapIO &io);         // (c64_cia.cpp) both CIAs
+void vicSnapshot(SnapIO &io);         // (c64_vic.cpp) VIC registers + raster state, records dropped
+
 } // namespace c64
 
 // ---- C-linkage entry points (c64.cpp), called from the dispatch / render loop ----
@@ -155,3 +163,9 @@ void c64Setup();
 void c64Loop();
 void c64RenderFrame();
 bool c64CartIsPath(const char *path);   // (c64_crt.cpp) is this .crt the mounted cartridge?
+// Snapshots: the cartridge's identity (compared on load, before anything changes; false = rejected)
+// and its banking state; the SID's registers and voices; the panel's row cache.
+bool c64CartSnapCheck(SnapIO &io);      // (c64_crt.cpp)
+void c64CartSnapState(SnapIO &io);      // (c64_crt.cpp)
+void c64SidSnapshot(SnapIO &io);        // (c64_sid.cpp)
+void c64VideoInvalidate();              // (c64.cpp) next frame goes to the panel whole

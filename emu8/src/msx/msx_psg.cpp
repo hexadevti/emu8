@@ -11,6 +11,7 @@
 // msx_audio.cpp (device only). Register 14 is the joystick input (PSG port A). Sample rate 22050 Hz.
 
 #include "msx.h"
+#include "../z80/z80_snapshot.h"
 #include <string.h>
 
 namespace msx {
@@ -80,6 +81,24 @@ uint8_t psgReadData() {
   return psgReg[psgAddr];
 }
 void setJoystick(uint8_t mask) { g_joy = mask; }
+
+// ---- save state (msx_snapshot.cpp) -------------------------------------------------------------
+// "AY  " record: R0-R15, address latch, then the synthesis state (tone/noise/envelope phases, LFSR,
+// envelope level/direction/shape bits). The phase steps are derived from the registers and rebuilt.
+// The joystick lines (R14 input) are live input and are left alone.
+void psgSnapshot(SnapIO &io) {
+  io.tag("AY  ");
+  io.arr(psgReg);
+  io.val(psgAddr);
+  io.arr(tonePhase);
+  io.val(noisePhase);
+  io.val(noiseLfsr);
+  io.val(envPhase);
+  snapInt(io, envLevel);
+  snapInt(io, envDir);
+  io.flag(envHold_); io.flag(envAlt_); io.flag(envCont_); io.flag(envAtt_); io.flag(envHolding);
+  if (io.loading) recalcSteps();
+}
 
 // One output sample (0..255, 128 = silence). masterVol = app volume (0..255); mute silences it.
 int psgGenSample(int masterVol, bool mute) {

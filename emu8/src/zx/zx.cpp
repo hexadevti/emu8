@@ -352,6 +352,7 @@ void zxSetKempston(uint8_t v)          { zx::setKempston(v); }
 void zxKey(int row, int bit, bool down) { zx::keySet(row, bit, down); }
 void zxKeysReleaseAll()                { zx::keyClearAll(); }
 void zxHardReset()                     { zxResetReq = true; }   // F12: back to the (C) 1982 screen
+void zxCancelReset()                   { zxResetReq = false; }  // snapshot loaded: resume it, do not reset
 
 // ---- file loading ---------------------------------------------------------------------------------
 // Snapshots write RAM and the CPU directly, so the Z80 must not be running: at boot the loop has not

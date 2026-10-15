@@ -45,7 +45,8 @@
 //   Ctrl-F3                  -> HID_KEY_F11  CPU reset (Apple II); PAUSE/NMI on SMS
 //   Ctrl-Shift-F1            -> the system selection menu (reboots only if another system is picked)
 //   Ctrl-Shift-F3            -> hard reset: reboot straight back into the running system, no menu
-// The keyboard sends Shift-F1..F5 as F6..F10, so these two arrive as Ctrl-F6 and Ctrl-F8; the
+//   Ctrl-Shift-F5            -> snapshots: save / load the machine's state (snapshot.cpp)
+// The keyboard sends Shift-F1..F5 as F6..F10, so these three arrive as Ctrl-F6, Ctrl-F8, Ctrl-F10; the
 // unshifted-code-plus-Shift forms are matched too, in case a keyboard firmware sends those.
 //   Ctrl-Shift-Up            -> reboot into the UF2 Loader menu (loader_picocalc.cpp)
 // Bare keys pass through:
@@ -84,7 +85,7 @@
 enum {
   PCK_BACKSPACE = 0x08, PCK_TAB = 0x09, PCK_ENTER = 0x0A,
   PCK_F1 = 0x81, PCK_F2 = 0x82, PCK_F3 = 0x83, PCK_F4 = 0x84, PCK_F5 = 0x85,
-  PCK_F6 = 0x86, PCK_F7 = 0x87, PCK_F8 = 0x88, PCK_F9 = 0x89, PCK_F10 = 0x8A,
+  PCK_F6 = 0x86, PCK_F7 = 0x87, PCK_F8 = 0x88, PCK_F9 = 0x89, PCK_F10 = 0x90,   // 0x90, not 0x8A: the keyboard skips 0x8A-0x8F
   PCK_MOD_ALT = 0xA1, PCK_MOD_SHL = 0xA2, PCK_MOD_SHR = 0xA3,
   PCK_MOD_SYM = 0xA4, PCK_MOD_CTRL = 0xA5,
   PCK_ESC = 0xB1,
@@ -297,6 +298,13 @@ static void handleEvent(uint8_t state, uint8_t code)
     if (code == PCK_F6 || (code == PCK_F1 && g_shiftHeld)) {
       printLog("Ctrl-Shift-F1: system menu");
       splashOpen();
+      return;
+    }
+
+    // Ctrl-Shift-F5 (arrives as F10) -> the snapshot page: save / load the machine's state
+    // (snapshot.cpp). Pressing it again closes the page and resumes.
+    if (code == PCK_F10 || (code == PCK_F5 && g_shiftHeld)) {
+      snapshotWindowToggle();
       return;
     }
 

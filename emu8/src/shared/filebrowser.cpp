@@ -6,33 +6,116 @@
 #include <strings.h>
 
 // ---------------------------------------------------------------------------
-// Entry helpers
+// FileList
 // ---------------------------------------------------------------------------
-static bool fbEntryIsDir(const std::string &e) {
-  return e == ".." || (!e.empty() && e.back() == '/');
+std::string FileList::operator[](size_t i) const
+{
+  const char *nm = pool + idx[i];
+  if (nm[0] == '.' && nm[1] == '.' && !nm[2]) return std::string("..");
+  std::string s;
+  s.reserve(prefix.size() + strlen(nm));
+  s += prefix;
+  s += nm;
+  return s;
 }
 
-// Add one entry, given its bare name and dir flag. `prefix` is the current directory's path
-// prefix ("/" at the root, "/games/" inside one). Shared by the readdir path and the fallback.
-static void fbAdd(FileBrowser &b, const std::string &prefix, const char *name, bool isDir)
+void FileList::release()
 {
-  if (!name || !*name) return;
-  if (name[0] == '.') return;             // "." / ".." and the hidden junk FAT cards accumulate
-  if (!strcasecmp(name, "System Volume Information")) return;
-  if (isDir) { b.out->push_back(prefix + name + "/"); return; }
-  if (b.accept && !b.accept(std::string(name))) return;
-  b.out->push_back(prefix + name);
+  free(pool); pool = nullptr; poolLen = poolCap = 0;
+  free(idx);  idx = nullptr;  n = cap = 0;
+}
+
+bool FileList::growIdx(size_t want)
+{
+  if (want <= cap) return true;
+  if (want > 0xffff) want = 0xffff;
+  if (want <= cap) return false;
+  void *p = realloc(idx, want * sizeof(uint16_t));
+  if (!p) return false;
+  idx = (uint16_t *)p; cap = (uint16_t)want;
+  return true;
+}
+
+// Offsets are 16-bit, so the pool stops at 64KB -- far past FB_MAX_ENTRIES of real names.
+bool FileList::growPool(size_t want)
+{
+  if (want <= poolCap) return true;
+  if (want > 0x10000) return false;
+  void *p = realloc(pool, want);
+  if (!p) return false;
+  pool = (char *)p; poolCap = (uint32_t)want;
+  return true;
+}
+
+bool FileList::reserve(size_t entries, size_t poolBytes)
+{
+  bool ok = growPool(poolBytes);     // the bigger block first, while the heap is least cut up
+  return growIdx(entries) && ok;
+}
+
+bool FileList::add(const char *name, bool isDir)
+{
+  size_t len = strlen(name), need = len + (isDir ? 1 : 0) + 1;
+  if (n == cap && !growIdx(cap ? (size_t)cap * 2 : 16) && !growIdx((size_t)cap + 1)) return false;
+  if (poolLen + need > poolCap) {
+    size_t w = poolCap ? (size_t)poolCap * 2 : 512;
+    if (w < poolLen + need) w = poolLen + need;
+    if (!growPool(w) && !growPool(poolLen + need)) return false;
+  }
+  char *d = pool + poolLen;
+  memcpy(d, name, len);
+  if (isDir) d[len++] = '/';
+  d[len] = 0;
+  idx[n++] = (uint16_t)poolLen;
+  poolLen += need;
+  return true;
+}
+
+void FileList::erase(size_t i)
+{
+  if (i >= n) return;
+  memmove(idx + i, idx + i + 1, (n - i - 1) * sizeof(uint16_t));
+  n--;
+}
+
+// realloc() to a smaller size stays in place, so this only hands the tail back -- it never needs
+// a second block. The scan sized the list for every entry it counted; verify() may drop some.
+void FileList::shrink()
+{
+  if (pool && poolLen && poolLen < poolCap) { void *p = realloc(pool, poolLen); if (p) { pool = (char *)p; poolCap = poolLen; } }
+  if (idx && n && n < cap) { void *p = realloc(idx, n * sizeof(uint16_t)); if (p) { idx = (uint16_t *)p; cap = n; } }
+}
+
+// ---------------------------------------------------------------------------
+// Entry helpers
+// ---------------------------------------------------------------------------
+// On a STORED (bare) name: ".." or "name/".
+static bool fbNameIsDir(const char *e) {
+  size_t l = strlen(e);
+  return !strcmp(e, "..") || (l && e[l - 1] == '/');
+}
+
+// Whether a directory entry is listed at all. Shared by the count pass and the add pass, so the
+// count is exact and the list can be sized once.
+static bool fbWanted(FileBrowser &b, const char *name, bool isDir)
+{
+  if (!name || !*name) return false;
+  if (name[0] == '.') return false;       // "." / ".." and the hidden junk FAT cards accumulate
+  if (!strcasecmp(name, "System Volume Information")) return false;
+  if (isDir) return true;
+  return !b.accept || b.accept(std::string(name));
 }
 
 // ".." first, then directories, then files; case-insensitive within each group. FAT hands
 // entries back in creation order, which is unreadable once subdirectories are mixed in.
-static bool fbLess(const std::string &a, const std::string &b)
+// Every entry shares one prefix, so ordering the bare names orders the full paths.
+static bool fbLess(const char *a, const char *b)
 {
-  if (a == "..") return b != "..";
-  if (b == "..") return false;
-  bool da = fbEntryIsDir(a), db = fbEntryIsDir(b);
+  bool ua = !strcmp(a, ".."), ub = !strcmp(b, "..");
+  if (ua || ub) return ua && !ub;
+  bool da = fbNameIsDir(a), db = fbNameIsDir(b);
   if (da != db) return da;
-  return strcasecmp(a.c_str(), b.c_str()) < 0;
+  return strcasecmp(a, b) < 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -54,13 +137,14 @@ static bool fbLess(const std::string &a, const std::string &b)
 // is a margin check, not a guarantee -- an add that still fails is caught in fbTryAdd().
 static bool fbHeapLow() { return ESP.getFreeHeap() < FB_HEAP_RESERVE; }
 
-// fbAdd() that reports running out of heap instead of throwing: false = stop the scan here.
-static bool fbTryAdd(FileBrowser &b, const std::string &prefix, const char *name, bool isDir)
+// Add one wanted entry; false = stop the scan here (heap low, or the list could not grow).
+// The reserve is only checked when the add has to GROW the list: the count pass already sized it
+// to leave FB_HEAP_RESERVE free, so the heap sits right at the reserve after that reservation and
+// testing it on every add stopped a big folder at its first entry (an empty list).
+static bool fbTryAdd(FileBrowser &b, const char *name, bool isDir)
 {
-  if (fbHeapLow()) return false;
-  try { fbAdd(b, prefix, name, isDir); }
-  catch (const std::bad_alloc &) { return false; }
-  return true;
+  if (!b.out->fits(name, isDir) && fbHeapLow()) return false;
+  return b.out->add(name, isDir);
 }
 
 // The browsers scanned so far, so fbListTruncated() can answer for a bare list.
@@ -74,7 +158,7 @@ static void fbRemember(FileBrowser &b)
   }
 }
 
-bool fbListTruncated(const std::vector<std::string> &list)
+bool fbListTruncated(const FileList &list)
 {
   for (FileBrowser *p : fbSeen)
     if (p && p->out == &list) return p->truncated;
@@ -88,18 +172,9 @@ static bool fbHoldsBus = false;
 // The real work; fbScan() below wraps it in the out-of-heap guard. Nothing else calls it.
 static void fbScanBody(FileBrowser &b)
 {
-  std::vector<std::string> &out = *b.out;
-  out.clear();
-  // Reserve a working amount, NOT maxEntries. maxEntries is a *cap* ("a huge folder cannot
-  // exhaust the heap"), and reserving it up front did the exact opposite: 250 std::strings is
-  // ~8KB claimed in one contiguous block for a folder that usually holds a handful of images.
-  // Let the vector grow; the cap is still enforced in the loop below.
-  // (The readdir path below sizes it exactly instead, once it has counted the folder.)
-  out.reserve(32);
-  if (b.dir != "/") out.push_back("..");                      // go-up entry
-
-  std::string prefix = (b.dir == "/") ? std::string("/")
-                                      : (std::string(b.dir.c_str()) + "/");
+  FileList &out = *b.out;
+  out.release();
+  out.setPrefix((b.dir == "/") ? std::string("/") : (std::string(b.dir.c_str()) + "/"));
   bool truncated = false, heapLow = false;
   int scanned = 0;
   unsigned long t0 = millis();
@@ -141,20 +216,32 @@ static void fbScanBody(FileBrowser &b)
   DIR *dp = opendir(vfsPath.c_str());
   if (dp) {
     struct dirent *de;
-    // Count first (no allocation) and size the vector once. Growing it by doubling needs the old
-    // AND the new block live at the same moment -- ~9KB contiguous to pass 128 entries, which is
-    // more than the C64 on the RP2040 has in total. Not fatal if the exact size is refused: the
-    // vector then just grows as before, and fbTryAdd() stops it at the reserve.
-    int count = (int)out.size();
-    while ((de = readdir(dp)) != nullptr && count < b.maxEntries) count++;
+    // Count first (no allocation) and size the list once: offsets and names, exactly. Growing it
+    // by doubling needs the old AND the new block live at the same moment, which on the RP2040's
+    // ~10KB is what ended long lists early. If the whole thing is more than the heap can spare
+    // (FB_HEAP_RESERVE stays free) only a part is asked for, and the list stops when that is full.
+    size_t count = 1, bytes = 3;                              // + the ".." entry
+    while ((de = readdir(dp)) != nullptr && (int)count < b.maxEntries)
+      if (fbWanted(b, de->d_name, de->d_type == DT_DIR)) { count++; bytes += strlen(de->d_name) + 2; }
     closedir(dp);
-    try { out.reserve(count); } catch (const std::bad_alloc &) {}
+    long avail = (long)ESP.getFreeHeap() - FB_HEAP_RESERVE;
+    while (count > 1 && (long)(count * sizeof(uint16_t) + bytes) > avail) { count -= count / 4 + 1; bytes -= bytes / 4 + 1; }
+    while (count > 1 && !out.reserve(count, bytes)) { count /= 2; bytes /= 2; }
     dp = opendir(vfsPath.c_str());
+  }
+  if (b.dir != "/" && !out.add("..", false)) {               // go-up entry
+    if (dp) closedir(dp);
+    fbHoldsBus = false; busGive();
+    b.truncated = true;
+    sprintf(buf, "%s: OUT OF HEAP before scan (free heap=%u)", b.tag, (unsigned)ESP.getFreeHeap());
+    printLog(buf);
+    return;
   }
   if (dp) {
     struct dirent *de;
     while ((de = readdir(dp)) != nullptr) {
-      if (!fbTryAdd(b, prefix, de->d_name, de->d_type == DT_DIR)) { truncated = heapLow = true; break; }
+      bool isDir = de->d_type == DT_DIR;
+      if (fbWanted(b, de->d_name, isDir) && !fbTryAdd(b, de->d_name, isDir)) { truncated = heapLow = true; break; }
       if ((++scanned & 0x3f) == 0) uiDirScanProgress((int)out.size());   // progress bar + yield
       if ((int)out.size() >= b.maxEntries) { truncated = true; break; }
     }
@@ -176,7 +263,9 @@ static void fbScanBody(FileBrowser &b)
       const char *nmc = file.name();                          // a full path on some cores
       if (nmc && *nmc) {
         const char *base = strrchr(nmc, '/');
-        if (!fbTryAdd(b, prefix, base ? base + 1 : nmc, file.isDirectory())) { truncated = heapLow = true; break; }
+        const char *nm = base ? base + 1 : nmc;
+        bool isDir = file.isDirectory();
+        if (fbWanted(b, nm, isDir) && !fbTryAdd(b, nm, isDir)) { truncated = heapLow = true; break; }
       }
       file = dir.openNextFile();
       if ((++scanned & 0x0f) == 0) uiDirScanProgress((int)out.size());
@@ -192,12 +281,13 @@ static void fbScanBody(FileBrowser &b)
   // lock themselves (gBusLock is a plain mutex, so taking it twice would deadlock).
   if (b.verify) {
     for (size_t i = 0; i < out.size(); ) {
-      if (!fbEntryIsDir(out[i]) && !b.verify(out[i].c_str())) out.erase(out.begin() + i);
+      if (!fbNameIsDir(out.name(i)) && !b.verify(out[i].c_str())) out.erase(i);
       else i++;
     }
   }
 
-  std::sort(out.begin(), out.end(), fbLess);
+  out.sortIdx(fbLess);
+  out.shrink();
   b.truncated = truncated;
 
   // %.80s: buf is 255 bytes shared globally and a nested path can be long.
@@ -241,9 +331,9 @@ void fbScan(FileBrowser &b)
     fbScanBody(b);
   } catch (const std::bad_alloc &) {
     if (fbHoldsBus) { fbHoldsBus = false; busGive(); }   // died mid-walk: release the card
-    std::vector<std::string>().swap(*b.out);             // give the partial list's heap back
+    b.out->release();                                    // give the partial list's heap back
     // Keep the go-up entry, or a folder too big to list would strand the user inside it.
-    if (b.dir != "/") { try { b.out->push_back(".."); } catch (const std::bad_alloc &) {} }
+    if (b.dir != "/") b.out->add("..", false);
     b.truncated = true;
     sprintf(buf, "%s: OUT OF HEAP during scan -- only \"..\" kept (free heap=%u)", b.tag,
             (unsigned)ESP.getFreeHeap());

@@ -424,5 +424,15 @@ void DisplayGFX::getTouchRaw(uint16_t *x, uint16_t *y) { if (x) *x = 0; if (y) *
 extern DisplayGFX tft;
 void displayFlush() { tft.flush(); }
 void displaySetUiMode(bool ui) { tft.setUiMode(ui); }
+// The emulator video area: the cores draw it 1:1 into the canvas at DISP_OFFSET_X/Y (snapshot
+// thumbnails). The NES direct-to-panel path leaves whatever the canvas last held.
+bool displayReadVideo(int x, int y, int w, int h, uint16_t *buf) { return tft.readVideo(x, y, w, h, buf); }
+bool DisplayGFX::readVideo(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t *buf) {
+  if (!_fb || !buf || x < 0 || y < 0 || w <= 0 || h <= 0) return false;
+  if (x + w + DISP_OFFSET_X > PANEL_NATIVE_W || y + h + DISP_OFFSET_Y > PANEL_NATIVE_H) return false;
+  for (int32_t r = 0; r < h; r++)
+    memcpy(buf + (size_t)r * w, _fb + (size_t)(y + DISP_OFFSET_Y + r) * PANEL_NATIVE_W + x + DISP_OFFSET_X, (size_t)w * 2);
+  return true;
+}
 
 #endif // BOARD_DISPLAY_GFX

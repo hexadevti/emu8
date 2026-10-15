@@ -1660,9 +1660,10 @@ void desktopUiFrame(SDL_Texture *emuTex, int fbW, int fbH)
   }
 
   // debug hotkeys (F5 pause/resume, F10 step) — handled here so they work over the whole window.
-  // Not in emu8-picocalc: F5 and F10 (Shift-F5) are PicoCalc keys there.
+  // Not in emu8-picocalc: F5 and F10 (Shift-F5) are PicoCalc keys there. Nor Ctrl-Shift-F5: snapshots.
   if (!ImGui::GetIO().WantTextInput && !kSimPicoCalc) {
-    if (ImGui::IsKeyPressed(ImGuiKey_F5, false))  dbgSetPaused(!dbgIsPaused());
+    const bool snapChord = ImGui::GetIO().KeyCtrl && ImGui::GetIO().KeyShift;
+    if (!snapChord && ImGui::IsKeyPressed(ImGuiKey_F5, false))  dbgSetPaused(!dbgIsPaused());
     if (ImGui::IsKeyPressed(ImGuiKey_F10, false)) dbgStep();
   }
 

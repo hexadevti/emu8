@@ -75,6 +75,7 @@ public:
   // --- blits ---
   void setSwapBytes(bool swap);
   void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data);
+  bool readVideo(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t *buf);   // displayReadVideo
 
   // --- direct-to-panel fast path (NES video): push a band straight to the panel at the centered
   //     video offset, skipping the PSRAM canvas + the full-panel QSPI flush. setBypassCanvas(true)

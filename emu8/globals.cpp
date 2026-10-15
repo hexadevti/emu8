@@ -30,16 +30,16 @@ File file;
 bool opened = false;
 String filelist = "";
 int freeSpace = 0;
-std::vector<std::string> hdFiles;
-std::vector<std::string> diskFiles;
-std::vector<std::string> c64Files;     // C64 .prg/.d64 images on SD
-std::vector<std::string> nesFiles;     // NES .nes ROMs on SD
-std::vector<std::string> atariFiles;   // Atari 2600 .a26/.bin ROMs on SD
-std::vector<std::string> msxFiles;     // MSX1 .rom/.mx1/.dsk images on SD
-std::vector<std::string> smsFiles;     // SMS .sms/.bin ROM images on SD
-std::vector<std::string> colecoFiles;  // ColecoVision .col/.rom/.bin cartridges on SD
-std::vector<std::string> zxFiles;      // ZX Spectrum .sna/.z80/.tap/.tzx on SD
-std::vector<std::string> pcFiles;      // PCXT .img/.ima/.dsk/.vhd disk images on SD
+FileList hdFiles;
+FileList diskFiles;
+FileList c64Files;     // C64 .prg/.d64 images on SD
+FileList nesFiles;     // NES .nes ROMs on SD
+FileList atariFiles;   // Atari 2600 .a26/.bin ROMs on SD
+FileList msxFiles;     // MSX1 .rom/.mx1/.dsk images on SD
+FileList smsFiles;     // SMS .sms/.bin ROM images on SD
+FileList colecoFiles;  // ColecoVision .col/.rom/.bin cartridges on SD
+FileList zxFiles;      // ZX Spectrum .sna/.z80/.tap/.tzx on SD
+FileList pcFiles;      // PCXT .img/.ima/.dsk/.vhd disk images on SD
 
 // keyboard
 unsigned short keyboard_data[3] = {0, 0, 0};
@@ -129,7 +129,7 @@ float appleClockMhz = 1.0f;    // Apple II: target clock when throttled (1.0 = s
 volatile int  g_pcSpkFreq = 0;     // PCXT PC-speaker: PIT ch2 frequency (Hz)
 volatile bool g_pcSpkOn   = false; // PCXT PC-speaker: gate+data enabled (port 0x61)
 bool c64Autoload = false;     // C64: auto-load the saved image on boot
-uint8_t joyPort = 2;          // C64: joystick port (1 or 2)
+uint8_t joyPort = 1;          // C64: joystick port (1 or 2)
 volatile bool c64AutoloadPending = false;  // .prg/.d64 autoload deferred to the BASIC READY trap
 String NewDeviceConfig;
 byte selectedHdFile;

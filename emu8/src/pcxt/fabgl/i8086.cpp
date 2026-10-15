@@ -2062,5 +2062,23 @@ void i8086::stepEx(uint8_t const * opcode_stream)
 }
 
 
+
+// Save state. regs8/regs16/regs_offset are pointers/offsets set up by reset() for this build's
+// memory layout and stay valid; only the values behind them move.
+void i8086::snapshot(PcSnap & s)
+{
+  s.bytes(regs, sizeof(regs));      // AX..DI, ES/CS/SS/DS (+ zero/scratch words), little-endian
+  s.bytes(flags, sizeof(flags));
+  s.val(reg_ip);
+  s.val(seg_override);
+  s.val(seg_override_en);
+  s.val(rep_override_en);
+  s.val(rep_mode);
+  s.flag(s_halted);
+  s.flag(s_pendingIRQ);
+  s.val(s_pendingIRQIndex);
+}
+
+
 }   // namespace fabgl
 #endif // !(BOARD_PICOCALC && RP2040)

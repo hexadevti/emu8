@@ -15,6 +15,7 @@
 // (diskSetStream, no RAM copy), go straight through the device layer's sector callback. Arduino-free.
 
 #include "msx_disk.h"
+#include "../z80/z80_snapshot.h"
 #include <string.h>
 #if defined(BOARD_DESKTOP)
 #include "../desktop/debug_bridge.h"   // desktop debugger: dbgDiskRead/Write feed the disk-read heat map (no-op on device)
@@ -188,6 +189,24 @@ void diskWrite(uint16_t addr, uint8_t v) {
       break;
     case 4: fdcSide = v & 1; fdcCtrl = v; break;                              // side select (bit0)
     case 5: fdcCtrl = v; break;                                              // drive/motor
+  }
+}
+
+// ---- save state (msx_snapshot.cpp) -------------------------------------------------------------
+// "FDC " record: the WD2793 registers, the 512-byte sector buffer with the transfer position (a
+// sector can be half-way through the data register when the machine parks), the seek-busy ticks and
+// the pending write offset. The .dsk image itself is not saved -- whatever is mounted now stays.
+void diskSnapshot(SnapIO &io) {
+  io.tag("FDC ");
+  io.val(fdcStatus); io.val(fdcTrack); io.val(fdcSector); io.val(fdcData); io.val(fdcCmd);
+  io.val(fdcSide); io.val(fdcCtrl);
+  io.bytes(fdcBuf, sizeof(fdcBuf));
+  snapInt(io, fdcIdx); snapInt(io, fdcLen); snapInt(io, fdcDir); snapInt(io, fdcSeekTicks);
+  io.val(fdcWriteOff);
+  if (io.loading) {                                   // keep a restored transfer inside the buffer
+    if (fdcLen < 0 || fdcLen > 512) fdcLen = 0;
+    if (fdcIdx < 0 || fdcIdx > fdcLen) fdcIdx = fdcLen;
+    if (fdcDir < 0 || fdcDir > 2) fdcDir = 0;
   }
 }
 

@@ -1,5 +1,6 @@
 #include "../../emu.h"
 #include "c64.h"
+#include "../shared/snapshot.h"
 
 // Minimal CIA1/CIA2 for phase 1: CIA1 keyboard-matrix ports + Timer A (the ~50/60 Hz
 // KERNAL IRQ that scans the keyboard and blinks the cursor); CIA2 VIC bank select + NMI.
@@ -159,5 +160,15 @@ void cia2Write(uint8_t reg, uint8_t val) {
 }
 
 bool cia2NMIPending() { return (icrData2 & 0x80) != 0; }
+
+// Snapshot (c64_snapshot.cpp): every register this CIA model keeps, same order both ways. The VIC
+// bank ($DD00) is restored with the port; the VIC's base addresses are rebuilt by vicSnapshot.
+void ciaSnapshot(SnapIO &io) {
+  io.val(pra1); io.val(prb1); io.val(ddra1); io.val(ddrb1);
+  io.val(ta1); io.val(ta1latch); io.val(cra1); io.val(icrData1); io.val(icrMask1);
+  io.val(pra2); io.val(ddra2);
+  io.val(ta2); io.val(ta2latch); io.val(tb2); io.val(tb2latch);
+  io.val(cra2); io.val(crb2); io.val(icrData2); io.val(icrMask2);
+}
 
 } // namespace c64

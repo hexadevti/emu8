@@ -67,12 +67,6 @@ void hdBrowseUp()           { fbUp(hdBrowser); }
 
 
 
-void loadHD() 
-{
-  busTake();               // loadHDDir() recurses, so the lock is taken here, at the one entry
-  loadHDDir(FSTYPE, "/", 1);   // point -- gBusLock is not recursive.
-  busGive();
-}
 
 char HDSoftSwitchesRead(ushort address)
 {
@@ -285,57 +279,3 @@ void apple2HdEject()
   busGive();
 }
 
-void loadHDDir(fs::FS &fs, const char *dirname, uint8_t levels) {
-  sprintf(buf,"Loading directory: %s\n", dirname);
-  printLog(buf);
-  hdFiles.clear();
-
-  File root = fs.open(dirname, "r");
-  if (!root) {
-    printLog("Failed to open directory");
-    return;
-  }
-  if (!root.isDirectory()) {
-    printLog("Not a directory");
-    return;
-  }
-
-  File file = root.openNextFile();
-  int i = 0;
-  while (file) {
-    if (file.isDirectory()) {
-      printLog("  DIR : ");
-      printLog(file.name());
-      if (levels) {
-#if defined(BOARD_PICOCALC)
-        loadHDDir(fs, file.fullName(), levels - 1);   // arduino-pico's name for path()
-#else
-        loadHDDir(fs, file.path(), levels - 1);
-#endif
-      }
-    } else {
-      bool acepted = false;
-      std::string fileName = file.name();
-      for (int j = 0; j < fileExtensions.size(); j++)
-      {
-        if ((int)fileName.find(fileExtensions[j].c_str()) > 0)
-        {
-          acepted = true;
-          break;
-        }
-      }
-      
-      if (acepted)
-      {
-        sprintf(buf, " FOUND FILE: %s SIZE: %d", file.name(), file.size());
-        printLog(buf);
-        std::string str(file.name());
-        hdFiles.push_back("/" + str);
-      }
-      i++;
-    }
-    file = root.openNextFile();
-  }
-  file.close();
-  root.close();
-}

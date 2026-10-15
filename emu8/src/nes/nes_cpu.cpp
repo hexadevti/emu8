@@ -151,14 +151,14 @@ void cpuReset() {
   SR = SR_FIXED_BITS | SR_INT;
 }
 
-void cpuIRQ() {
+NES_HOT void cpuIRQ() {
   push16(PC);
   push8((SR & ~SR_BRK) | SR_FIXED_BITS);
   SR |= SR_INT;
   PC = cpuRead16(0xFFFE);
 }
 
-void cpuNMI() {
+NES_HOT void cpuNMI() {
   push16(PC);
   push8((SR & ~SR_BRK) | SR_FIXED_BITS);
   SR |= SR_INT;
@@ -184,15 +184,27 @@ static inline __attribute__((always_inline)) void setflags() {
 // there starts without a reboot. The picture goes black (the render task keeps re-pushing the
 // framebuffer on its timeout) and the APU is silenced; the pause is waited out too, so the new
 // cart is fully loaded and its banks mapped before the CPU touches it.
+static volatile bool idleNoCart = false;      // parked in idleWithoutCart (not the pause spin)
+static volatile bool idleSkipReset = false;   // a snapshot was loaded there: resume it, don't reset
+
 static void idleWithoutCart() {
   printLog("NES: no ROM loaded; CPU idle until one is picked in settings");
   apuWrite(0x15, 0);                                  // disable every channel: no stuck tone
   fbRendering = false;                                // the PPU is not drawing any more
   if (framebuffer) memset(framebuffer, 0x0F, 256 * 240);   // master-palette $0F = black
+  idleNoCart = true;
   while (running && (!prgMap[0] || paused)) delay(100);
+  idleNoCart = false;
 }
 
-void cpuLoop() {
+// A snapshot was just loaded into the parked machine (nes_snapshot.cpp): drop any reset still owed
+// for a ROM picked in the settings browser, including the one the no-cart idle owes on its way out.
+void cpuSnapRestored() {
+  nesResetReq = false;
+  if (idleNoCart) idleSkipReset = true;
+}
+
+NES_HOT void cpuLoop() {
   if (prgMap[0]) cpuReset();          // else the no-cart idle below runs first and requests the reset
   lastPC = PC;
 
@@ -224,7 +236,9 @@ void cpuLoop() {
     if (!prgMap[0]) {                   // no cart at boot, or unmounted while paused
       idleWithoutCart();
       if (!running) return;
-      nesResetReq = true;               // start the newly loaded cart from a clean reset
+      if (idleSkipReset) idleSkipReset = false;   // a snapshot was loaded instead: resume it
+      else nesResetReq = true;          // start the newly loaded cart from a clean reset
+
       fpsLastMs = millis(); fpsLastFrames = nesFrameCount;
     }
 

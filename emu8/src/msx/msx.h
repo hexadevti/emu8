@@ -9,6 +9,8 @@
 #include <stdint.h>
 #include "../z80/z80.h"
 
+struct SnapIO;   // src/shared/snapshot.h (save states; only the snapshot code includes it)
+
 namespace msx {
 
 // ---- machine geometry ----
@@ -46,6 +48,8 @@ void    vdpEndFrame();          // set the VBlank status flag (and arm IRQ if R1
 bool    vdpIrqActive();         // VBlank flag set AND interrupts enabled
 void    vdpRender();            // paint the current mode into framebuffer (256x192 indexed)
 uint8_t vdpRegister(int r);     // for diagnostics
+void    vdpSnapshot(SnapIO &io);// save state: registers + latches (VRAM is the caller's)
+void    vdpRedraw();            // vdpRender() that leaves the status register alone (after a load)
 extern uint16_t MSX_PALETTE[16];// TMS9918 fixed palette as RGB565 (device uses this directly)
 
 // ---- 8255 PPI + keyboard (msx_ppi.cpp) ----
@@ -56,6 +60,7 @@ int     ppiPageSlot(int page);  // current primary slot (0-3) mapped to 16 KB pa
 void    kbSetKey(int row, int col, bool down);   // MSX 8x11 matrix injector (row 0-10, col 0-7)
 void    kbReset();
 void    setJoystick(uint8_t mask);               // active-LOW: b0 up b1 down b2 left b3 right b4 trgA b5 trgB
+void    ppiSnapshot(SnapIO &io);                 // save state: slot select + port C (keys released on load)
 
 // ---- PSG AY-3-8910 (msx_psg.cpp) ----  (full audio in M3.5; minimal reg file + joystick I/O now)
 void    psgReset();
@@ -63,12 +68,16 @@ void    psgWriteAddr(uint8_t a);
 void    psgWriteData(uint8_t v);
 uint8_t psgReadData();
 int     psgGenSample(int masterVol, bool mute);  // one 22050 Hz sample (0..255); used by msx_audio.cpp
+void    psgSnapshot(SnapIO &io);                 // save state: registers + tone/noise/envelope state
 
 // ---- cartridge (msx_cart.cpp, M3) ----
 uint8_t cartRead(int slot, uint16_t a);          // slot 1 or 2
 const uint8_t* cartPage(int slot, int chunk);   // 8 KB of ROM at chunk (a >> 13) 2..5, or nullptr -> cartRead
 void    cartWrite(int slot, uint16_t a, uint8_t v);
 bool    cartPresent(int slot);
+int     cartMapper(int slot);                    // detected mapper (MAP_* in msx_cart.cpp), -1 = bad slot
+const uint8_t* cartImage(int slot, int* len);   // the loaded image (nullptr / 0 when empty), for save states
+void    cartSnapshot(SnapIO &io, int slot);      // save state: bank registers + SCC enable
 
 } // namespace msx
 

@@ -1,5 +1,6 @@
 #include "../../emu.h"
 #include "atari.h"
+#include "atari_snap.h"
 #include "driver/i2s.h"
 #include "driver/adc.h"   // adc_power_acquire(): keep the SAR ADC powered (I2S DAC powers it down)
 
@@ -149,6 +150,22 @@ static void audioSetup() {
 #endif
   printLog("Atari audio: 2 TIA voices on (I2S amp)");
 #endif
+}
+
+// Snapshot (atari_snapshot.cpp): both voices, field by field (fixed widths, no struct padding).
+// No voices (audio malloc failed) -> a silent pair is written / the file's pair is skipped.
+void audioSnap(SnapIO &io) {
+  for (int i = 0; i < 2; i++) {
+    Voice t = v ? v[i] : Voice();
+    io.val(t.audc); io.val(t.audf); io.val(t.audv); io.flag(t.noise);
+    io.val(t.lfsrLen); io.val(t.lfsr); io.val(t.phase); io.val(t.step);
+    if (!io.loading || !io.ok) continue;
+    if ((t.lfsrLen != 4 && t.lfsrLen != 5 && t.lfsrLen != 9) || t.lfsr == 0) {
+      io.fail("Snapshot is damaged");
+      return;
+    }
+    if (v) v[i] = t;                   // the audio task reads it live; a torn sample is harmless
+  }
 }
 
 } // namespace atari

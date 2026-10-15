@@ -14,6 +14,7 @@
 // Synthesis (psgGenSample) is Arduino-free so it links into the harness; the I2S task is sms_audio.cpp.
 
 #include "sms.h"
+#include "../z80/z80_snapshot.h"
 
 namespace sms {
 
@@ -64,6 +65,28 @@ void psgWrite(uint8_t v) {
     if (latchType) { vol[latchCh] = v & 0x0F; }
     else if (latchCh == 3) { noiseCtrl = v & 0x07; lfsr = 0x8000; recalcNoise(); }
     else { tonePeriod[latchCh] = (uint16_t)((tonePeriod[latchCh] & 0x00F) | ((v & 0x3F) << 4)); recalcTone(latchCh); if ((noiseCtrl & 3) == 3) recalcNoise(); }
+  }
+}
+
+// ---- save state (sms_snapshot.cpp, coleco_snapshot.cpp) -----------------------------------------
+// "SN  " record: tone periods (u16 x3), attenuations (x4), noise control, the latch (channel, type),
+// tone/noise phases, the noise LFSR and the square levels. The phase steps are rebuilt.
+void psgSnapshot(SnapIO &io) {
+  io.tag("SN  ");
+  io.arr(tonePeriod);
+  io.arr(vol);
+  io.val(noiseCtrl);
+  snapInt(io, latchCh);
+  snapInt(io, latchType);
+  io.arr(tonePhase);
+  io.val(noisePhase);
+  io.val(lfsr);
+  for (int i = 0; i < 3; i++) snapInt(io, toneOut[i]);
+  if (io.loading) {
+    for (int i = 0; i < 3; i++) { tonePeriod[i] &= 0x3FF; recalcTone(i); }
+    for (int i = 0; i < 4; i++) vol[i] &= 0x0F;
+    latchCh &= 3; latchType &= 1;
+    recalcNoise();
   }
 }
 

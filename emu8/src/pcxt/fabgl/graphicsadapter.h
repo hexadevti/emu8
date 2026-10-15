@@ -58,6 +58,14 @@ public:
   int  graphForegroundIndex()                     { return m_graphFgIndex; }
   int  graphPalette()                             { return m_graphPalette; }
 
+  // save state (fabgl.h PcSnap); the video buffer pointer is NOT saved -- the machine re-points it
+  void snapshot(PcSnap & s) {
+    s.e32(m_emulation); s.flag(m_videoEnabled);
+    s.i32(m_cursorStart); s.i32(m_cursorEnd); s.i32(m_cursorRow); s.i32(m_cursorCol);
+    s.flag(m_cursorVisible); s.flag(m_bit7blink);
+    s.i32(m_graphBgIndex); s.i32(m_graphFgIndex); s.i32(m_graphPalette);
+  }
+
 private:
 
   Emulation        m_emulation     = Emulation::None;

@@ -446,6 +446,42 @@ void Machine::speakerEnableDisable()
 
 
 //////////////////////////////////////////////////////////////////////////////
+// Save state (Ctrl-Shift-F5; the file format is described in pcxt_snapshot.cpp)
+
+void Machine::snapshot(PcSnap & s)
+{
+  s.tag("MACH");
+  s.flag(m_reset);
+  s.val(m_ticksCounter);
+  s.val(m_refreshToggle);
+  s.val(m_CGA6845SelectRegister);
+  s.bytes(m_CGA6845, sizeof(m_CGA6845));
+  s.val(m_CGAMemoryOffset);
+  s.val(m_CGAModeReg);
+  s.val(m_CGAColorReg);
+  s.val(m_CGAVSyncQuery);
+  s.flag(m_speakerDataEnable);
+  s.i32(m_speakerFreq);
+
+  s.tag("CGA "); m_graphicsAdapter.snapshot(s);
+  s.tag("PIC "); m_PIC8259A.snapshot(s); m_PIC8259B.snapshot(s);
+  s.tag("PIT "); m_PIT8253.snapshot(s);
+  s.tag("KBC "); m_i8042.snapshot(s);
+  s.tag("RTC "); m_MC146818.snapshot(s);
+  s.tag("BIOS"); m_BIOS.snapshot(s);
+  s.tag("CPU "); i8086::snapshot(s);
+
+  if (s.loading) {
+    if (m_CGA6845SelectRegister >= sizeof(m_CGA6845)) m_CGA6845SelectRegister = 0;
+    // pointers are rebuilt, never saved: the CGA window inside this build's video RAM
+    m_frameBuffer = cgaBase() + (m_CGAMemoryOffset & (PCXT_VIDEOMEM_SIZE - PCXT_CGA_WINDOW - 1));
+    m_graphicsAdapter.setVideoBuffer(m_frameBuffer);
+    if (s_speakerCb) s_speakerCb(m_speakerFreq, speakerEnabled());
+  }
+}
+
+
+//////////////////////////////////////////////////////////////////////////////
 // Disk image attach (FILE*-backed; device build bridges fopen to SD in M2)
 
 void Machine::setDriveImage(int drive, char const * filename, int cylinders, int heads, int sectors)

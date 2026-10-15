@@ -3,6 +3,7 @@
 #include "../desktop/debug_bridge.h"   // dbgVicMarkFrame: tag VIC DMA reads in the heat map (no-op on device)
 #endif
 #include "c64.h"
+#include "../shared/snapshot.h"
 
 // VIC-II renderer ported from C64Esp32 VIC.ino: renders each scanline into the RGB565
 // `bitmap` framebuffer. All char/bitmap modes + sprites + collisions. Wrapped in
@@ -297,6 +298,27 @@ C64_HOT void vicLineToRgb(const uint8_t *out, uint16_t *dst, const uint16_t *pal
     dst[x + 2] = pal[out[x + 2] & 15];
     dst[x + 3] = pal[out[x + 3] & 15];
   }
+}
+
+// Snapshot (c64_snapshot.cpp): the registers and the raster/border/badline state the next lines
+// depend on, so a frame saved mid-way carries on where it was. The base addresses and the charset
+// pointer are rebuilt from $D018 + the bank, as a register write does. On load the line records
+// are dropped: the frame being recorded started on the old machine, so the render core skips it
+// and shows the next whole one.
+void vicSnapshot(SnapIO &io) {
+  io.arr(vicreg);
+  io.val(latchd011); io.val(latchd012);
+  io.val(vicmem); io.val(rasterline);
+  io.val(syncd020); io.val(cntRefreshs);
+  io.flag(screenblank); io.flag(badlinecond0); io.flag(badlinecond);
+  io.flag(vertborder); io.flag(vicCollPolled);
+  io.val(lineC64map); io.val(startbyte);
+  if (!io.loading || !io.ok) return;
+  if (rasterline > 311) rasterline = 0;
+  adaptVICBaseAddrs(false);
+  if (vicRec)
+    for (int i = 0; i < 400; i++) vicRec[i].frame = 0;
+  vicSnapRow = 0xFF;
 }
 
 // End marker of the C64's SRAM code on the PicoCalc: the Apple II borrows the idle run of it up to

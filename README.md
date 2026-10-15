@@ -4,7 +4,7 @@
 ESP32 boards with a built-in TFT and microSD. Pick a system on the boot splash and it boots disk/cartridge images
 straight off a microSD card — no PC, no external ROM files.
 
-Eight systems share one firmware, dispatched at runtime from the boot splash — the classic 8-bit cores
+Nine systems share one firmware, dispatched at runtime from the boot splash — the classic 8-bit cores
 plus the experimental **PC-XT** target that is still in development:
 
 | System | CPU | Status | Image formats |
@@ -16,6 +16,7 @@ plus the experimental **PC-XT** target that is still in development:
 | **MSX1** | Z80 | Playable (TMS9918 VDP + AY-3-8910 PSG); HotBit 1.2 BIOS + Disk BASIC from SD | `.rom` `.mx1` `.dsk` |
 | **ZX Spectrum 48K** | Z80 | Playable (ULA screen + per-line border, beeper, Kempston); instant tape loading through a ROM trap (no turbo loaders); ROM from SD | `.sna` `.z80` `.tap` `.tzx` |
 | **Sega Master System** | Z80 | Playable (Mode 4 VDP + SN76489 PSG); Sega mapper + line interrupts; boots cartridges directly (no BIOS) | `.sms` `.bin` |
+| **ColecoVision** | Z80 | Playable (TMS9918 VDP + SN76489 PSG); BIOS from `/roms/coleco.rom` | `.col` `.rom` `.bin` |
 | **PC-XT** | Intel 8086 | **In development** — fabgl-based IBM PC-XT: BIOS POST, CGA text/graphics, PC speaker; mounts floppy (A:) and hard-disk (C:) images and boots DOS. BIOS from `/roms/pcxt_bios.bin` | `.img` `.ima` `.dsk` `.vhd` `.hdd` |
 
 > Derived from [hexadevti/Apple2Esp32](https://github.com/hexadevti/Apple2Esp32). The original was a
@@ -26,20 +27,27 @@ plus the experimental **PC-XT** target that is still in development:
 
 ## Screenshots
 
-*Captured from the desktop (SDL2) build. The firmware draws the same 320×240 picture on the boards.*
+*Captured from the PicoCalc build (RP2040 profile) running in the desktop simulator. The device's 320×320 panel
+shows the same picture, pixel for pixel, including the battery gauge.*
 
 | | |
 | :---: | :---: |
-| <img src="docs/screenshots/system-menu.png" width="320" alt="Boot splash / system menu"> | <img src="docs/screenshots/settings-sms.png" width="320" alt="Settings window with file list"> |
-| Boot splash: pick a system, or **SETUP** | Settings window: toggles, ROM list, **UNMOUNT** |
-| <img src="docs/screenshots/nes-smb.png" width="320" alt="NES: Super Mario Bros."> | <img src="docs/screenshots/sms-sonic.png" width="320" alt="Master System: Sonic the Hedgehog"> |
-| NES | Sega Master System |
-| <img src="docs/screenshots/msx-galaga.png" width="320" alt="MSX: Galaga"> | <img src="docs/screenshots/atari-pitfall.png" width="320" alt="Atari 2600: Pitfall!"> |
-| MSX1 | Atari 2600 |
-| <img src="docs/screenshots/apple2-loderunner.png" width="320" alt="Apple II: Lode Runner"> | <img src="docs/screenshots/c64-skramble.png" width="320" alt="C64: 3-D Skramble"> |
-| Apple II | Commodore 64 |
-| <img src="docs/screenshots/atari-riverraid.png" width="320" alt="Atari 2600: River Raid"> | <img src="docs/screenshots/zx48.png" width="320" alt="ZX Spectrum 48K boot screen"> |
-| Atari 2600 | ZX Spectrum 48K |
+| <img src="docs/screenshots/system-menu.png" width="320" alt="System menu over the running emulator"> | <img src="docs/screenshots/settings-apple2.png" width="320" alt="Apple IIe settings with the HD image list"> |
+| System menu (`Ctrl`+`Shift`+`F1`) over the paused game | Settings (`Ctrl`+`F1`): file list, toggles, **ROMS**, **HELP** |
+| <img src="docs/screenshots/snapshots.png" width="320" alt="Snapshot page with a saved state and its thumbnail"> | <img src="docs/screenshots/help.png" width="320" alt="Help / controls page"> |
+| Snapshots (`Ctrl`+`Shift`+`F5`): save / load / delete, with thumbnails | Built-in help: global keys, menu keys, the system's own keys |
+| <img src="docs/screenshots/apple2-totalreplay.png" width="320" alt="Apple IIe: Total Replay"> | <img src="docs/screenshots/apple2-brucelee-smooth.png" width="320" alt="Apple IIe: Bruce Lee, SCREEN: SMOOTH"> |
+| Apple IIe — Total Replay from a ProDOS `.hdv` | Apple IIe — **SCREEN: SMOOTH** scaling |
+| <img src="docs/screenshots/sms-sonic.png" width="320" alt="Master System: Sonic the Hedgehog, original size"> | <img src="docs/screenshots/sms-sonic-smooth.png" width="320" alt="Master System: Sonic the Hedgehog, SCREEN: SMOOTH"> |
+| Sega Master System — **SCREEN: ORIG** | Sega Master System — **SCREEN: SMOOTH** |
+| <img src="docs/screenshots/nes-smb.png" width="320" alt="NES: Super Mario Bros."> | <img src="docs/screenshots/c64-galaga.png" width="320" alt="C64: Galaga"> |
+| NES | Commodore 64 |
+| <img src="docs/screenshots/msx-soccer.png" width="320" alt="MSX: Konami's Soccer"> | <img src="docs/screenshots/coleco-decathlon.png" width="320" alt="ColecoVision: The Activision Decathlon"> |
+| MSX1 | ColecoVision |
+| <img src="docs/screenshots/atari-pitfall.png" width="320" alt="Atari 2600: Pitfall!"> | <img src="docs/screenshots/atari-riverraid.png" width="320" alt="Atari 2600: River Raid"> |
+| Atari 2600 | Atari 2600 |
+| <img src="docs/screenshots/zx48.png" width="320" alt="ZX Spectrum 48K boot screen"> | <img src="docs/screenshots/settings-c64.png" width="320" alt="C64 settings with a long, sorted file list"> |
+| ZX Spectrum 48K | C64 settings: sorted file list with subfolders |
 
 ---
 
@@ -123,10 +131,18 @@ to some components).
 
 ### Shared core
 
-- **Boot-splash platform selector** — tap **APPLE / C64 / NES / ATARI / MSX / SMS / PCXT**
-  to choose a system; the selection persists in EEPROM and auto-boots next time. (**PCXT** is
-  experimental / in development.)
-- **microSD storage** for every platform, with on-screen file browsers per system.
+- **Boot-splash platform selector** — **II+ / IIe / C64 / NES / ATARI / MSX / SMS / PCXT / COLECO / ZX48**;
+  the selection persists in EEPROM and auto-boots next time. (**PCXT** is experimental / in development.)
+- **microSD storage** for every platform, with on-screen file browsers per system: subfolders, `..` to go
+  up, directories first and names sorted. Big folders work even on the RP2040 — up to 1000 entries,
+  stored packed so a long list costs a few bytes per name. If a folder holds more than fits, the count
+  reads `N+` and the list stops there instead of coming up empty.
+- **Snapshots (save states) on every system** — `Ctrl`+`Shift`+`F5` (the **SNAP** button on touch
+  boards) opens the snapshot page: **SAVE** (`S`), **LOAD** (`L`), **DELETE** (`D`). Each snapshot is one
+  file, `<SNAPSHOTS folder>/<system>/NNNN-<name>.snp` (default folder `/emu8-snapshot`), listed newest first with
+  a half-size thumbnail of the screen. A snapshot also stores the settings and the mounted disk / cartridge;
+  if they differ from the running ones, loading it reboots into them and then restores the state. A snapshot
+  made for a different cartridge or machine model is refused and the running machine is left untouched.
 - **On-screen touch keyboard** (OSK) on both boards, plus PS/2 on the CYD and a **USB keyboard** on the JC4827W543.
 - **Audio** routed to the board's amplifier — internal DAC on the CYD, I2S Class-D on the S3.
 - **Settings persistence in EEPROM** (platform, machine type, speed, sound/volume, joystick,
@@ -136,10 +152,17 @@ to some components).
   red and reads **UNMOUNT** (or press `Del` / `Backspace`). Cartridges, programs and snapshots leave an
   empty, idle machine; disks and tapes are ejected while the program keeps running.
 - **General settings** (the **SETUP** button on the system menu): **ROM FOLDER** (where system ROMs are
-  read from, default `/roms`), **APPS FOLDER** (where every file browser starts, default `/`), **RESET**
-  (erase all saved settings and ROM picks, then reboot) and a **HELP** page.
+  read from, default `/roms`), **APPS FOLDER** (where every file browser starts, default `/`),
+  **SNAPSHOTS** (where snapshots are kept, default `/emu8-snapshot`), **RESET** (erase all saved settings
+  and ROM picks, then reboot) and a **HELP** page.
+- **HELP / CONTROLS** page in every system's settings: the global keys, the menu keys and that system's
+  own key mapping.
 - **ROMS page**: any system ROM can be pointed at another file, or set to **(none)**.
 - **Live speed readout**: the settings title shows the measured emulated CPU speed (MHz) and the panel fps.
+- **Battery gauge (PicoCalc)**: the charge in percent and a charging indicator, read from the keyboard
+  MCU's fuel gauge every 10 s, in the title bar of the settings, snapshot and system-menu pages.
+- **SCREEN: SMOOTH (PicoCalc)**: every core can scale its picture up to fill the 320×320 panel with
+  bilinear blending (**SCREEN: ORIG** keeps the 1:1 picture). It costs more SPI time per frame.
 - **Sound is muted while any menu is open** (settings window, system menu), on every system.
 - **Only changed screen areas are sent to the panel** (dirty bands on MSX, Coleco, SMS, ZX and Apple II;
   changed rows only on the C64), and the SMS uses **frame pacing with adaptive frame-skip** so game speed
@@ -210,6 +233,12 @@ to some components).
   arrows = cursor keys (Kempston stick + `Space` fire when **JOYSTICK** is on), common punctuation is
   translated to its SYMBOL SHIFT chord, `F12` = reset.
 
+### ColecoVision
+
+- **Z80** CPU with the **TMS9918** VDP (shared with the MSX core) and the **SN76489** PSG (shared with the SMS core).
+- Needs the ColecoVision BIOS on the SD card at `/roms/coleco.rom`; loads `.col` / `.rom` / `.bin` cartridges.
+- Arrows = joystick, `Space`/`F4` = left fire, `X`/`F5` = right fire, `0`–`9` = keypad, `-` = `*`, `=` = `#`, `F3` = reset.
+
 ### PC-XT *(in development)*
 
 - fabgl-derived **Intel 8086** IBM PC-XT: runs the embedded PC BIOS (POST text in the CGA buffer),
@@ -278,6 +307,7 @@ behind `Ctrl`, so bare function keys stay available to the emulated system:
 | `Ctrl` + `F3` | Apple **Reset** (CPU reset); SMS **PAUSE** |
 | `Ctrl` + `Shift` + `F1` | System menu over the running emulator, no reboot (see above) |
 | `Ctrl` + `Shift` + `F3` | Hard reset: settings saved, then reboot straight back into the running system (no menu) |
+| `Ctrl` + `Shift` + `F5` | Snapshots: save / load / delete the machine's state |
 | `Ctrl` + `Shift` + `Up` | Reboot into the [UF2 Loader](https://github.com/pelrun/uf2loader) menu, to pick another app from the SD card |
 | `F3` | Atari **RESET** switch; reset on PC-XT, Coleco and ZX |
 
@@ -308,9 +338,9 @@ shows the images for the **current platform**; function keys / touch toggles cov
 | `Del` / `Backspace` | Unmount the highlighted image, if it is the one loaded |
 | `Esc` | Exit the menu |
 
-The general settings (**SETUP** on the system menu) and the built-in help:
+The general settings (**SETUP** on the system menu):
 
-<img src="docs/screenshots/general-settings.png" width="320" alt="General settings"> <img src="docs/screenshots/help.png" width="320" alt="Help page">
+<img src="docs/screenshots/general-settings.png" width="320" alt="General settings">
 
 A built-in **6502 debugger** (Apple core) offers pause/continue, single-step (`F10`), breakpoint by
 address, and a live instruction/stack trace.

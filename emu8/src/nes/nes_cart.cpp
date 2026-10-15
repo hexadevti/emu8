@@ -84,7 +84,41 @@ uint8_t *prgBankResolve(int window, int bank8k) {
   return prgCache + (uint32_t)victim * 8192;
 }
 
+// Snapshot cartridge fingerprint: FNV-1a over the first and last 4K of PRG and, for CHR-ROM carts,
+// of CHR. A streamed PRG is read through the already-open .nes handle in small pieces (no cache
+// slot is touched, so the bank windows stay as they are); the caller holds the SD bus.
+static uint32_t fnv1a(uint32_t h, const uint8_t *p, uint32_t n) {
+  while (n--) h = (h ^ *p++) * 0x01000193u;
+  return h;
+}
+static bool prgHashRange(uint32_t &h, uint32_t off, uint32_t n) {
+  if (!prgStreamed) { h = fnv1a(h, prgRom + off, n); return true; }
+  uint8_t chunk[256];
+  while (n) {
+    uint32_t k = n < sizeof(chunk) ? n : (uint32_t)sizeof(chunk);
+    if (!prgFile.seek(prgDataOffset + off) || prgFile.read(chunk, k) != (int)k) return false;
+    h = fnv1a(h, chunk, k);
+    off += k; n -= k;
+  }
+  return true;
+}
+bool cartChecksum(uint32_t &sum) {
+  const uint32_t SPAN = 4096;
+  uint32_t h = 0x811C9DC5u;
+  if (!prgRomSize || (!prgRom && !prgStreamed) || !chrData) return false;
+  uint32_t n = prgRomSize < SPAN ? prgRomSize : SPAN;
+  if (!prgHashRange(h, 0, n) || !prgHashRange(h, prgRomSize - n, n)) return false;
+  if (!chrIsRam) {
+    n = chrSize < SPAN ? chrSize : SPAN;
+    h = fnv1a(h, chrData, n);
+    h = fnv1a(h, chrData + chrSize - n, n);
+  }
+  sum = h;
+  return true;
+}
+
 // Append a short "<rom>: <reason>" line to the on-screen startup warning (kept narrow to fit).
+
 static void loadWarnAdd(const char *path, const char *reason) {
   if (!loadWarn) return;
   const char *name = (*path == '/') ? path + 1 : path;

@@ -1,5 +1,6 @@
 #include "../../emu.h"
 #include "nes.h"
+#include "../shared/snapshot.h"
 #include "driver/i2s.h"
 
 // NES APU (2A03 audio) -> ESP32 internal DAC (GPIO26) via I2S DMA, mirroring the C64 SID path.
@@ -168,7 +169,7 @@ static const uint16_t noiseRecip[21] = {
 #define APU_GAIN     3
 
 // ---- one 16-bit signed output sample ----
-static int16_t genSample16() {
+NES_HOT static int16_t genSample16() {
   // Frame sequencer, clocked from emulated time rather than from the sample count (see the header
   // note). Cap the catch-up so a pause / ROM load cannot fire hundreds of envelope clocks at once.
   uint32_t q = apuQuarterTicks;
@@ -243,7 +244,7 @@ static void pulseWrite(int i, int sub, uint8_t val) {
   }
 }
 
-void apuWrite(uint8_t reg, uint8_t val) {
+NES_HOT void apuWrite(uint8_t reg, uint8_t val) {
   switch (reg) {
     case 0x00: case 0x01: case 0x02: case 0x03: pulseWrite(0, reg - 0x00, val); break;
     case 0x04: case 0x05: case 0x06: case 0x07: pulseWrite(1, reg - 0x04, val); break;
@@ -268,7 +269,46 @@ void apuWrite(uint8_t reg, uint8_t val) {
   }
 }
 
-uint8_t apuReadStatus() {                                // $4015: which length counters are active
+// Snapshot (src/nes/nes_snapshot.cpp): every channel's registers, counters and phase, field by field
+// (the structs hold bools and padding, so they are not dumped raw). The phase steps and sweep mute
+// are derived from the periods and recomputed on load; the DC blocker is output filtering, not
+// machine state. The audio task keeps running meanwhile -- a torn sample is all it can cost.
+static void pulseSnapshot(SnapIO &io, Pulse &p) {
+  io.flag(p.enabled); io.val(p.timer); io.val(p.duty);
+  io.flag(p.constVol); io.flag(p.lengthHalt); io.val(p.volParam);
+  io.flag(p.envStart); io.val(p.envDivider); io.val(p.envDecay);
+  io.flag(p.sweepEnable); io.flag(p.sweepNegate); io.flag(p.sweepReload);
+  io.val(p.sweepPeriod); io.val(p.sweepShift); io.val(p.sweepDivider);
+  io.val(p.lengthCounter); io.val(p.phase);
+}
+void apuSnapshot(SnapIO &io) {
+  io.tag("APU ");
+  pulseSnapshot(io, pulse[0]);
+  pulseSnapshot(io, pulse[1]);
+  io.flag(tri.enabled); io.val(tri.timer); io.flag(tri.control);
+  io.val(tri.linReload); io.val(tri.linCounter); io.flag(tri.linReloadFlag);
+  io.val(tri.lengthCounter); io.val(tri.phase);
+  io.flag(noise.enabled); io.flag(noise.constVol); io.flag(noise.lengthHalt); io.val(noise.volParam);
+  io.flag(noise.envStart); io.val(noise.envDivider); io.val(noise.envDecay);
+  io.flag(noise.mode); io.val(noise.period); io.val(noise.lfsr);
+  io.val(noise.lengthCounter); io.val(noise.phase);
+  io.val(frameMode); io.flag(frameIRQInhibit); io.flag(halfTick);
+  if (!io.loading || !io.ok) return;
+  for (int i = 0; i < 2; i++) {
+    pulse[i].duty &= 3;
+    pulse[i].timer &= 0x7FF;
+    pulse[i].step = pulseStep(pulse[i].timer);
+    updateSweepMute(pulse[i], i);
+  }
+  tri.timer &= 0x7FF;
+  tri.step = triStep(tri.timer);
+  if (!noise.lfsr) noise.lfsr = 1;                       // must be non-zero
+  noise.step = noiseStep(noise.period);
+  apuQuarterSeen = apuQuarterTicks;                      // no envelope catch-up for the paused time
+}
+
+uint8_t apuReadStatus() {
+                                // $4015: which length counters are active
   uint8_t s = 0;
   if (pulse[0].lengthCounter) s |= 1;
   if (pulse[1].lengthCounter) s |= 2;

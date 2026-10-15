@@ -8,6 +8,7 @@
 
 #include "../../emu.h"
 #include "atari.h"
+#include "atari_snap.h"
 
 namespace atari {
 
@@ -137,6 +138,15 @@ void cpuReset() {
   SR = SR_FIXED_BITS | SR_INT;
 }
 
+// Snapshot (atari_snapshot.cpp): taken with cpuLoop parked between instructions, so the registers
+// are the whole CPU state (the rest is per-instruction scratch). A load sets snapResumed so a cart
+// loaded in the same pause from the no-cart idle does not reset the restored machine on resume.
+static volatile bool snapResumed = false;
+void cpuSnap(SnapIO &io) {
+  io.val(PC); io.val(STP); io.val(A); io.val(X); io.val(Y); io.val(SR);
+  if (io.loading && io.ok) { SR |= SR_FIXED_BITS; lastPC = PC; snapResumed = true; }
+}
+
 static inline __attribute__((always_inline)) void setflags() {
   switch (opflags & 0xF0) {
     case  FL_ZN: SR &= 0x7D; break;
@@ -185,9 +195,11 @@ void cpuLoop() {
     if (!cartRom) {                    // no cart at boot, or unmounted while paused
       idleWithoutCart();
       if (!running) return;
-      atariResetReq = true;            // start the newly loaded cart from a clean reset
+      atariResetReq = !snapResumed;    // start the newly loaded cart from a clean reset (unless a
+                                       // snapshot was loaded onto it during the pause)
       fpsLastMs = millis(); fpsLastFrames = atariFrameCount;
     }
+    snapResumed = false;
 
     // A new ROM was loaded from the settings window -> reset TIA/RIOT/CPU to start it cleanly.
     if (atariResetReq) { atariResetReq = false; tiaReset(); riotReset(); cpuReset(); lastPC = PC; }

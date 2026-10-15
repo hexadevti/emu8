@@ -95,6 +95,7 @@ public:
                                              // MSB-first, i.e. native RGB565 (same as the
                                              // Arduino_GFX and SDL backends, which also ignore it)
   void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data);
+  bool readVideo(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t *buf);   // displayReadVideo
   void pushImageAsync(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data);  // returns at once
   bool pushBusy();                  // pushImageAsync still sending
   void pushWait();                  // until it is done

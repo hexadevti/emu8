@@ -21,6 +21,7 @@
 
 #include "sms.h"
 #include "sms_cart.h"
+#include "../z80/z80_snapshot.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -81,6 +82,24 @@ void cartReset() {
   ramCtrl = 0;
   if (cartRam) memset(cartRam, 0, CART_RAM_SIZE);
   updateSlots();
+}
+
+// ---- save state (sms_snapshot.cpp) -------------------------------------------------------------
+// The ROM is not saved (flash / PSRAM); the cart RAM is streamed by sms_snapshot.cpp through
+// cartRamData(). cartRamEnsure() is the same lazy allocation a $FFFC write does, for loading a
+// snapshot that has cart RAM into a session that has not mapped it yet. The "MAPR" record holds the
+// three bank registers and $FFFC; the window offsets and page pointers are rebuilt from them.
+uint8_t* cartRamData() { return cartRam; }
+int      cartRamSize() { return CART_RAM_SIZE; }
+bool cartRamEnsure() {
+  if (!cartRam && (cartRam = (uint8_t*)malloc(CART_RAM_SIZE))) memset(cartRam, 0, CART_RAM_SIZE);
+  return cartRam != nullptr;
+}
+void cartSnapshot(SnapIO &io) {
+  io.tag("MAPR");
+  io.arr(bankReg);
+  io.val(ramCtrl);
+  if (io.loading) updateSlots();
 }
 
 uint8_t cartRead(uint16_t a) {

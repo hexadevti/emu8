@@ -227,6 +227,7 @@ void smsRenderFrame() {
 void smsSetInput(uint8_t joyMask) { sms::setInput1(joyMask); }
 void smsPauseButton() { sms::smsPause(); }            // PAUSE button -> Z80 NMI (F11)
 void smsHardReset()   { smsResetReq = true; }         // soft power-cycle: re-run the cart (F12)
+void smsCancelReset() { smsResetReq = false; }        // snapshot loaded: resume it, do not reset
 
 // ---- settings hooks ----
 bool smsLoadSelected(const char* path) {

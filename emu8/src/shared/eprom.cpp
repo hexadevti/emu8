@@ -162,7 +162,7 @@ void epromSetup() {
   // C64 settings (validated so old/uninitialised EEPROM doesn't enable surprises).
   c64Autoload = (EEPROM.readChar(C64AutoloadEEPROMaddress) == 1);
   joyPort = EEPROM.readChar(JoyPortEEPROMaddress);
-  if (joyPort != 1 && joyPort != 2) joyPort = 2;
+  if (joyPort != 1 && joyPort != 2) joyPort = 1;
   // ==1 test (not readBool) so an uninitialised 0xFF on older devices reads as OFF, not ON.
   screenFill = (EEPROM.readChar(ScreenFillEEPROMaddress) == 1);
   { char s = EEPROM.readChar(NesDisplaySkipEEPROMaddress); nesDisplaySkip = (s >= 1 && s <= 3) ? (uint8_t)s : 3; }  // default 3; fresh EEPROM (0xFF) -> 3

@@ -73,6 +73,7 @@ public:
   // blits
   void setSwapBytes(bool s) { _swap = s; }
   void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data);
+  bool readVideo(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t *buf);   // displayReadVideo
   void setBypassCanvas(bool) {}     // device fast-path flag; desktop always presents the framebuffer
   void pushPanelBand(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data);
   // The PicoCalc's DMA push (display_picocalc.h): synchronous here, so it is never busy.

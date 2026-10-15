@@ -223,5 +223,20 @@ void PIC8259::performEOI()
 }
 
 
+
+void PIC8259::snapshot(PcSnap & s)
+{
+  s.val(m_state);
+  s.val(m_baseVector);
+  s.flag(m_autoEOI);
+  s.val(m_IRR);
+  s.val(m_ISR);
+  s.val(m_IMR);
+  s.flag(m_readISR);
+  s.flag(m_pendingInterrupt);
+  s.val(m_pendingIR);
+}
+
+
 } // namespace fabgl
 #endif // !(BOARD_PICOCALC && RP2040)

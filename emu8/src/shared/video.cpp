@@ -87,6 +87,13 @@ static StackType_t  renderTaskStack[RENDER_TASK_STACK];
 // src/picocalc/display_picocalc.cpp, where displayFlush() also polls the I2C keyboard.)
 void displayFlush() {}
 void displaySetUiMode(bool) {}
+// TFT_eSPI reads the ILI9341 back over MISO, colour bytes swapped (ready for pushImage unswapped).
+bool displayReadVideo(int x, int y, int w, int h, uint16_t *buf) {
+  if (!buf || w <= 0 || h <= 0) return false;
+  tft.readRect(x, y, w, h, buf);
+  for (int i = 0; i < w * h; i++) buf[i] = (uint16_t)((buf[i] >> 8) | (buf[i] << 8));
+  return true;
+}
 void displaySetVideoRect(int, int) {}
 void displaySetVideoFill(int, int, bool) {}
 #endif
@@ -451,6 +458,7 @@ static void splashFinish()           // boot the current platform
 // on this render task (see splashKeyEvent above), so no locking against splashService().
 void splashOpen()
 {
+  if (snapBootBusy()) return;                         // a snapshot is being restored
   if (splashActive) {                                 // the same key closes it again
     optionsUiCloseGeneral();                          // (and the general settings over it)
     splashFinish();
@@ -509,6 +517,8 @@ static void splashSelect(int idx)
 static void splashService()
 {
   static unsigned long startMs = 0;
+  // Rebooted to finish a snapshot load: straight into the system, the menu would only confuse.
+  if (!splashDrawn && !splashResumeCpu && snapBootPending()) { splashFinish(); return; }
   if (!splashDrawn) {
     startMs = millis();
     tft.fillScreen(TFT_BLACK);
@@ -853,6 +863,14 @@ void renderLoop(void *pvParameters)
     if (currentPlatform == PLATFORM_APPLE2 && apple2RenderLoadWarning())
     {
       oskPoll();
+      Vertical_blankingOn_Off = true;
+      vTaskDelay(pdMS_TO_TICKS(20));
+      continue;
+    }
+
+    // A snapshot load that restarted for its settings finishes here, behind a "Restoring" screen.
+    if (snapBootPoll())
+    {
       Vertical_blankingOn_Off = true;
       vTaskDelay(pdMS_TO_TICKS(20));
       continue;

@@ -1,5 +1,6 @@
 #include "../../emu.h"
 #include "atari.h"
+#include "atari_snap.h"
 
 // TIA video — the 2600 has no framebuffer in hardware: the program writes TIA registers in real
 // time as the electron beam scans ("racing the beam"). We emulate the beam at colour-clock (dot)
@@ -341,6 +342,46 @@ void tiaReset() {
   wsyncStall = false;
   pfDirty = true; spanX = 0;
   if (framebuffer) memset(framebuffer, 0, 160 * ATARI_FB_H);
+}
+
+// Snapshot (atari_snapshot.cpp). objLine/pfLine are per-span caches rebuilt from the registers
+// (pfDirty), pf20 is rebuilt from PF0-2. The framebuffer rows this field has already drawn
+// (0..outRow) are saved so the field in progress completes exactly as it would have.
+void tiaSnap(SnapIO &io) {
+  snapI32(io, colorClock); snapI32(io, scanline); snapI32(io, outRow); snapI32(io, spanX);
+  io.flag(vsync); io.flag(vblank);
+  io.val(colup0); io.val(colup1); io.val(colupf); io.val(colubk);
+  io.val(ctrlpf); io.val(pf0); io.val(pf1); io.val(pf2);
+  io.val(grp0New); io.val(grp0Old); io.val(grp1New); io.val(grp1Old);
+  snapI32(io, playerX[0]); snapI32(io, playerX[1]);
+  io.val(nusiz0); io.val(nusiz1);
+  io.flag(refp0); io.flag(refp1); io.flag(vdelp0); io.flag(vdelp1);
+  snapI32(io, missileX[0]); snapI32(io, missileX[1]);
+  io.flag(enam0); io.flag(enam1); io.flag(resmp0); io.flag(resmp1);
+  snapI32(io, ballX);
+  io.flag(enablNew); io.flag(enablOld); io.flag(vdelbl);
+  io.val(hmp0); io.val(hmp1); io.val(hmm0); io.val(hmm1); io.val(hmbl);
+  io.arr(collision);
+  if (!io.ok) return;
+  if (io.loading) {
+    // These index the framebuffer / object line: never trust them from a file.
+    if (colorClock < 0 || colorClock >= 228 || outRow < 0 || outRow > ATARI_FB_H ||
+        spanX < 0 || spanX > 160) {
+      colorClock = 0; outRow = 0; spanX = 0;
+      io.fail("Snapshot is damaged");
+      return;
+    }
+    playerX[0] = mod160(playerX[0]); playerX[1] = mod160(playerX[1]);
+    missileX[0] = mod160(missileX[0]); missileX[1] = mod160(missileX[1]);
+    ballX = mod160(ballX);
+    rebuildPf(); pfDirty = true;
+    wsyncStall = false;
+  }
+  if (!framebuffer) { io.fail("Atari framebuffer missing"); return; }
+  int rows = outRow < ATARI_FB_H ? outRow + 1 : ATARI_FB_H;
+  io.bytes(framebuffer, (size_t)rows * 160);
+  if (io.loading && rows < ATARI_FB_H)       // rows not reached yet: no leftovers from before the load
+    memset(framebuffer + rows * 160, 0, (size_t)(ATARI_FB_H - rows) * 160);
 }
 
 } // namespace atari

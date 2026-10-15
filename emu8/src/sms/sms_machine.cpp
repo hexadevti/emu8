@@ -11,6 +11,7 @@
 
 #include "sms.h"
 #include "../z80/z80_core.h"
+#include "../z80/z80_snapshot.h"
 #include <string.h>
 
 namespace sms {
@@ -51,6 +52,9 @@ void machineWire() {
 
 static bool pauseLatch = false;
 void smsPause() { pauseLatch = true; }            // SMS PAUSE button -> NMI (edge-triggered)
+
+// save state (sms_snapshot.cpp): the PAUSE NMI latched for the next frame boundary
+void pauseSnapshot(SnapIO &io) { io.flag(pauseLatch); }
 
 void machineReset() {
   vdpReset();

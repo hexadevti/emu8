@@ -40,7 +40,7 @@ static const RomSlotInfo kSlots[ROMSEL_COUNT] = {
 
 const RomSlotInfo &romSlotInfo(int slot) { return kSlots[slot]; }
 
-static const int kSlotBytes = ROMSEL_RECORDS * ROMSEL_SLOT_LEN;   // the ROM slots + the two base folders
+static const int kSlotBytes = ROMSEL_RECORDS * ROMSEL_SLOT_LEN;   // the ROM slots + the three base folders
 
 #if defined(BOARD_PICOCALC)
 #include <hardware/flash.h>
@@ -183,6 +183,14 @@ static bool setBaseDir(int rec, const char *dir, const char *def, const char *wh
 }
 bool setRomBaseDir(const char *dir)  { return setBaseDir(ROMSEL_BASE_ROMS, dir, "/roms", "ROM base"); }
 bool setAppsBaseDir(const char *dir) { return setBaseDir(ROMSEL_BASE_APPS, dir, "/", "apps base"); }
+
+// Snapshot base: save states go to <this>/<system>/ (snapshot.cpp), "/emu8-snapshot" unless changed.
+const char *snapBaseDir()
+{
+  static char d[ROMSEL_SLOT_LEN];
+  return recRead(ROMSEL_BASE_SNAP, d) ? d : SNAP_DEFAULT_DIR;
+}
+bool setSnapBaseDir(const char *dir) { return setBaseDir(ROMSEL_BASE_SNAP, dir, SNAP_DEFAULT_DIR, "snapshot base"); }
 
 // The default file for `slot`: its upstream name inside the ROM base folder. Static buffer.
 const char *romDefaultPath(int slot)

@@ -143,10 +143,23 @@ const char *romBaseDir();                 // general settings: folder of the def
 const char *appsBaseDir();                // general settings: where every file browser starts ("/")
 bool setRomBaseDir(const char *dir);      // nullptr = back to the default; commits
 bool setAppsBaseDir(const char *dir);
+#define SNAP_DEFAULT_DIR "/emu8-snapshot"
+const char *snapBaseDir();                // general settings: where snapshots go (<this>/<system>/)
+bool setSnapBaseDir(const char *dir);     // nullptr = back to the default; commits
 void romSelEraseAll();                    // EEPROM reset: every ROM pick and both base folders
 void eepromFactoryReset();                // eprom.cpp: wipe all saved settings (reboot afterwards)
 void optionsUiOpenGeneral();              // optionsui.cpp: general settings, over the system menu
 void optionsUiCloseGeneral();
+// Snapshots (save states): Ctrl-Shift-F5 opens a page of the settings window (optionsui.cpp) over
+// the paused machine; the files and the per-core state live in snapshot.cpp / snapshot.h.
+void snapshotWindowToggle();              // interface.cpp: open / close the snapshot page
+void optionsUiOpenSnap();                 // optionsui.cpp: the page itself (window already open)
+bool optionsUiSnapOpen();
+void optionsUiClosed();
+bool optionsUiSnapRestarting();      // snapshot page: about to reboot into restored settings
+bool snapBootPoll();                 // snapshot.cpp: render loop; true = a load after its restart owns the screen
+bool snapBootPending();              // snapshot.cpp: such a load is pending (the boot menu is skipped)
+bool snapBootBusy();                 // snapshot.cpp: it is under way (no menus over it)
 void uiDirScanProgress(int count);    // draw a "Loading…" bar while a directory is scanned (+yield)
 
 // video.cpp
@@ -196,6 +209,7 @@ int blue(int color);
 void renderLoop(void *pvParameters);
 void displayFlush();   // push the rendered frame to the panel (Arduino_GFX canvas); no-op on TFT_eSPI
 void displaySetUiMode(bool ui);   // true=UI scaled to full panel, false=emulator video centered; no-op on TFT_eSPI
+bool displayReadVideo(int x, int y, int w, int h, uint16_t *buf);   // read back the emulator video area (320x240 logical, RGB565); false = can't
 void displaySetVideoRect(int topLogical, int hLogical);   // active video content rect (for fill-screen); no-op on TFT_eSPI
 void displaySetVideoFill(int leftLogical, int wLogical, bool stretch);   // horizontal content rect + stretch-to-full-width (NES); no-op on TFT_eSPI
 
@@ -262,7 +276,6 @@ void HDSetup();
 void loadHdFilesSync();
 void hdBrowseEnter(const char *path); // navigate into a subdirectory and rescan
 void hdBrowseUp();                // navigate to the parent directory and rescan
-void loadHD();
 char HDSoftSwitchesRead(ushort address);
 void HDSoftSwitchesWrite(ushort address, char value);
 void getHdFileInfo(fs::FS &fs);
@@ -274,7 +287,6 @@ char loadBlock(unsigned short address, unsigned short block);
 ushort getBlockQty();
 void getBlock(fs::FS &fs, ushort block);
 void closeHdFile();
-void loadHDDir(fs::FS &fs, const char *dirname, uint8_t levels);
 
 // languagecard.cpp
 void languagecardWrite(ushort address, byte b);
@@ -478,7 +490,8 @@ void optionsUiAdjust(int dir);
 void optionsUiActivate();
 // Keyboard menu navigation (separate from the joystick trio above -- see optionsui.cpp).
 void optionsUiKeyArrow(int dx, int dy);   // -1 = left/up, +1 = right/down
-void optionsUiKeyEnter(bool ctrl = false);   // ctrl: file list -> mount AND reboot
+void optionsUiKeyEnter(bool ctrl = false, bool shift = false);   // ctrl: file list -> mount AND reboot; shift: snapshot page -> load
+bool optionsUiSnapKey(char c);             // snapshot page: S save / L load / D delete (false: not open)
 void optionsUiKeyUnmount();               // Del/Backspace: file list -> unmount the highlighted loaded entry
 bool optionsUiKeyEscape();                // false = nothing was open, caller closes the window
 

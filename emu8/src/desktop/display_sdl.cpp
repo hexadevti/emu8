@@ -97,15 +97,15 @@ void desktopGetCurrentWindowSize(int *w, int *h) {
 }
 
 // --- the PicoCalc's LCD link ---
-// On the device every pixel crosses an SPI link at F_CPU/4 (board.h LCD_SPI_HZ: 62.5MHz on the
-// RP2040 at 250MHz, 50MHz on the RP2350 at 200MHz), 16 bits each, and the render task waits for it.
+// On the device every pixel crosses an SPI link at F_CPU/4 (board.h LCD_SPI_HZ: 62.5MHz, both the
+// RP2040 and the RP2350 build at 250MHz), 16 bits each, and the render task waits for it.
 // That wire time is what sets the PicoCalc's frame rates (and why its cores push only changed bands),
 // so the simulator charges it too: drawing counts pixels, flush() sleeps until the link would be free.
 #if defined(EMU_SIM_PICOCALC)
 static std::atomic<uint32_t> g_wirePx{0};
 static inline void wire(int64_t n) { if (n > 0) g_wirePx.fetch_add((uint32_t)n, std::memory_order_relaxed); }
 static void wirePace() {
-  static const double hz = desktopDevice() == DEV_PICOCALC_RP2350 ? 50e6 : 62.5e6;
+  static const double hz = 62.5e6;
   static const uint64_t freq = SDL_GetPerformanceFrequency();
   static uint64_t busyUntil = 0;                       // when the link finishes what was sent so far
   const uint32_t n = g_wirePx.exchange(0, std::memory_order_relaxed);
@@ -391,6 +391,18 @@ void DisplayGFX::getTouchRaw(uint16_t *x, uint16_t *y) { if (x) *x = (uint16_t)_
 // --- free-function shims (declared in proto.h / display_sdl.h) ---
 void displayFlush() { tft.flush(); }
 void displaySetUiMode(bool ui) { tft.setUiMode(ui); }
+// The emulator video area, whatever the menu did to the logical offset (snapshot thumbnails).
+bool displayReadVideo(int x, int y, int w, int h, uint16_t *buf) { return tft.readVideo(x, y, w, h, buf); }
+bool DisplayGFX::readVideo(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t *buf) {
+#if defined(EMU_SIM_PICOCALC)
+  const int offY = SIM_OFFSET_Y;
+#else
+  const int offY = 0;
+#endif
+  if (!_fb || !buf || x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > W || y + offY + h > H) return false;
+  for (int r = 0; r < h; r++) memcpy(buf + (size_t)r * w, _fb + (size_t)(y + offY + r) * W + x, (size_t)w * 2);
+  return true;
+}
 bool desktopUiModeActive() { return tft.uiMode() || OptionsWindow; }
 // Cores report their active video content rect each frame (the rest of 320x240 is black border);
 // The S3/P4 panel presentation (ui_imgui.cpp) zooms this rect in SCREEN FILL, like display_gfx.cpp.

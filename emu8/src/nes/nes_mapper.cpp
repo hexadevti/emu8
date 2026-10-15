@@ -1,5 +1,6 @@
 #include "../../emu.h"
 #include "nes.h"
+#include "../shared/snapshot.h"
 
 // NES mapper layer. Phase 3a: mappers 0 (NROM), 1 (MMC1), 2 (UxROM), 3 (CNROM).
 //
@@ -100,14 +101,18 @@ static void mmc1Write(uint16_t addr, uint8_t val) {
 
 // ============================ UxROM (mapper 2) ===========================
 // 16K switchable bank at $8000, fixed last 16K at $C000. CHR is usually 8K RAM.
+static uint8_t uxromBank = 0;     // last bank written (kept for snapshots; the map is the live state)
 static void uxromWrite(uint16_t /*addr*/, uint8_t val) {
-  setPrg16k(0, val & 0x0F);
+  uxromBank = val & 0x0F;
+  setPrg16k(0, uxromBank);
 }
 
 // ============================ CNROM (mapper 3) ===========================
 // Fixed PRG (16K mirrored or 32K); 8K CHR bank selected by any write to $8000-$FFFF.
+static uint8_t cnromBank = 0;     // last bank written (kept for snapshots)
 static void cnromWrite(uint16_t /*addr*/, uint8_t val) {
-  setChr8k(val & 0x03);
+  cnromBank = val & 0x03;
+  setChr8k(cnromBank);
 }
 
 // ============================ MMC3 (mapper 4) ============================
@@ -162,7 +167,7 @@ static void mmc3ClockIrq() {
   if (mmc3IrqCounter == 0 && mmc3IrqEnable) irqLine = true;
 }
 
-void mapperClockScanline() {
+NES_HOT void mapperClockScanline() {
   if (mapperNum == 4) mmc3ClockIrq();
 }
 
@@ -176,6 +181,7 @@ void mapperInit() {
   if (prg8kCount >= 4) setPrg32k(0);
   else { setPrg16k(0, 0); setPrg16k(2, 0); }
   setChr8k(0);
+  uxromBank = 0; cnromBank = 0;
 
   switch (mapperNum) {
     case 1:   // MMC1: reset to power-on state, then apply
@@ -201,7 +207,7 @@ void mapperInit() {
   }
 }
 
-void mapperWrite(uint16_t addr, uint8_t val) {
+NES_HOT void mapperWrite(uint16_t addr, uint8_t val) {
   switch (mapperNum) {
     case 1: mmc1Write(addr, val);  break;
     case 2: uxromWrite(addr, val); break;
@@ -209,6 +215,34 @@ void mapperWrite(uint16_t addr, uint8_t val) {
     case 4: mmc3Write(addr, val);  break;
     default: break;  // NROM: $8000-$FFFF writes are ignored
   }
+}
+
+// Snapshot (src/nes/nes_snapshot.cpp): every mapper's registers, whatever the cart, so the layout is
+// fixed; on load the windows are rebuilt from them through the setters above -- prgMap/chrMap hold
+// pointers and are never saved. mirrorMode goes last because MMC1/MMC3 own it at run time.
+void mapperSnapshot(SnapIO &io) {
+  io.tag("MAPR");
+  io.val(mmc1Shift); io.val(mmc1Ctrl); io.val(mmc1Chr0); io.val(mmc1Chr1); io.val(mmc1Prg);
+  io.val(uxromBank); io.val(cnromBank);
+  io.val(mmc3BankSelect); io.arr(mmc3Regs); io.val(mmc3IrqLatch); io.val(mmc3IrqCounter);
+  io.flag(mmc3IrqReload); io.flag(mmc3IrqEnable);
+  uint8_t mir = mirrorMode;
+  io.val(mir);
+  if (!io.loading || !io.ok) return;
+
+  prg8kCount = prgRomSize / 8192;
+  chr1kCount = chrSize    / 1024;
+  if (prg8kCount >= 4) setPrg32k(0);              // the mapperInit() base map, then the mapper's own
+  else { setPrg16k(0, 0); setPrg16k(2, 0); }
+  setChr8k(0);
+  switch (mapperNum) {
+    case 1: mmc1ApplyBanks(); break;
+    case 2: setPrg16k(0, uxromBank); setPrg16k(2, prg8kCount / 2 - 1); break;
+    case 3: setChr8k(cnromBank); break;
+    case 4: mmc3UpdateBanks(); break;
+    default: break;
+  }
+  mirrorMode = mir & 3;
 }
 
 } // namespace nes

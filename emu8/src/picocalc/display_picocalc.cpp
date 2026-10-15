@@ -621,4 +621,101 @@ void displaySetUiMode(bool ui) { tft.setUiMode(ui); }
 void displaySetVideoRect(int, int) {}
 void displaySetVideoFill(int, int, bool) {}
 
+// ============================== read-back =====================================================
+// The emulator video area as it is on the panel, for the snapshot thumbnails: always the
+// letterboxed 320x240 (rows DISP_OFFSET_Y on), whatever the menu set the logical offset to.
+// RAMRD runs at a read clock far below the write one, so the clock drops for it and comes back.
+// What it answers -- dummy bytes, 2 or 3 bytes per pixel, RGB or BGR -- differs between ILI948x /
+// ST7365 units, so the first read probes it: three known pixels go into the black top bar, are read
+// back and matched against each layout, and the bar is painted black again.
+#define LCD_READ_HZ 5000000
+void printLog(const char *txt);              // interface.cpp
+static int8_t s_rdSkip = -1, s_rdBpp = 0;   // dummy bytes, bytes per pixel (0 = not probed / unknown)
+static bool s_rdBgr = false;
+
+static void rdBegin(int32_t x0, int32_t y0, int32_t x1, int32_t y1) {
+  uint8_t b[4];
+  wrCmd(0x2A);                                                  // CASET
+  b[0] = (uint8_t)(x0 >> 8); b[1] = (uint8_t)x0; b[2] = (uint8_t)(x1 >> 8); b[3] = (uint8_t)x1;
+  wrArgs(b, 4);
+  wrCmd(0x2B);                                                  // RASET
+  b[0] = (uint8_t)(y0 >> 8); b[1] = (uint8_t)y0; b[2] = (uint8_t)(y1 >> 8); b[3] = (uint8_t)y1;
+  wrArgs(b, 4);
+  spiIdle();
+  spi_set_baudrate(LCD_SPI, LCD_READ_HZ);
+  wrCmd(0x2E);                                                  // RAMRD
+  spiIdle();
+}
+static void rdEnd() {
+  spiIdle();
+  spi_set_baudrate(LCD_SPI, s_spiHz);
+  // A read only ends on a CS rising edge (a NOP does not), and CS is otherwise held low for good
+  // (note 2 at the top): without this pulse the panel stays in read mode and ignores every draw.
+  gpio_put(LCD_CS_PIN, 1);
+  busy_wait_us_32(2);
+  gpio_put(LCD_CS_PIN, 0);
+  busy_wait_us_32(1);
+  wrCmd(0x00);                                                  // NOP
+}
+static bool rdProbe() {
+  if (s_rdSkip >= 0) return s_rdBpp != 0;
+  static const uint16_t pat[3] = { 0xF800, 0x07E0, 0x001F };    // red, green, blue
+  for (int i = 0; i < 3; i++) panelFillRaw(i, 0, 1, 1, pat[i]);
+  uint8_t r[12];
+  rdBegin(0, 0, 2, 0);
+  spi_read_blocking(LCD_SPI, 0, r, sizeof(r));
+  rdEnd();
+  panelFillRaw(0, 0, 3, 1, TFT_BLACK);
+  s_rdSkip = 0; s_rdBpp = 0;
+  for (int d = 0; d <= 3 && !s_rdBpp; d++) {
+    const uint8_t *p = r + d;
+    uint8_t m[9];
+    for (int i = 0; i < 9; i++) m[i] = p[i] & 0xF8;
+    if      (m[0] == 0xF8 && !m[1] && !m[2] && !m[3] && m[4] == 0xF8 && !m[5] && !m[6] && !m[7] && m[8] == 0xF8) { s_rdBpp = 3; s_rdBgr = false; }
+    else if (!m[0] && !m[1] && m[2] == 0xF8 && !m[3] && m[4] == 0xF8 && !m[5] && m[6] == 0xF8 && !m[7] && !m[8]) { s_rdBpp = 3; s_rdBgr = true; }
+    else if (p[0] == 0xF8 && p[1] == 0x00 && p[2] == 0x07 && p[3] == 0xE0 && p[4] == 0x00 && p[5] == 0x1F)        { s_rdBpp = 2; s_rdBgr = false; }
+    else if (p[0] == 0x00 && p[1] == 0x1F && p[2] == 0x07 && p[3] == 0xE0 && p[4] == 0xF8 && p[5] == 0x00)        { s_rdBpp = 2; s_rdBgr = true; }
+    if (s_rdBpp) s_rdSkip = (int8_t)d;
+  }
+  char t[112];
+  snprintf(t, sizeof(t), "LCD read probe: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X -> %s",
+           r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11],
+           !s_rdBpp ? "unknown" : s_rdBpp == 3 ? (s_rdBgr ? "3B BGR" : "3B RGB") : (s_rdBgr ? "2B BGR" : "2B RGB"));
+  printLog(t);
+  if (s_rdBpp) { snprintf(t, sizeof(t), "LCD read probe: %d dummy byte(s)", s_rdSkip); printLog(t); }
+  return s_rdBpp != 0;
+}
+
+bool DisplayGFX::readVideo(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t *buf) {
+  pxFlush();
+  if (!buf || x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > DISP_LOGICAL_W || y + h > DISP_LOGICAL_H) return false;
+  pcd::stageDrain();
+  txWait();
+  if (!rdProbe()) return false;                                 // unknown answer: no picture beats a wrong one
+  const int32_t py = y + DISP_OFFSET_Y;
+  rdBegin(x, py, x + w - 1, py + h - 1);
+  uint8_t c[96];
+  if (s_rdSkip) spi_read_blocking(LCD_SPI, 0, c, (size_t)s_rdSkip);
+  const uint32_t n = (uint32_t)w * (uint32_t)h, bpp = (uint32_t)s_rdBpp, per = sizeof(c) / 6;
+  for (uint32_t i = 0; i < n; ) {
+    const uint32_t k = n - i > per ? per : n - i;
+    spi_read_blocking(LCD_SPI, 0, c, k * bpp);
+    for (uint32_t j = 0; j < k; j++, i++) {
+      const uint8_t *q = c + j * bpp;
+      uint16_t v;
+      if (bpp == 3) {
+        const uint8_t r8 = s_rdBgr ? q[2] : q[0], b8 = s_rdBgr ? q[0] : q[2];
+        v = (uint16_t)(((r8 & 0xF8) << 8) | ((q[1] & 0xFC) << 3) | (b8 >> 3));
+      } else {
+        v = (uint16_t)((q[0] << 8) | q[1]);
+        if (s_rdBgr) v = (uint16_t)((v >> 11) | (v & 0x07E0) | (v << 11));
+      }
+      buf[i] = v;
+    }
+  }
+  rdEnd();
+  return true;
+}
+bool displayReadVideo(int x, int y, int w, int h, uint16_t *buf) { return tft.readVideo(x, y, w, h, buf); }
+
 #endif // BOARD_PICOCALC

@@ -15,6 +15,7 @@
 // Controllers are active-LOW (a 0 bit = pressed). This file is Arduino-free (links into the harness).
 
 #include "sms.h"
+#include "../z80/z80_snapshot.h"
 
 namespace sms {
 
@@ -31,6 +32,14 @@ void setInput2(uint8_t mask) { pad2 = mask; }
 static uint8_t portA() { return (uint8_t)((pad1 & 0x3F) | ((pad2 & 0x03) << 6)); }
 // Controller port B ($DD): P2 left/right/TL/TR in b0-3; b4 RESET (1=released); TH pins b6-7 read high.
 static uint8_t portB() { return (uint8_t)(((pad2 >> 2) & 0x0F) | 0xF0); }
+
+// ---- save state (sms_snapshot.cpp): "SIO " = $3E memory control, $3F I/O control. The pads are
+// live input and stay as they are.
+void ioSnapshot(SnapIO &io) {
+  io.tag("SIO ");
+  io.val(memCtrl);
+  io.val(ioCtrl);
+}
 
 uint8_t ioIn(uint16_t port) {
   uint8_t p = (uint8_t)(port & 0xFF);
