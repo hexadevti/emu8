@@ -182,8 +182,12 @@
       //   arch=arm      FreeRTOS SMP does not work in RISC-V mode.
       //   os=freertos   selects the FreeRTOS SMP kernel (defines __FREERTOS); the shared code is
       //                 built around FreeRTOS tasks/semaphores.
-      //   freq=200      the RP2350 SPI baud divider is quantised: at the stock 150MHz sysclk the
-      //                 panel can only run at 37.5MHz, but 200MHz sysclk yields an exact 50MHz.
+      //   freq=250      the panel link is clk_peri/4 (board.h LCD_SPI_HZ), and display_picocalc.cpp
+      //                 runs clk_peri from clk_sys, so 250MHz gives the same 62.5MHz the RP2040
+      //                 build already proved on this panel. It was 200 (50MHz link); the extra 25%
+      //                 also goes to every interpreter -- the NES was visibly short of full speed.
+      //                 VREG stays at the default 1.10V (arduino-pico only raises it on the
+      //                 RP2040). If a unit is unstable here, go back to freq=200.
       // The -I puts src/picocalc/pico_shim first on the include path, so the sources that reach for
       // <esp_system.h> / <dirent.h> / "driver/i2s.h" / "EspUsbHost.h" by name resolve to the shims
       // (see pico_shim.h). BOARD_PICOCALC goes to the C compiler too.
@@ -199,12 +203,15 @@
       "args": [
         "compile",
         "--fqbn",
-        "rp2040:rp2040:rpipico2:arch=arm,os=freertos,freq=200,flash=4194304_65536,usbstack=picosdk,opt=Optimize2,exceptions=Enabled",
+        "rp2040:rp2040:rpipico2:arch=arm,os=freertos,freq=250,flash=4194304_65536,usbstack=picosdk,opt=Optimize2,exceptions=Enabled",
         "--verbose",
         "--build-property",
         "compiler.cpp.extra_flags=-DBOARD_PICOCALC -I${workspaceFolder}/emu8/src/picocalc/pico_shim",
         "--build-property",
         "compiler.c.extra_flags=-DBOARD_PICOCALC -I${workspaceFolder}/emu8/src/picocalc/pico_shim",
+        // Route every flash write through pico_shim.cpp, which restores fast XIP afterwards (RP2350 only).
+        "--build-property",
+        "compiler.c.elf.extra_flags=-Wl,--wrap=flash_range_erase -Wl,--wrap=flash_range_program",
         "--build-path",
         "${workspaceFolder}/.picocalc-rp2350-build",
         "--output-dir",
@@ -224,7 +231,7 @@
         "-p",
         "COM7",
         "--fqbn",
-        "rp2040:rp2040:rpipico2:arch=arm,os=freertos,freq=200,flash=4194304_65536,usbstack=picosdk,opt=Optimize2,exceptions=Enabled",
+        "rp2040:rp2040:rpipico2:arch=arm,os=freertos,freq=250,flash=4194304_65536,usbstack=picosdk,opt=Optimize2,exceptions=Enabled",
         "--verbose",
         "--input-dir",
         "${workspaceFolder}/build-picocalc",

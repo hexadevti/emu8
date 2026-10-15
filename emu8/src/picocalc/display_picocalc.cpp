@@ -58,6 +58,10 @@ namespace pcd {
   uint32_t stageFill = 0;
   uint8_t  stageHalf = 0;
   uint8_t  hsc = 0;
+  uint8_t  rowBlend = 0;
+  bool     smooth = false;      // setSmooth() armed for this window
+  bool     prevValid = false;   // stage[stageHalf ^ 1] holds the previous full row of this window
+  bool     holding = false;     // ...or a row marked setRowBlend(2), waiting for the next one
 }
 
 // ============================== low-level panel I/O ===========================================
@@ -187,7 +191,39 @@ namespace pcd {
 // A staging half just filled up: hand it to DMA and flip. txWait() joins the transfer started by
 // the PREVIOUS kick, which was on the other half -- that is the whole point of the ping-pong, the
 // decoder gets to refill one half while SPI is still draining the other.
+static inline uint16_t avg565(uint16_t a, uint16_t b) {
+  return (uint16_t)((((a ^ b) & 0xF7DE) >> 1) + (a & b));
+}
+// SCREEN: SMOOTH (setSmooth): a full row is blended before it goes out. Out of line, so the inline
+// writeColor() stays a plain store.
+static void smoothKick() {
+  uint16_t *cur = stage[stageHalf], *oth = stage[stageHalf ^ 1];
+  if (hsc)                                           // 7:8: the inserted pixel of each 8-pixel group
+    for (uint32_t i = 7; i < STAGE_LEN - 1; i += 8) cur[i] = avg565(cur[i - 1], cur[i + 1]);
+  const uint8_t mode = rowBlend;
+  rowBlend = 0;
+  if (holding) {                                     // the held row (oth) goes first, blended with this one
+    for (uint32_t i = 0; i < STAGE_LEN; i++) oth[i] = avg565(oth[i], cur[i]);
+    txWait();
+    txBuf(oth, STAGE_LEN);
+    holding = false;
+  } else if (mode == 1 && prevValid) {               // oth is the row above, still (only) being read by DMA
+    for (uint32_t i = 0; i < STAGE_LEN; i++) cur[i] = avg565(cur[i], oth[i]);
+  } else if (mode == 2) {                            // hold it; the next row lands in oth once it is idle
+    txWait();
+    holding = true;
+    stageHalf ^= 1;
+    stageFill  = 0;
+    return;
+  }
+  txWait();
+  txBuf(cur, STAGE_LEN);
+  stageHalf ^= 1;
+  stageFill  = 0;
+  prevValid  = true;
+}
 void stageKick() {
+  if (smooth && stageFill == STAGE_LEN) { smoothKick(); return; }
   txWait();
   txBuf(stage[stageHalf], stageFill);
   stageHalf ^= 1;
@@ -196,8 +232,14 @@ void stageKick() {
 // Flush a partially-filled half, in order, and join. Used before anything that reconfigures DMA
 // or moves the address window.
 void stageDrain() {
+  if (holding) {                                     // nothing followed it: send it unblended
+    txWait();
+    txBuf(stage[stageHalf ^ 1], STAGE_LEN);
+    holding = false;
+  }
   if (stageFill) stageKick();
   txWait();
+  prevValid = false;
 }
 // writeColor() with a large len: skip staging entirely and let DMA repeat one source word. Makes
 // the full-screen clear (writeColor(color, 320*240) in video.cpp) a single zero-CPU descriptor.
@@ -497,12 +539,16 @@ void DisplayGFX::startWrite() {
   pcd::stageFill = 0;                                // nothing carried over from a previous window
   pcd::stageHalf = 0;
   pcd::hsc = _hscale ? 7 : 0;                        // groups restart at the window origin
+  pcd::smooth = _smooth;
+  pcd::prevValid = pcd::holding = false;
+  pcd::rowBlend = 0;
   fmt16();
 }
 void DisplayGFX::endWrite() {
   pcd::stageDrain();
   pcd::hsc = 0;
-  _hscale = false;
+  pcd::smooth = false;
+  _hscale = _smooth = false;
 }
 
 // ---------- single pixels, coalesced into horizontal runs ----------
@@ -574,5 +620,102 @@ void displaySetUiMode(bool ui) { tft.setUiMode(ui); }
 // scaling straight into the 320x240 window, so there is nothing to record.
 void displaySetVideoRect(int, int) {}
 void displaySetVideoFill(int, int, bool) {}
+
+// ============================== read-back =====================================================
+// The emulator video area as it is on the panel, for the snapshot thumbnails: always the
+// letterboxed 320x240 (rows DISP_OFFSET_Y on), whatever the menu set the logical offset to.
+// RAMRD runs at a read clock far below the write one, so the clock drops for it and comes back.
+// What it answers -- dummy bytes, 2 or 3 bytes per pixel, RGB or BGR -- differs between ILI948x /
+// ST7365 units, so the first read probes it: three known pixels go into the black top bar, are read
+// back and matched against each layout, and the bar is painted black again.
+#define LCD_READ_HZ 5000000
+void printLog(const char *txt);              // interface.cpp
+static int8_t s_rdSkip = -1, s_rdBpp = 0;   // dummy bytes, bytes per pixel (0 = not probed / unknown)
+static bool s_rdBgr = false;
+
+static void rdBegin(int32_t x0, int32_t y0, int32_t x1, int32_t y1) {
+  uint8_t b[4];
+  wrCmd(0x2A);                                                  // CASET
+  b[0] = (uint8_t)(x0 >> 8); b[1] = (uint8_t)x0; b[2] = (uint8_t)(x1 >> 8); b[3] = (uint8_t)x1;
+  wrArgs(b, 4);
+  wrCmd(0x2B);                                                  // RASET
+  b[0] = (uint8_t)(y0 >> 8); b[1] = (uint8_t)y0; b[2] = (uint8_t)(y1 >> 8); b[3] = (uint8_t)y1;
+  wrArgs(b, 4);
+  spiIdle();
+  spi_set_baudrate(LCD_SPI, LCD_READ_HZ);
+  wrCmd(0x2E);                                                  // RAMRD
+  spiIdle();
+}
+static void rdEnd() {
+  spiIdle();
+  spi_set_baudrate(LCD_SPI, s_spiHz);
+  // A read only ends on a CS rising edge (a NOP does not), and CS is otherwise held low for good
+  // (note 2 at the top): without this pulse the panel stays in read mode and ignores every draw.
+  gpio_put(LCD_CS_PIN, 1);
+  busy_wait_us_32(2);
+  gpio_put(LCD_CS_PIN, 0);
+  busy_wait_us_32(1);
+  wrCmd(0x00);                                                  // NOP
+}
+static bool rdProbe() {
+  if (s_rdSkip >= 0) return s_rdBpp != 0;
+  static const uint16_t pat[3] = { 0xF800, 0x07E0, 0x001F };    // red, green, blue
+  for (int i = 0; i < 3; i++) panelFillRaw(i, 0, 1, 1, pat[i]);
+  uint8_t r[12];
+  rdBegin(0, 0, 2, 0);
+  spi_read_blocking(LCD_SPI, 0, r, sizeof(r));
+  rdEnd();
+  panelFillRaw(0, 0, 3, 1, TFT_BLACK);
+  s_rdSkip = 0; s_rdBpp = 0;
+  for (int d = 0; d <= 3 && !s_rdBpp; d++) {
+    const uint8_t *p = r + d;
+    uint8_t m[9];
+    for (int i = 0; i < 9; i++) m[i] = p[i] & 0xF8;
+    if      (m[0] == 0xF8 && !m[1] && !m[2] && !m[3] && m[4] == 0xF8 && !m[5] && !m[6] && !m[7] && m[8] == 0xF8) { s_rdBpp = 3; s_rdBgr = false; }
+    else if (!m[0] && !m[1] && m[2] == 0xF8 && !m[3] && m[4] == 0xF8 && !m[5] && m[6] == 0xF8 && !m[7] && !m[8]) { s_rdBpp = 3; s_rdBgr = true; }
+    else if (p[0] == 0xF8 && p[1] == 0x00 && p[2] == 0x07 && p[3] == 0xE0 && p[4] == 0x00 && p[5] == 0x1F)        { s_rdBpp = 2; s_rdBgr = false; }
+    else if (p[0] == 0x00 && p[1] == 0x1F && p[2] == 0x07 && p[3] == 0xE0 && p[4] == 0xF8 && p[5] == 0x00)        { s_rdBpp = 2; s_rdBgr = true; }
+    if (s_rdBpp) s_rdSkip = (int8_t)d;
+  }
+  char t[112];
+  snprintf(t, sizeof(t), "LCD read probe: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X -> %s",
+           r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11],
+           !s_rdBpp ? "unknown" : s_rdBpp == 3 ? (s_rdBgr ? "3B BGR" : "3B RGB") : (s_rdBgr ? "2B BGR" : "2B RGB"));
+  printLog(t);
+  if (s_rdBpp) { snprintf(t, sizeof(t), "LCD read probe: %d dummy byte(s)", s_rdSkip); printLog(t); }
+  return s_rdBpp != 0;
+}
+
+bool DisplayGFX::readVideo(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t *buf) {
+  pxFlush();
+  if (!buf || x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > DISP_LOGICAL_W || y + h > DISP_LOGICAL_H) return false;
+  pcd::stageDrain();
+  txWait();
+  if (!rdProbe()) return false;                                 // unknown answer: no picture beats a wrong one
+  const int32_t py = y + DISP_OFFSET_Y;
+  rdBegin(x, py, x + w - 1, py + h - 1);
+  uint8_t c[96];
+  if (s_rdSkip) spi_read_blocking(LCD_SPI, 0, c, (size_t)s_rdSkip);
+  const uint32_t n = (uint32_t)w * (uint32_t)h, bpp = (uint32_t)s_rdBpp, per = sizeof(c) / 6;
+  for (uint32_t i = 0; i < n; ) {
+    const uint32_t k = n - i > per ? per : n - i;
+    spi_read_blocking(LCD_SPI, 0, c, k * bpp);
+    for (uint32_t j = 0; j < k; j++, i++) {
+      const uint8_t *q = c + j * bpp;
+      uint16_t v;
+      if (bpp == 3) {
+        const uint8_t r8 = s_rdBgr ? q[2] : q[0], b8 = s_rdBgr ? q[0] : q[2];
+        v = (uint16_t)(((r8 & 0xF8) << 8) | ((q[1] & 0xFC) << 3) | (b8 >> 3));
+      } else {
+        v = (uint16_t)((q[0] << 8) | q[1]);
+        if (s_rdBgr) v = (uint16_t)((v >> 11) | (v & 0x07E0) | (v << 11));
+      }
+      buf[i] = v;
+    }
+  }
+  rdEnd();
+  return true;
+}
+bool displayReadVideo(int x, int y, int w, int h, uint16_t *buf) { return tft.readVideo(x, y, w, h, buf); }
 
 #endif // BOARD_PICOCALC

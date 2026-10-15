@@ -5,6 +5,8 @@
 #pragma once
 #include <stdint.h>
 
+struct SnapIO;   // src/shared/snapshot.h
+
 namespace msx {
 void    diskSetRom(const uint8_t* rom, int len);   // install (or null to remove) the disk ROM in slot 2
 void    diskSetImage(uint8_t* img, int size);      // mount a .dsk image already in memory
@@ -22,6 +24,7 @@ void    diskWrite(uint16_t addr, uint8_t v);       // slot-2 write (disk ROM reg
 uint8_t diskPeek(uint16_t addr);                   // desktop debugger: side-effect-free slot-2 read (no FDC advance)
 int     diskTrackCount();                          // desktop debugger: cylinders in the mounted .dsk (rings for the heat map)
 #endif
+void    diskSnapshot(SnapIO &io);              // save state: WD2793 registers + sector buffer
 // SD write-back: the FDC marks written sectors dirty; the device layer drains them to the .dsk file.
 bool    diskHasDirty();
 int     diskTakeDirtySector(const uint8_t** data, uint32_t* offset);   // next dirty sector (clears it); -1 = none

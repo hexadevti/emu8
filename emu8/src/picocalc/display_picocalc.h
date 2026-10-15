@@ -58,6 +58,7 @@ namespace pcd {
   extern uint32_t stageFill;                          // pixels held in stage[stageHalf]
   extern uint8_t  stageHalf;
   extern uint8_t  hsc;                                // 7:8 upscale countdown, 0 = off (see setHScale78)
+  extern uint8_t  rowBlend;                           // setRowBlend() for the row being written
   void stageKick();                                   // DMA the full half, flip, reset stageFill
   void stageDrain();                                  // push a partial half and join the transfer
   void bulkFill(uint16_t color, uint32_t len);        // read-increment-off DMA of `len` copies
@@ -94,6 +95,7 @@ public:
                                              // MSB-first, i.e. native RGB565 (same as the
                                              // Arduino_GFX and SDL backends, which also ignore it)
   void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data);
+  bool readVideo(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t *buf);   // displayReadVideo
   void pushImageAsync(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data);  // returns at once
   bool pushBusy();                  // pushImageAsync still sending
   void pushWait();                  // until it is done
@@ -128,6 +130,12 @@ public:
   // goes out twice, so a 280-wide raster fills a 320-wide window (7:8, nearest neighbour). One-shot
   // so no other window can inherit it; endWrite() turns it off.
   void setHScale78(bool on) { _hscale = on; }
+  // Apple II SCREEN: SMOOTH. Also one-shot per window, rows must be exactly the 320-px stage: each
+  // full row is post-processed before it is sent. With setHScale78 the inserted 8th pixel of every
+  // group becomes the average of its neighbours; a row marked setRowBlend(1) is averaged with the
+  // row above it, and one marked 2 is held back and averaged with the row that follows it.
+  void setSmooth(bool on) { _smooth = on; }
+  void setRowBlend(uint8_t mode) { pcd::rowBlend = mode; }
 
   // text
   void    setTextDatum(uint8_t d) { _datum = d; }
@@ -167,6 +175,7 @@ private:
   bool      _rawText = false;       // drawPanelString(): skip the logical clip + DISP_OFFSET_Y
   bool      _swap = false;
   bool      _hscale = false;        // setHScale78(): armed for the next startWrite()
+  bool      _smooth = false;        // setSmooth(): armed for the next startWrite()
   int32_t   _spanX = 0, _spanY = -1, _spanLen = 0;   // pending horizontal run (_spanY < 0 = none)
   uint16_t  _spanColor = 0;
   int32_t   _offY = DISP_OFFSET_Y;  // panel row of logical row 0 (0 in full-panel mode)

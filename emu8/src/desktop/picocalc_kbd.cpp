@@ -198,6 +198,10 @@ static void handleEvent(uint8_t state, uint8_t code)
       splashOpen();
       return;
     }
+    if (code == PCK_F10 || (code == PCK_F5 && shiftHeld())) {         // Ctrl-Shift-F5: snapshots
+      snapshotWindowToggle();
+      return;
+    }
     if (code == PCK_F1) { tapHid(HID_KEY_F10); return; }              // settings menu
     if (code == PCK_F3) { tapHid(HID_KEY_F11); return; }              // CPU reset
   }
@@ -236,7 +240,8 @@ static void handleEvent(uint8_t state, uint8_t code)
 static uint8_t shiftedCode(uint8_t k)
 {
   if (k >= 'a' && k <= 'z') return (uint8_t)(k - 'a' + 'A');
-  if (k >= PCK_F1 && k <= PCK_F5) return (uint8_t)(k + 5);      // Shift-F1..F5 arrive as F6..F10
+  if (k == PCK_F5) return PCK_F10;                               // F10 is 0x90, not F5 + 5
+  if (k >= PCK_F1 && k <= PCK_F4) return (uint8_t)(k + 5);      // Shift-F1..F5 arrive as F6..F10
   switch (k) {
     case '1': return '!';  case '2': return '@';  case '3': return '#';  case '4': return '$';
     case '5': return '%';  case '6': return '^';  case '7': return '&';  case '8': return '*';
@@ -288,7 +293,8 @@ bool pcSimHostKey(int sc, bool down, bool repeat)
   uint8_t k = 0;
   if (sc >= SDL_SCANCODE_A && sc <= SDL_SCANCODE_Z) k = (uint8_t)('a' + (sc - SDL_SCANCODE_A));
   else if (sc >= SDL_SCANCODE_1 && sc <= SDL_SCANCODE_9) k = (uint8_t)('1' + (sc - SDL_SCANCODE_1));
-  else if (sc >= SDL_SCANCODE_F1 && sc <= SDL_SCANCODE_F10) k = (uint8_t)(PCK_F1 + (sc - SDL_SCANCODE_F1));
+  else if (sc == SDL_SCANCODE_F10) k = PCK_F10;
+  else if (sc >= SDL_SCANCODE_F1 && sc <= SDL_SCANCODE_F9) k = (uint8_t)(PCK_F1 + (sc - SDL_SCANCODE_F1));
   else switch (sc) {
     case SDL_SCANCODE_0:            k = '0';  break;
     case SDL_SCANCODE_SPACE:        k = ' ';  break;
@@ -331,5 +337,9 @@ bool pcSimHostKey(int sc, bool down, bool repeat)
   pcSimPhysKey(k, down, repeat);
   return true;
 }
+
+// The STM32's battery register (input_picocalc.cpp): a fixed reading, so the gauge shows in the menus.
+int  picocalcBatteryPercent()  { return 76; }
+bool picocalcBatteryCharging() { return false; }
 
 #endif // BOARD_DESKTOP && EMU_SIM_PICOCALC

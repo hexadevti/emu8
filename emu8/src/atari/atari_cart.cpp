@@ -1,6 +1,7 @@
 #include "../../emu.h"
 #include "atari.h"
 #include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
+#include "atari_snap.h"
 
 // Atari 2600 cartridge loader. ROMs are raw images (no header) identified purely by size:
 //   2K / 4K  -> not bank-switched (2K mirrors into the 4K window)
@@ -77,6 +78,43 @@ void cartWrite(uint16_t addr, uint8_t val) {
   checkHotspot(a);
 }
 
+// ---- snapshot (atari_snapshot.cpp) ----
+// Cartridge identity: size + scheme + Superchip + FNV-1a of the ROM. Loading reads the file's id
+// into locals and rejects a different (or no) cart before anything in the machine changes.
+bool cartSnapCheck(SnapIO &io) {
+  uint32_t size = 0, sum = 2166136261u;
+  uint8_t  type = 0, sc = 0;
+  if (cartRom) {
+    size = cartSize; type = (uint8_t)cartType; sc = hasSC ? 1 : 0;
+    for (uint32_t i = 0; i < cartSize; i++) { sum ^= cartRom[i]; sum *= 16777619u; }
+  }
+  if (!io.loading) {
+    if (!cartRom) { io.fail("No cartridge loaded"); return false; }
+    io.val(size); io.val(type); io.val(sc); io.val(sum);
+    return io.ok;
+  }
+  uint32_t fSize = 0, fSum = 0;
+  uint8_t  fType = 0, fSc = 0;
+  io.val(fSize); io.val(fType); io.val(fSc); io.val(fSum);
+  if (!io.ok) { io.rejected = true; return false; }   // short read: nothing overwritten yet
+  if (!cartRom || fSize != size || fType != type || fSc != sc || fSum != sum) {
+    io.reject("Load the same cartridge first");
+    return false;
+  }
+  return true;
+}
+
+// Bank-switch state: the bank NUMBER (cartRead indexes the ROM with it -- no pointer to rebuild)
+// and the Superchip RAM. Called after cartSnapCheck, so the scheme matches the running cart.
+void cartSnap(SnapIO &io) {
+  snapI32(io, cartBank);
+  if (io.loading && io.ok) {
+    int banks = (cartType == CART_F8) ? 2 : (cartType == CART_F6) ? 4 : (cartType == CART_F4) ? 8 : 1;
+    if (cartBank < 0 || cartBank >= banks) { cartBank = 0; io.fail("Snapshot is damaged"); return; }
+  }
+  if (hasSC) io.bytes(scRam, 128);     // hasSC implies scRam (atariLoadROM drops SC without RAM)
+}
+
 bool atariLoadROM(const char *path) {
   File f = FSTYPE.open(path, FILE_READ);
   if (!f) { sprintf(buf, "Atari: cannot open %s", path); printLog(buf); return false; }
@@ -121,7 +159,7 @@ bool atariLoadROM(const char *path) {
 }
 
 // Scan the SD root for *.a26 / *.bin files into the global atariFiles list (full paths).
-#define ATARI_MAX_FILES 200
+#define ATARI_MAX_FILES FB_MAX_ENTRIES
 // SD ROM browser (.a26/.bin + subdirectories); see src/shared/filebrowser.h.
 static bool atariAccept(const std::string &n) {
   return endsWithCI(n, ".a26") || endsWithCI(n, ".bin");

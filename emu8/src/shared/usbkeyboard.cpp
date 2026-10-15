@@ -545,6 +545,10 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
     // arrows then change the value inside it; Escape backs out of whatever Enter opened, and
     // Escape with nothing open closes the window. The joystick keeps its own simpler scheme
     // (optionsUiNav/Adjust/Activate) -- see the note in optionsui.cpp.
+    // Ctrl-Shift-F5: the snapshot page (save / load the machine's state), from anywhere but the
+    // system menu; again closes it. (The PicoCalc keyboards take it before it gets here.)
+    if (kc == HID_KEY_F5 && ctrl && shift) { snapshotWindowToggle(); continue; }
+
     if (OptionsWindow) {
       switch (kc) {
         case HID_KEY_ARROW_LEFT:   optionsUiKeyArrow(-1,  0); break;
@@ -552,11 +556,14 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
         case HID_KEY_ARROW_UP:     optionsUiKeyArrow( 0, -1); break;
         case HID_KEY_ARROW_DOWN:   optionsUiKeyArrow( 0, +1); break;
         case HID_KEY_ENTER:
-        case HID_KEY_KEYPAD_ENTER: optionsUiKeyEnter(ctrl); break;
+        case HID_KEY_KEYPAD_ENTER: optionsUiKeyEnter(ctrl, shift); break;
         case HID_KEY_ESCAPE:       if (!optionsUiKeyEscape()) showHideOptionsWindow(); break;
         case HID_KEY_DELETE:
         case HID_KEY_BACKSPACE:    optionsUiKeyUnmount(); break;   // file list: unmount the loaded entry
         case HID_KEY_F10:          showHideOptionsWindow(); break;
+        case HID_KEY_S:            optionsUiSnapKey('s'); break;   // snapshot page: SAVE (S) / LOAD (L) / DELETE (D)
+        case HID_KEY_L:            optionsUiSnapKey('l'); break;
+        case HID_KEY_D:            optionsUiSnapKey('d'); break;
       }
       continue;   // menu swallows every key
     }

@@ -87,6 +87,9 @@ public:
 
   TimerInfo const & timerInfo(int timerIndex) { return m_timer[timerIndex]; }
 
+  // save state (fabgl.h PcSnap); a load restarts the real-time pacer from now, no catch-up
+  void snapshot(PcSnap & s);
+
 
 private:
 

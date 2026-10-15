@@ -79,7 +79,7 @@ static bool loadBiosFromSD() {
 
 // SD cartridge browser (.col/.rom/.bin + subdirectories); see src/shared/filebrowser.h.
 // The BIOS image stays hidden -- it is loaded by name, not picked.
-#define COLECO_MAX_FILES 200
+#define COLECO_MAX_FILES FB_MAX_ENTRIES
 static bool colAccept(const std::string &n) {
   if (isBiosName(n)) return false;
   return colEndsCI(n, ".col") || colEndsCI(n, ".rom") || colEndsCI(n, ".bin");
@@ -257,6 +257,7 @@ void colecoRenderFrame() {
 void colecoSetInput(uint8_t joyMask) { coleco::setInput(0, joyMask); }
 void colecoSetKeypad(int key)        { coleco::setKeypad(0, key); }
 void colecoHardReset()               { colResetReq = true; }   // power-cycle: BIOS title -> cart (F12)
+void colecoCancelReset()             { colResetReq = false; }  // snapshot loaded: resume it, do not reset
 
 // ---- settings hooks ----
 bool colecoLoadSelected(const char* path) {

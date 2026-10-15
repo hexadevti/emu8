@@ -24,6 +24,7 @@
 #include "../msx/msx.h"   // the TMS9918A (msx::vdp*) and its vram/framebuffer pointers
 #include "../sms/sms.h"   // the SN76489 (sms::psgWrite)
 #include "../z80/z80_core.h"
+#include "../z80/z80_snapshot.h"
 
 namespace coleco {
 
@@ -138,6 +139,17 @@ void machineReset() {
   nmiLine = false;
   megaBase = 0;
   cpu.reset();                        // PC = 0x0000 -> BIOS (title screen, then the cartridge)
+}
+
+// ---- save state (coleco_snapshot.cpp) ------------------------------------------------------------
+// "CMAC" record: the MegaCart bank at 0xC000 (ROM offset, u32), controller mode, sampled NMI level.
+// The pads themselves are live input and stay as they are.
+void machineSnapshot(SnapIO &io) {
+  io.tag("CMAC");
+  io.val(megaBase);
+  io.flag(keypadMode);
+  io.flag(nmiLine);
+  if (io.loading) { megaBase &= ~0x3FFFu; if (!megaBanks || megaBase >= (uint32_t)romLen) megaBase = 0; }
 }
 
 // ---- per-frame execution --------------------------------------------------------------------------

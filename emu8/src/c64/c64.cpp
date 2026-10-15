@@ -388,6 +388,9 @@ static void c64RenderBitmap() {
   }
 }
 
+// After a snapshot load: the rows on the panel are the old machine's, so send the next frame whole.
+void c64VideoInvalidate() { c64RowHashValid = false; }
+
 // Render a frame. Uses the full VIC-II framebuffer when it was allocated; otherwise falls
 // back to the direct text-mode renderer below (standard char mode only).
 //

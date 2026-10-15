@@ -1,5 +1,6 @@
 #include "../../emu.h"
 #include "atari.h"
+#include "atari_snap.h"
 
 // 6532 RIOT: 128 bytes of RAM, an interval timer, and two 8-bit I/O ports (SWCHA = joysticks,
 // SWCHB = console switches). The RAM is the 2600's only RAM; it doubles as the CPU stack
@@ -78,6 +79,23 @@ void riotTick(int cycles) {
       instat       |= 0xC0;             // set the timer-underflow flag (bit7)
     } else {
       timerValue--;
+    }
+  }
+}
+
+// Snapshot (atari_snapshot.cpp). The input latches are restored too, though the joystick task
+// rewrites them on its next poll with whatever is held now.
+void riotSnap(SnapIO &io) {
+  if (!riotRam) { io.fail("Atari RAM missing"); return; }
+  io.bytes(riotRam, 128);
+  io.val(outa); io.val(ddra); io.val(outb); io.val(ddrb);
+  io.val(timerValue); io.val(timerInterval); snapI32(io, timerCycleAcc); io.val(instat);
+  snapU8v(io, swcha); snapU8v(io, swchb); snapU8v(io, inpt4); snapU8v(io, inpt5);
+  if (io.loading && io.ok) {
+    if ((timerInterval != 1 && timerInterval != 8 && timerInterval != 64 && timerInterval != 1024) ||
+        timerCycleAcc < 0 || timerCycleAcc >= (int)timerInterval) {
+      timerInterval = 1024; timerCycleAcc = 0;
+      io.fail("Snapshot is damaged");
     }
   }
 }

@@ -97,15 +97,15 @@ void desktopGetCurrentWindowSize(int *w, int *h) {
 }
 
 // --- the PicoCalc's LCD link ---
-// On the device every pixel crosses an SPI link at F_CPU/4 (board.h LCD_SPI_HZ: 62.5MHz on the
-// RP2040 at 250MHz, 50MHz on the RP2350 at 200MHz), 16 bits each, and the render task waits for it.
+// On the device every pixel crosses an SPI link at F_CPU/4 (board.h LCD_SPI_HZ: 62.5MHz, both the
+// RP2040 and the RP2350 build at 250MHz), 16 bits each, and the render task waits for it.
 // That wire time is what sets the PicoCalc's frame rates (and why its cores push only changed bands),
 // so the simulator charges it too: drawing counts pixels, flush() sleeps until the link would be free.
 #if defined(EMU_SIM_PICOCALC)
 static std::atomic<uint32_t> g_wirePx{0};
 static inline void wire(int64_t n) { if (n > 0) g_wirePx.fetch_add((uint32_t)n, std::memory_order_relaxed); }
 static void wirePace() {
-  static const double hz = desktopDevice() == DEV_PICOCALC_RP2350 ? 50e6 : 62.5e6;
+  static const double hz = 62.5e6;
   static const uint64_t freq = SDL_GetPerformanceFrequency();
   static uint64_t busyUntil = 0;                       // when the link finishes what was sent so far
   const uint32_t n = g_wirePx.exchange(0, std::memory_order_relaxed);
@@ -252,10 +252,37 @@ void DisplayGFX::writeColor(uint16_t color, uint32_t len) {
     if (reps == 2) wire(1);
     for (int rep = reps; rep; rep--) {
       if ((unsigned)_curX < (unsigned)W && (unsigned)_curY < (unsigned)H) _fb[_curY * W + _curX] = color;
-      if (++_curX >= xEnd) { _curX = _winX; if (++_curY >= yEnd) _curY = _winY; }
+      if (++_curX >= xEnd) {
+        if (_smoothOn) smoothRow(_curY);
+        _curX = _winX; if (++_curY >= yEnd) _curY = _winY;
+      }
     }
     if (scale && _hsc == 0) _hsc = 7;
   }
+}
+
+// SCREEN: SMOOTH, the device's smoothKick() (display_picocalc.cpp) on the framebuffer row just done.
+static inline uint16_t avg565(uint16_t a, uint16_t b) {
+  return (uint16_t)((((a ^ b) & 0xF7DE) >> 1) + (a & b));
+}
+void DisplayGFX::smoothRow(int32_t y) {
+  const uint8_t mode = _rowBlend;
+  _rowBlend = 0;
+  if ((unsigned)y >= (unsigned)H || _winX < 0 || _winX + _winW > W) { _prevValid = false; return; }
+  uint16_t *r = _fb + y * W + _winX;
+  if (_hscale)
+    for (int32_t i = 7; i < _winW - 1; i += 8) r[i] = avg565(r[i - 1], r[i + 1]);
+  if (_heldY >= 0) {
+    uint16_t *h = _fb + _heldY * W + _winX;
+    for (int32_t i = 0; i < _winW; i++) h[i] = avg565(h[i], r[i]);
+    _heldY = -1;
+  } else if (mode == 1 && _prevValid && y > 0) {
+    const uint16_t *u = r - W;
+    for (int32_t i = 0; i < _winW; i++) r[i] = avg565(r[i], u[i]);
+  } else if (mode == 2) {
+    _heldY = y;
+  }
+  _prevValid = true;
 }
 
 // --- text: 1:1 bitmap fonts (src/shared/uitext.h), identical to the PicoCalc's ---
@@ -364,6 +391,18 @@ void DisplayGFX::getTouchRaw(uint16_t *x, uint16_t *y) { if (x) *x = (uint16_t)_
 // --- free-function shims (declared in proto.h / display_sdl.h) ---
 void displayFlush() { tft.flush(); }
 void displaySetUiMode(bool ui) { tft.setUiMode(ui); }
+// The emulator video area, whatever the menu did to the logical offset (snapshot thumbnails).
+bool displayReadVideo(int x, int y, int w, int h, uint16_t *buf) { return tft.readVideo(x, y, w, h, buf); }
+bool DisplayGFX::readVideo(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t *buf) {
+#if defined(EMU_SIM_PICOCALC)
+  const int offY = SIM_OFFSET_Y;
+#else
+  const int offY = 0;
+#endif
+  if (!_fb || !buf || x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > W || y + offY + h > H) return false;
+  for (int r = 0; r < h; r++) memcpy(buf + (size_t)r * w, _fb + (size_t)(y + offY + r) * W + x, (size_t)w * 2);
+  return true;
+}
 bool desktopUiModeActive() { return tft.uiMode() || OptionsWindow; }
 // Cores report their active video content rect each frame (the rest of 320x240 is black border);
 // The S3/P4 panel presentation (ui_imgui.cpp) zooms this rect in SCREEN FILL, like display_gfx.cpp.

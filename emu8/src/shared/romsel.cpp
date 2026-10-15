@@ -40,15 +40,16 @@ static const RomSlotInfo kSlots[ROMSEL_COUNT] = {
 
 const RomSlotInfo &romSlotInfo(int slot) { return kSlots[slot]; }
 
-static const int kSlotBytes = ROMSEL_RECORDS * ROMSEL_SLOT_LEN;   // the ROM slots + the two base folders
+static const int kSlotBytes = ROMSEL_RECORDS * ROMSEL_SLOT_LEN;   // the ROM slots + the three base folders
 
 #if defined(BOARD_PICOCALC)
 #include <hardware/flash.h>
 extern "C" uint8_t _FS_end;
 
-// Erased flash reads 0xFF, which romOverride() already takes as "no pick".
-static const uint8_t *romSelSector() { return &_FS_end - FLASH_SECTOR_SIZE; }
-static uint8_t romSelRead(int off)   { return romSelSector()[off]; }
+// Erased flash reads 0xFF, which romOverride() already takes as "no pick". Relocated into the
+// flash the firmware can see (picoFlashRelocate, pico_shim.h); if there is none, no picks at all.
+static const uint8_t *romSelSector() { return (const uint8_t *)picoFlashRelocate(&_FS_end - FLASH_SECTOR_SIZE); }
+static uint8_t romSelRead(int off)   { return picoFlashMapOk() ? romSelSector()[off] : 0xFF; }
 
 // Rewrite the slot area with `len` bytes at `off` replaced. The rest is staged in a short-lived
 // buffer (the ROMS page has already dropped its file list by now) and programmed with the same
@@ -56,6 +57,7 @@ static uint8_t romSelRead(int off)   { return romSelSector()[off]; }
 // FreeRTOS interrupts masked and the scheduler suspended, so nothing fetches from flash meanwhile.
 static bool romSelWrite(int off, const uint8_t *data, int len)
 {
+  if (!picoFlashMapOk()) return false;
   const uint8_t *sec = romSelSector();
   if (memcmp(sec + off, data, len) == 0) return true;               // unchanged: no erase
   const size_t n = (kSlotBytes + FLASH_PAGE_SIZE - 1) & ~(size_t)(FLASH_PAGE_SIZE - 1);
@@ -63,7 +65,7 @@ static bool romSelWrite(int off, const uint8_t *data, int len)
   if (!img) { printLog("ROMSEL: no heap to stage the flash write"); return false; }
   memcpy(img, sec, n);
   memcpy(img + off, data, len);
-  const uint32_t at = (uint32_t)((uintptr_t)sec - XIP_BASE);
+  const uint32_t at = picoFlashOffset((uintptr_t)sec);
   ampDmaPause(true);                                                 // as in romflash_picocalc.cpp
 #ifndef __FREERTOS
   noInterrupts();
@@ -83,7 +85,8 @@ static bool romSelWrite(int off, const uint8_t *data, int len)
 // EEPROM reset: an erased sector is every slot and both base folders back to their defaults.
 void romSelEraseAll()
 {
-  const uint32_t at = (uint32_t)((uintptr_t)romSelSector() - XIP_BASE);
+  if (!picoFlashMapOk()) return;
+  const uint32_t at = picoFlashOffset((uintptr_t)romSelSector());
   ampDmaPause(true);
 #ifndef __FREERTOS
   noInterrupts();
@@ -183,6 +186,14 @@ static bool setBaseDir(int rec, const char *dir, const char *def, const char *wh
 }
 bool setRomBaseDir(const char *dir)  { return setBaseDir(ROMSEL_BASE_ROMS, dir, "/roms", "ROM base"); }
 bool setAppsBaseDir(const char *dir) { return setBaseDir(ROMSEL_BASE_APPS, dir, "/", "apps base"); }
+
+// Snapshot base: save states go to <this>/<system>/ (snapshot.cpp), "/emu8-snapshot" unless changed.
+const char *snapBaseDir()
+{
+  static char d[ROMSEL_SLOT_LEN];
+  return recRead(ROMSEL_BASE_SNAP, d) ? d : SNAP_DEFAULT_DIR;
+}
+bool setSnapBaseDir(const char *dir) { return setBaseDir(ROMSEL_BASE_SNAP, dir, SNAP_DEFAULT_DIR, "snapshot base"); }
 
 // The default file for `slot`: its upstream name inside the ROM base folder. Static buffer.
 const char *romDefaultPath(int slot)

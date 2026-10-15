@@ -17,6 +17,19 @@
 
 #include <cstdint>
 
+struct SnapIO;   // src/shared/snapshot.h
+
+// PicoCalc RP2350: the 6502 loop, the bus, the scanline PPU and the APU sample generator run from
+// SRAM, as the C64's do (C64_HOT, src/c64/c64.h). From flash they fetch through the 16K XIP cache
+// that both cores share, and the render task's panel code on the other core keeps evicting them.
+// The RP2350 has ~265K of heap to spare for it. Not on the RP2040 (Cortex-M0+, __ARM_ARCH_6M__):
+// its heap is too tight to pay for the move, and other boards keep their default placement.
+#if defined(BOARD_PICOCALC) && !defined(__ARM_ARCH_6M__)
+#define NES_HOT IRAM_ATTR
+#else
+#define NES_HOT
+#endif
+
 namespace nes {
 
 // Nametable mirroring (mapper 0 uses HORIZONTAL or VERTICAL from the iNES header).
@@ -150,6 +163,15 @@ uint8_t apuReadStatus();                       // $4015 read (length-counter sta
 extern const uint16_t nesPalette[64];
 extern uint16_t nesPaletteGray[64];      // luma version used when VIDEO toggle = MONO
 void nesBuildGrayPalette();              // fill nesPaletteGray from nesPalette (call once at boot)
+
+// ---- snapshots (src/nes/nes_snapshot.cpp drives these; each lives next to the state it owns) ----
+bool cartChecksum(uint32_t &sum);        // nes_cart.cpp: PRG/CHR fingerprint (false = no cart)
+void mapperSnapshot(SnapIO &io);         // nes_mapper.cpp: registers; rebuilds the bank windows on load
+void ppuSnapshot(SnapIO &io);            // nes_ppu.cpp: registers, loopy, frame position, OAM/palette/VRAM
+void apuSnapshot(SnapIO &io);            // nes_apu.cpp: channel registers + counters
+void ctrlSnapshot(SnapIO &io);           // nes_memory.cpp: controller shift register + strobe
+void cpuSnapRestored();                  // nes_cpu.cpp: cancel the reset a ROM load left pending
+
 
 } // namespace nes
 

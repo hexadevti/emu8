@@ -18,6 +18,7 @@
 
 #include "msx.h"
 #include "msx_cart.h"
+#include "../z80/z80_snapshot.h"
 #include <string.h>
 
 namespace msx {
@@ -115,6 +116,21 @@ static int detectMapper(const uint8_t* d, int size) {
 }
 
 int cartMapper(int slot) { return (slot >= 1 && slot <= 2) ? g_cart[slot].mapper : -1; }
+
+// ---- save state (msx_snapshot.cpp) -------------------------------------------------------------
+// The image is not saved (flash / PSRAM); msx_snapshot.cpp identifies it through cartImage(). The
+// "CART" record holds what the program changed: the four 8K bank registers and the SCC enable.
+const uint8_t* cartImage(int slot, int* len) {
+  if (slot < 1 || slot > 2) { *len = 0; return nullptr; }
+  *len = g_cart[slot].data ? g_cart[slot].size : 0;
+  return g_cart[slot].data;
+}
+void cartSnapshot(SnapIO &io, int slot) {
+  Cart& c = g_cart[slot];
+  io.tag("CART");
+  io.arr(c.bank8k);
+  io.flag(c.sccEnabled);
+}
 
 } // namespace msx
 

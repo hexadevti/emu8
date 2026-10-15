@@ -16,6 +16,7 @@
 // touch/USB keyboards drive it through msxKeyMatrix (see msx.cpp).
 
 #include "msx.h"
+#include "../z80/z80_snapshot.h"
 
 namespace msx {
 
@@ -50,6 +51,16 @@ void ppiWrite(uint8_t port, uint8_t v) {
       break;
     default: break;
   }
+}
+
+// ---- save state (msx_snapshot.cpp) -------------------------------------------------------------
+// "PPI " record: port A (primary-slot select) and port C (keyboard row, CAPS, click). The key
+// matrix is live input: on load every key is released rather than restoring keys nobody holds.
+void ppiSnapshot(SnapIO &io) {
+  io.tag("PPI ");
+  io.val(ppiA);
+  io.val(ppiC);
+  if (io.loading) kbReset();
 }
 
 void kbSetKey(int row, int col, bool down) {

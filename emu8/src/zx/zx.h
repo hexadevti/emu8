@@ -17,6 +17,8 @@
 #include <stdint.h>
 #include "../z80/z80.h"
 
+struct SnapIO;   // src/shared/snapshot.h (save states; only the snapshot code includes it)
+
 namespace zx {
 
 static const int ROM_SIZE   = 0x4000;             // 16 KB ROM at 0x0000-0x3FFF
@@ -60,6 +62,8 @@ void    ioOut(uint16_t port, uint8_t v);
 void    runFrame();                 // one 50 Hz frame
 uint8_t border();                   // current border colour (snapshot loaders set it)
 void    setBorder(uint8_t c);
+void    machineSnapshot(SnapIO &io);  // save state: ULA / frame / tape position (zx_machine.cpp)
+void    snapshotRedraw();             // after a load: rebuild screen + borderLine, set frameReady
 
 // Keyboard: 8 half-rows x 5 keys, active-LOW like the hardware. row = 0..7 in port-address order
 // (A8 = CAPS SHIFT..V, A9 = A..G, A10 = Q..T, A11 = 1..5, A12 = 0..6, A13 = P..Y, A14 = ENTER..H,
@@ -93,6 +97,7 @@ void zxSetKempston(uint8_t v);
 void zxKey(int row, int bit, bool down);
 void zxKeysReleaseAll();
 void zxHardReset();
+void zxCancelReset();               // drop a queued reset (after a snapshot load)
 bool zxLoadSelected(const char* path);
 void zxScanFiles();
 bool zxRenderLoadWarning();

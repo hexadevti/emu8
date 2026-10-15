@@ -7,6 +7,7 @@
 
 #include "zx.h"
 #include "../z80/z80_core.h"
+#include "../z80/z80_snapshot.h"
 #include <string.h>
 
 namespace zx {
@@ -190,6 +191,40 @@ struct ZxBus {
   static inline void    out(Z80&, uint16_t p, uint8_t v) { ioOut(p, v); }
 };
 typedef Z80Core<ZxBus> Cpu;
+
+// ---- save state (zx_snapshot.cpp) ----------------------------------------------------------------
+// "ULA " record: border colour, last port 0xFE byte (EAR/MIC -> beeper level), frame start in CPU
+// cycles (u32), frame counter (FLASH phase), tape block count + position. The keyboard, Kempston and
+// beeper ring are live / transient: on load the keys are released, scripted typing is cancelled and
+// the beeper restarts its frame. The tape image is not saved; its position is restored only when
+// the same number of blocks is mounted.
+void machineSnapshot(SnapIO &io) {
+  io.tag("ULA ");
+  io.val(borderCol);
+  io.val(lastFE);
+  io.val(frameStart);
+  snapInt(io, frameCount);
+  int32_t tc = tapeCount, tp = tapePos;
+  io.val(tc); io.val(tp);
+  if (io.loading && io.ok) {
+    borderCol &= 7;
+    beepLevel = (uint8_t)(((lastFE & 0x10) ? 200 : 0) + ((lastFE & 0x08) ? 40 : 0));
+    beepIdx = 0; beepLastT = 0; beepAcc = 0;
+    keyClearAll();
+    atSeq = nullptr;
+    for (int i = 0; i < 8; i++) atRow[i] = 0x1F;
+    if (tc == tapeCount && tp >= 0 && tp <= tapeCount) tapePos = tp;
+  }
+}
+
+// After a load: the frame-end capture runFrame() would have made (screen, border rows, FLASH).
+// The per-line border stripes of the saved frame are not kept, so the border shows one colour.
+void snapshotRedraw() {
+  memcpy(screen, ram, SCR_SIZE);
+  memset(borderLine, borderCol, OUT_H);
+  flashPhase = (frameCount & 16) != 0;
+  frameReady = true;
+}
 
 void machineWire() {
   cpu.rd  = memRead8;

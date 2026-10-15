@@ -119,6 +119,9 @@ public:
 
   static void step();
 
+  // save state (fabgl.h PcSnap): register file, flags, IP, prefix/IRQ/halt state
+  static void snapshot(PcSnap & s);
+
 
 private:
 

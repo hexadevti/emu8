@@ -14,7 +14,8 @@
 // emulated machine (msx_cart.cpp / sms_cart.cpp only ever repoint bank windows), so nothing ever writes to XIP.
 //
 // Layout, top-down from the arduino-pico flash filesystem partition (the menu's "flash=..._65536"
-// size; the EEPROM sector sits above it at the very end of flash). Neither is touched:
+// size; the EEPROM sector sits above it at the very end of flash). Neither is touched. Under the
+// RP2350 UF2 Loader all of it moves down to the end of the app's partition (picoFlashRelocate):
 //
 //     _FS_start - 32K .. _FS_start                  BIOS window, fixed
 //     (BIOS base) - 16K .. BIOS base                MSX disk-ROM window, fixed
@@ -39,13 +40,14 @@
 
 extern "C" uint8_t _FS_start;
 extern "C" uint8_t __flash_binary_end;
+extern "C" volatile uint32_t picocalcXipRestores;   // pico_shim.cpp: fast XIP put back after writes
 
 static const uint32_t kSector     = FLASH_SECTOR_SIZE;   // 4096: the erase granule
 static const uint32_t kBiosWindow = 0x8000;              // 32K, the largest MSX1 main BIOS
 static const uint32_t kDiskWindow = 0x4000;              // 16K MSX disk-interface ROM (beside a cart)
 
 static uintptr_t alignUp(uintptr_t v) { return (v + kSector - 1) & ~(uintptr_t)(kSector - 1); }
-static uintptr_t biosBase()           { return (uintptr_t)&_FS_start - kBiosWindow; }
+static uintptr_t biosBase()           { return picoFlashRelocate(&_FS_start) - kBiosWindow; }   // pico_shim.h
 static uintptr_t diskBase()           { return biosBase() - kDiskWindow; }
 static uintptr_t firmwareEnd()        { return alignUp((uintptr_t)&__flash_binary_end); }
 
@@ -66,6 +68,7 @@ static void waitUsbSettled()
 
 uint32_t romFlashCapacity(RomFlashWindow w)
 {
+  if (!picoFlashMapOk()) return 0;
   if (w == ROMFLASH_BIOS) return kBiosWindow;
   if (w == ROMFLASH_DISKROM) return kDiskWindow;
   uintptr_t top = diskBase(), bottom = firmwareEnd();
@@ -106,8 +109,8 @@ const uint8_t *romFlashLoad(RomFlashWindow w, File &f, uint32_t len, uint8_t *st
     noInterrupts();
 #endif
     rp2040.idleOtherCore();
-    flash_range_erase((uint32_t)(base + off - XIP_BASE), kSector);
-    flash_range_program((uint32_t)(base + off - XIP_BASE), chunk, kSector);
+    flash_range_erase(picoFlashOffset(base + off), kSector);
+    flash_range_program(picoFlashOffset(base + off), chunk, kSector);
     rp2040.resumeOtherCore();
 #ifndef __FREERTOS
     interrupts();
@@ -118,8 +121,9 @@ const uint8_t *romFlashLoad(RomFlashWindow w, File &f, uint32_t len, uint8_t *st
   if (!staging) free(chunk);
 
   if (!ok) { printLog("ROMFLASH: SD read came up short"); return nullptr; }
-  sprintf(buf, "ROMFLASH: %uK at 0x%08x, %u of %u sectors rewritten", (unsigned)(len / 1024),
-          (unsigned)base, (unsigned)written, (unsigned)((len + kSector - 1) / kSector));
+  sprintf(buf, "ROMFLASH: %uK at 0x%08x, %u of %u sectors rewritten, xip restores %u", (unsigned)(len / 1024),
+          (unsigned)base, (unsigned)written, (unsigned)((len + kSector - 1) / kSector),
+          (unsigned)picocalcXipRestores);
   printLog(buf);
   return (const uint8_t *)base;
 }

@@ -14,9 +14,11 @@
 
 #include "../../emu.h"
 #include "pcxt.h"
+#include "../shared/dirty_bands.h"     // PicoCalc SCREEN: SMOOTH blends (dband::avg565)
 #include "fabgl/machine.h"
 #include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
 #include "../shared/speedmeter.h"     // live 8086 MHz-equiv for the settings title
+#include "../shared/snapshot.h"       // pcxtMouseSnapshot (save states, pcxt_snapshot.cpp)
 #include <string>
 
 // 1 MB main RAM (PSRAM) + 64 KB CGA/video window (internal: read every frame).
@@ -187,7 +189,7 @@ static bool pcLooksLikePcDisk(const char* path) {
 // SD disk-image browser (extension match + 0x55AA boot signature + subdirectories).
 // The signature check opens the file, so it goes in the verify hook, which fbScan runs
 // AFTER releasing the bus lock -- pcLooksLikePcDisk() takes that lock itself.
-#define PCXT_MAX_FILES 200
+#define PCXT_MAX_FILES FB_MAX_ENTRIES
 static bool pcxtAccept(const std::string &n) { return pcIsDiskImage(n); }
 static FileBrowser pcxtBrowser = { "PCXT", &pcFiles, pcxtAccept, pcLooksLikePcDisk, PCXT_MAX_FILES, "" };
 
@@ -426,6 +428,31 @@ static bool pcInt33Service() {
       return true;
     default: return true;   // ack everything else so no call ever vectors to a null handler
   }
+}
+
+// Save state of the INT 33h driver above (called by pcxtSnapshot, pcxt_snapshot.cpp, CPU parked):
+// the app's installed handler, a callback in flight (and the context it must restore), latched
+// button counts, ranges and the cursor. Ints go through int32_t so every build shares the format.
+template <class T> static void pcSnapV(SnapIO& io, volatile T& v) { T x = v; io.val(x); if (io.loading) v = x; }
+static void pcSnapI(SnapIO& io, volatile int& v)  { int32_t x = v; io.val(x); if (io.loading) v = x; }
+static void pcSnapB(SnapIO& io, volatile bool& v) { bool x = v; io.flag(x); if (io.loading) v = x; }
+
+void pcxtMouseSnapshot(SnapIO& io) {
+  pcSnapI(io, pcMouseX); pcSnapI(io, pcMouseY); pcSnapI(io, pcMouseBtns);
+  pcSnapI(io, pcMouseAccX); pcSnapI(io, pcMouseAccY); pcSnapB(io, pcMouseShown);
+  pcSnapI(io, pcMouseMinX); pcSnapI(io, pcMouseMaxX); pcSnapI(io, pcMouseMinY); pcSnapI(io, pcMouseMaxY);
+  pcSnapI(io, pcBtnPrev);
+  for (int b = 0; b < 3; b++) {
+    pcSnapI(io, pcBtnPressCnt[b]); pcSnapI(io, pcBtnRelCnt[b]);
+    pcSnapI(io, pcBtnPressX[b]); pcSnapI(io, pcBtnPressY[b]);
+    pcSnapI(io, pcBtnRelX[b]);   pcSnapI(io, pcBtnRelY[b]);
+  }
+  pcSnapV(io, pcCbSeg); pcSnapV(io, pcCbOff); pcSnapV(io, pcCbMask);
+  pcSnapV(io, pcEvCond); pcSnapB(io, pcEvPending); pcSnapB(io, pcInCb);
+  pcSnapV(io, pcCbRetCS); pcSnapV(io, pcCbRetIP); pcSnapV(io, pcCbAge);
+  pcSnapV(io, pcSavAX); pcSnapV(io, pcSavBX); pcSnapV(io, pcSavCX); pcSnapV(io, pcSavDX);
+  pcSnapV(io, pcSavSI); pcSnapV(io, pcSavDI); pcSnapV(io, pcSavBP); pcSnapV(io, pcSavDS);
+  pcSnapV(io, pcSavES); pcSnapV(io, pcSavFL);
 }
 
 // ============================ platform entry points =============================================
@@ -859,8 +886,9 @@ static void pcxtRenderGraphicsDesktop(fabgl::GraphicsAdapter::Emulation emu) {
 // ---- PicoCalc: CGA streamed straight to the 320x320 panel (no canvas; see display_picocalc.h) ----
 // Text uses the BIOS's own IBM 8x8 font. 80 columns get 4 px each: glyph columns are OR'd in pairs,
 // so single-pixel strokes survive the halving. 25 rows are 9 panel px (8 glyph rows + row 7 again,
-// which keeps CP437 box lines joined), or 12 px (rows 0,0,1,2,2,3,...) with SCREEN: FILL. Graphics
-// are 320 wide and scaled 6:5 vertically into the 240-line window, or 3:2 to 300 lines with FILL.
+// which keeps CP437 box lines joined), or 12 px with SCREEN: SMOOTH (row pairs a, b go out as a,
+// (a+b)/2, b). Graphics are 320 wide and scaled 6:5 vertically into the 240-line window, or 3:2 to
+// 300 lines with SMOOTH (same blend).
 // Only text rows / graphics bands whose bytes changed are re-sent: the SPI link is the bottleneck.
 extern bool screenFill;
 const uint8_t *pcBiosFont8x8();
@@ -911,21 +939,33 @@ static void pcxtRenderTextPico() {
     tft.setPanelAddrWindow(0, top + r * RH, 320, RH);
     tft.startWrite();
     for (int y = 0; y < RH; y++) {
-      const int gy = fill ? (y * 2 / 3) : (y < 8 ? y : 7);
+      // SMOOTH: glyph rows 2p, 2p+1 -> panel rows 3p (2p), 3p+1 (their average), 3p+2 (2p+1).
+      const int gy = fill ? (y / 3 * 2 + (y % 3 == 2)) : (y < 8 ? y : 7);
+      const bool mix = fill && y % 3 == 1;
+      const int gy2 = gy + 1;
       for (int c = 0; c < cols; c++) {
         uint8_t ch = pcVb(base + c * 2), at = pcVb(base + c * 2 + 1);
         uint16_t fg = kCgaRgb565[at & 0x0F], bg = kCgaRgb565[(at >> 4) & 0x07];
         uint8_t bits = font ? font[ch * 8 + gy] : kBlank[gy];
         if (r == curR && c == curC && gy >= 6) bits = 0xFF;                    // underline cursor
         if (r == msR && c == msC) { uint16_t t = fg; fg = bg; bg = t; }        // mouse: reverse video
+        uint8_t bits2 = bits;
+        if (mix) {
+          bits2 = font ? font[ch * 8 + gy2] : kBlank[gy2];
+          if (r == curR && c == curC && gy2 >= 6) bits2 = 0xFF;
+        }
         if (text80) {
           uint8_t m = bits | (bits >> 1);                                       // OR column pairs
-          tft.writeColor((m & 0x80) ? fg : bg, 1);
-          tft.writeColor((m & 0x20) ? fg : bg, 1);
-          tft.writeColor((m & 0x08) ? fg : bg, 1);
-          tft.writeColor((m & 0x02) ? fg : bg, 1);
-        } else {
+          uint8_t m2 = bits2 | (bits2 >> 1);
+          for (int b = 7; b >= 1; b -= 2) {
+            uint16_t p = ((m >> b) & 1) ? fg : bg;
+            tft.writeColor(mix ? dband::avg565(p, ((m2 >> b) & 1) ? fg : bg) : p, 1);
+          }
+        } else if (!mix) {
           for (int b = 7; b >= 0; b--) tft.writeColor(((bits >> b) & 1) ? fg : bg, 1);
+        } else {
+          for (int b = 7; b >= 0; b--)
+            tft.writeColor(dband::avg565(((bits >> b) & 1) ? fg : bg, ((bits2 >> b) & 1) ? fg : bg), 1);
         }
       }
     }
@@ -969,7 +1009,16 @@ static void pcxtRenderGraphicsPico(fabgl::GraphicsAdapter::Emulation emu) {
     for (int y = 0; y < O; y++) {
       int sy = b * G + y * G / O;
       const uint8_t* srow = vm + (sy & 1) * 0x2000 + (sy >> 1) * 80;
-      if (!mode640) {
+      if (fill && y == 1) {
+        // SMOOTH: the middle row of 3 is the average of the band's two lines (sy and sy + 1).
+        const uint8_t* srow2 = vm + 0x2000 + (sy >> 1) * 80;            // sy is even here
+        for (int i = 0; i < 80; i++) {
+          uint8_t v = srow[i], u = srow2[i];
+          if (mode640) { v = ((v | v >> 1) >> 1) & 0x55; u = ((u | u >> 1) >> 1) & 0x55; }  // as below
+          for (int s = 6; s >= 0; s -= 2)
+            tft.writeColor(dband::avg565(pal[(v >> s) & 3], pal[(u >> s) & 3]), 1);
+        }
+      } else if (!mode640) {
         for (int i = 0; i < 80; i++) {
           uint8_t v = srow[i];
           tft.writeColor(pal[v >> 6], 1);       tft.writeColor(pal[(v >> 4) & 3], 1);

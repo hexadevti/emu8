@@ -3,6 +3,15 @@
 #include "bootlogo.h"
 #if UI_PICOCALC
 #include "dirty_bands.h"
+// Apple II SCREEN: SMOOTH: the 8:7 line repeat sends some source lines twice; one copy is blended
+// with the neighbouring line (tft.setRowBlend: 1 = with the row above, 2 = with the row below). The
+// neighbour is always in the same 8-line band, so a band redraws the same no matter which bands
+// around it are skipped as unchanged: line 0 of a band blends its second copy with line 1, any
+// other line its first copy with the line before.
+#define APPLE_ROW_BLEND(line, rep, times) \
+  tft.setRowBlend((times) < 2 ? 0 : (line) == 0 ? ((rep) == 1 ? 2 : 0) : ((rep) == 0 ? 1 : 0))
+#else
+#define APPLE_ROW_BLEND(line, rep, times)
 #endif   // embedded boot-splash logo (RGB565)
 #include <esp_system.h>          // esp_reset_reason()
 #include <esp_attr.h>            // RTC_NOINIT_ATTR
@@ -25,7 +34,17 @@ volatile int8_t splashKeyEvent = 0;
 // just before restarting. Selecting a platform on the splash, and the mount+reboot paths, restart
 // WITHOUT the magic, so they boot straight into the chosen system without re-showing the banner.
 
+#if defined(BOARD_PICOCALC)
+// Not plain RAM here: on the RP2350 "@sdmgr" rebooted into the normal system instead of SD Manager
+// (and the deploy script, asking again, kept the board rebooting) -- the UF2 loader, which runs
+// between our reset and our main(), is the suspect for clobbering .uninitialized_data. The watchdog
+// scratch registers survive a watchdog reboot whatever runs in SRAM; the SDK only uses 4..7.
+#include <hardware/structs/watchdog.h>
+#define splashOnBootMagic    (watchdog_hw->scratch[0])
+#define sdManagerOnBootMagic (watchdog_hw->scratch[1])
+#else
 RTC_NOINIT_ATTR static uint32_t splashOnBootMagic;
+#endif
 #define SPLASH_ON_BOOT_MAGIC 0x5350A5AAu
 void requestSplashOnNextBoot() { splashOnBootMagic = SPLASH_ON_BOOT_MAGIC; }
 
@@ -33,7 +52,9 @@ void requestSplashOnNextBoot() { splashOnBootMagic = SPLASH_ON_BOOT_MAGIC; }
 // splash leaves the choice here instead of in EEPROM and reboots. Honoured only after a software
 // reset -- RTC_NOINIT memory holds garbage at power-on -- and consumed on read, so the boot after
 // this one (Ctrl-F6, a power cycle) comes back to the system the user was running.
+#if !defined(BOARD_PICOCALC)
 RTC_NOINIT_ATTR static uint32_t sdManagerOnBootMagic;
+#endif
 #define SDMGR_ON_BOOT_MAGIC 0x53444D47u
 static void requestSdManagerOnNextBoot() { sdManagerOnBootMagic = SDMGR_ON_BOOT_MAGIC; }
 void rebootToSdManager() { requestSdManagerOnNextBoot(); delay(50); ESP.restart(); }   // also: USB serial "@sdmgr"
@@ -78,6 +99,13 @@ static StackType_t  renderTaskStack[RENDER_TASK_STACK];
 // src/picocalc/display_picocalc.cpp, where displayFlush() also polls the I2C keyboard.)
 void displayFlush() {}
 void displaySetUiMode(bool) {}
+// TFT_eSPI reads the ILI9341 back over MISO, colour bytes swapped (ready for pushImage unswapped).
+bool displayReadVideo(int x, int y, int w, int h, uint16_t *buf) {
+  if (!buf || w <= 0 || h <= 0) return false;
+  tft.readRect(x, y, w, h, buf);
+  for (int i = 0; i < w * h; i++) buf[i] = (uint16_t)((buf[i] >> 8) | (buf[i] << 8));
+  return true;
+}
 void displaySetVideoRect(int, int) {}
 void displaySetVideoFill(int, int, bool) {}
 #endif
@@ -423,6 +451,9 @@ static void splashDrawBtn(int i, bool enabled)
 
 static bool splashDrawn = false;     // splashService() paints the whole menu once per showing
 static bool splashResumeCpu = false; // opened over a running core (splashOpen), which it paused
+#if UI_PICOCALC
+static uint32_t splashBatSig = ~0u;  // battery gauge as last drawn on the menu
+#endif
 
 static void splashFinish()           // boot the current platform
 {
@@ -439,6 +470,7 @@ static void splashFinish()           // boot the current platform
 // on this render task (see splashKeyEvent above), so no locking against splashService().
 void splashOpen()
 {
+  if (snapBootBusy()) return;                         // a snapshot is being restored
   if (splashActive) {                                 // the same key closes it again
     optionsUiCloseGeneral();                          // (and the general settings over it)
     splashFinish();
@@ -497,6 +529,8 @@ static void splashSelect(int idx)
 static void splashService()
 {
   static unsigned long startMs = 0;
+  // Rebooted to finish a snapshot load: straight into the system, the menu would only confuse.
+  if (!splashDrawn && !splashResumeCpu && snapBootPending()) { splashFinish(); return; }
   if (!splashDrawn) {
     startMs = millis();
     tft.fillScreen(TFT_BLACK);
@@ -512,7 +546,16 @@ static void splashService()
 #endif
     for (int i = 0; i < SPLASH_N; i++) splashDrawBtn(i, splashEnabled(i));
     splashDrawn = true;
+#if UI_PICOCALC
+    splashBatSig = ~0u;
+#endif
   }
+#if UI_PICOCALC
+  if (splashBatSig != uiBatterySig()) {               // top-right corner, above the logo
+    splashBatSig = uiBatterySig();
+    uiDrawBattery(314, SPLASH_LOGO_Y / 2, TFT_BLACK);
+  }
+#endif
 
   int16_t tx, ty;
   if (touchRead(&tx, &ty)) {
@@ -837,6 +880,14 @@ void renderLoop(void *pvParameters)
       continue;
     }
 
+    // A snapshot load that restarted for its settings finishes here, behind a "Restoring" screen.
+    if (snapBootPoll())
+    {
+      Vertical_blankingOn_Off = true;
+      vTaskDelay(pdMS_TO_TICKS(20));
+      continue;
+    }
+
     // On-screen touch keyboard: poll touch every frame so its state is current
     // before we pick the raster geometry below.
     oskPoll();
@@ -1036,9 +1087,9 @@ void renderLoop(void *pvParameters)
     screen_width = 280;
     screen_height = oskRasterHeight();
 #if UI_PICOCALC
-    // SCREEN: FILL (Settings): 280x192 scaled ~8:7 on both axes to 320x220 (rows 10..229) of the 320x240
+    // SCREEN: SMOOTH (Settings): 280x192 scaled ~8:7 on both axes to 320x220 (rows 10..229) of the 320x240
     // logical screen. Vertically that is the existing coef192 line repeat; horizontally the display
-    // doubles every 7th pixel (setHScale78 below). A mode change wipes the screen once, so the
+    // doubles every 7th pixel (setHScale78 below); setSmooth blends both repeats. A mode change wipes the screen once, so the
     // bigger picture's edges do not linger around the smaller one.
     extern bool screenFill;
     static bool appleLastFill = false;
@@ -1101,9 +1152,12 @@ void renderLoop(void *pvParameters)
 #if UI_PICOCALC
     // FILL: every 280-wide branch widens 7:8 to the full 320. (The 80-col text branch above is
     // already 320 wide; the clear and the menu keep their unscaled 320x240 window.)
-    if (appleFill && !OptionsWindow && !DebugWindow && !clearScr && !wide80) {
-      tft.setAddrWindow(0, margin_y, 320, rasterH);
-      tft.setHScale78(true);
+    if (appleFill && !OptionsWindow && !DebugWindow && !clearScr) {
+      if (!wide80) {
+        tft.setAddrWindow(0, margin_y, 320, rasterH);
+        tft.setHScale78(true);
+      }
+      tft.setSmooth(true);         // SCREEN: SMOOTH -- see APPLE_ROW_BLEND
     }
 #endif
     tft.startWrite();
@@ -1256,6 +1310,7 @@ void renderLoop(void *pvParameters)
                 last_y = upscaleCoef_y;
                 while (repeat_y < repeatTimes_y)
                 {
+                  APPLE_ROW_BLEND(j, repeat_y, repeatTimes_y);
                   x_upscaled = margin_x;
                   x = margin_x;
                   last_x = margin_x;
@@ -1306,6 +1361,7 @@ void renderLoop(void *pvParameters)
                 const unsigned char *mn  = ram + rowAddr;
                 while (repeat_y < repeatTimes_y)
                 {
+                  APPLE_ROW_BLEND(block, repeat_y, repeatTimes_y);
                   // End Upscale
                   if (gfxPad) tft.writeColor(TFT_BLACK, gfxPad);   // mixed-mode 80-col frame: center in 320
                   for (int c = 0; c < 0x28; c += 2)
@@ -1347,6 +1403,7 @@ void renderLoop(void *pvParameters)
                 last_y = upscaleCoef_y;
                 while (repeat_y < repeatTimes_y)
                 {
+                  APPLE_ROW_BLEND(block, repeat_y, repeatTimes_y);
                   x_upscaled = margin_x;
                   x = margin_x;
                   last_x = margin_x;
@@ -1475,6 +1532,7 @@ void renderLoop(void *pvParameters)
               last_y = upscaleCoef_y;
               while (repeat_y < repeatTimes_y)
               {
+                APPLE_ROW_BLEND(i, repeat_y, repeatTimes_y);
                 x_upscaled = margin_x;
                 x = margin_x;
                 last_x = margin_x;
@@ -1535,6 +1593,7 @@ void renderLoop(void *pvParameters)
               last_y = upscaleCoef_y;
               while (repeat_y < repeatTimes_y)
               {
+                APPLE_ROW_BLEND(i, repeat_y, repeatTimes_y);
                 x_upscaled = margin_x;
                 x = margin_x;
                 last_x = margin_x;

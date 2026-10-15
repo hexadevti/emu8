@@ -76,6 +76,7 @@ def send_raw(port, data):
 def connect(want_port, wait_sec):
     t0 = time.time()
     last_sdmgr = 0
+    sdmgr_sent = 0
     told = set()
     while time.time() - t0 < wait_sec:
         port = find_port(want_port)
@@ -95,6 +96,12 @@ def connect(want_port, wait_sec):
             time.sleep(2)
             continue
         if time.time() - last_sdmgr > 8:
+            # Each request reboots the board. If two did not bring SD Manager up, more would only
+            # keep it rebooting (seen on the RP2350), so stop and say so.
+            if sdmgr_sent >= 2:
+                raise SystemExit('O emu8 reiniciou mas não entrou no SD Manager. Parei de pedir para não '
+                                 'deixar o PicoCalc reiniciando.')
+            sdmgr_sent += 1
             say(f'Pedindo ao emu8 em {port} para reiniciar no SD Manager...')
             send_raw(port, b'\n@sdmgr\n')
             last_sdmgr = time.time()

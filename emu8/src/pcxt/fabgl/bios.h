@@ -128,6 +128,9 @@ public:
 
   void setDriveMediaType(int drive, MediaType media);
 
+  // save state (fabgl.h PcSnap): keyboard multi-byte state, INT 1Eh address, media types
+  void snapshot(PcSnap & s);
+
 private:
 
   void getKeyFromKeyboard();

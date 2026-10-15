@@ -55,6 +55,12 @@ public:
 
   bool diskChanged(int drive)      { return m_diskChanged[drive]; }
   void resetDiskChanged(int drive) { m_diskChanged[drive] = false; }
+  // after a snapshot load with another floppy in the drive: report a media change, re-detect type
+  void markMediaChanged(int drive) { m_diskChanged[drive] = true; m_BIOS.setDriveMediaType(drive, mediaUnknown); }
+
+  // save state of the chipset + CPU (fabgl.h PcSnap; guest RAM / video RAM are the caller's,
+  // see src/pcxt/pcxt_snapshot.cpp). Disk images, callbacks and pointers are not part of it.
+  void snapshot(PcSnap & s);
 
   void setBootDrive(int drive)     { m_bootDrive = drive; }
 

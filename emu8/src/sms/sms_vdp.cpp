@@ -15,6 +15,7 @@
 // path (sms.cpp / sms_host.cpp) converts CRAM to a 32-entry RGB565 LUT each frame.
 
 #include "sms.h"
+#include "../z80/z80_snapshot.h"
 #include <string.h>
 
 namespace sms {
@@ -329,6 +330,46 @@ void vdpRenderCaptured() {
 }
 
 // Register / palette of the picture being shown (the capture when there is one).
+// ---- save state (sms_snapshot.cpp) -------------------------------------------------------------
+// "SVDP" record: R0-R15, CRAM, status, VRAM address (u16), command code, control latch toggle +
+// first byte, read-ahead, line-IRQ pending, line counter, current line, the latched vscroll and the
+// per-line hscroll table, and the overflow/collision bits the display-core render owes vstatus.
+// VRAM itself is saved by the machine.
+void vdpSnapshot(SnapIO &io) {
+  io.tag("SVDP");
+  io.arr(vreg);
+  io.arr(cram);
+  io.val(vstatus);
+  io.val(vaddr);
+  io.val(vcode);
+  io.flag(vlatched);
+  io.val(vlatch);
+  io.val(vreadAhead);
+  io.flag(lineIntPending);
+  snapInt(io, lineCounter);
+  snapInt(io, curLine);
+  io.val(vsLatch);
+  io.bytes(lineHS, sizeof(lineHS));
+  uint8_t owed = snap ? snap->statusOut : 0;
+  io.val(owed);
+  if (io.loading && snap) snap->statusOut = owed;
+}
+
+// After a load: hand the restored frame to the display path (capture it, or draw it here when there
+// is no capture buffer) without changing the restored status register.
+void vdpRedraw() {
+  if (snap) {
+    const uint8_t owed = snap->statusOut;
+    snap->statusOut = 0;                                   // vdpCapture would OR it into vstatus
+    vdpCapture();
+    snap->statusOut = owed;
+  } else {
+    const uint8_t s = vstatus;
+    vdpRender();
+    vstatus = s;
+  }
+}
+
 uint8_t vdpShownRegister(int r) { return snap ? snap->vreg[r & 15] : vreg[r & 15]; }
 void vdpBuildShownPalette(uint16_t* lut32) {
   const uint8_t* c = snap ? snap->cram : cram;

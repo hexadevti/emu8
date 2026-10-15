@@ -1,4 +1,5 @@
 #include "../../emu.h"
+#include "snapshot.h"
 
 #include <cstring>
 #include <iostream>
@@ -228,31 +229,25 @@ void listFiles(bool downDirection)
   }
   
   pageSize--; // transform to index
-  std::vector<std::string> files;
-  if (!HdDisk)
-  {
-    files = diskFiles;
-  }
-  else
-  {
-    files = hdFiles;
-  }
+  // A reference, not a copy: on the PicoCalc's IIe a second copy of a long list is more heap than
+  // the machine has left.
+  FileList &files = HdDisk ? hdFiles : diskFiles;
   if (shownFile > files.size())
-    shownFile = 0xff;
+    shownFile = SHOWN_NONE;
   if (downDirection)
   {
-    if (shownFile != 0xff && shownFile >= firstShowFile + pageSize)
+    if (shownFile != SHOWN_NONE && shownFile >= firstShowFile + pageSize)
     {
       firstShowFile = shownFile - pageSize;
     }
   }
   else
   {
-    if (shownFile != 0xff && shownFile < firstShowFile && firstShowFile > 0)
+    if (shownFile != SHOWN_NONE && shownFile < firstShowFile && firstShowFile > 0)
       firstShowFile--;
   }
   int id = 0;
-  if (shownFile == 0xff) {
+  if (shownFile == SHOWN_NONE) {
     if ((HdDisk && selectedHdFileName == "/") || (!HdDisk && selectedDiskFileName == "/")) {
       shownFile = 0;
     } 
@@ -274,13 +269,9 @@ void listFiles(bool downDirection)
   // sprintf(buf, "firstShowFile: %d, shownFile: %d, filename: %s", firstShowFile, shownFile, HdDisk ? selectedHdFileName.c_str() : selectedDiskFileName.c_str());
   // Serial.println(buf);
   
-  for (auto &&i : files)
+  for (id = firstShowFile; id < (int)files.size(); id++)
   {
-    if (id < firstShowFile)
-    {
-      id++;
-      continue;
-    }
+    std::string i = files[id];
     if (shown > pageSize)
       break;
     setCursor(startX, startY + id - firstShowFile);
@@ -293,7 +284,6 @@ void listFiles(bool downDirection)
     for (size_t b = 0; b<fileNameMax-i.size();b++)
       print(" ", id == shownFile);
     shown++;
-    id++;
   }
   optionsUiMarkDirty();   // refresh the modern touch UI on PS/2 file navigation
 }
@@ -322,6 +312,12 @@ void showHideOptionsWindow() {
     if (OptionsWindow) optionsUiCloseGeneral(); else optionsUiOpenGeneral();
     return;
   }
+  if (optionsUiSnapRestarting() || snapBootBusy()) return;   // restored snapshot settings: closing would save over them
+#if !defined(BOARD_PICOCALC) && !defined(EMU_SIM_PICOCALC)
+  // Touch boards reach the snapshot page from here (SNAP in the title bar): its thumbnail is the
+  // picture on screen right now, before the window covers it.
+  if (!OptionsWindow && currentPlatform != PLATFORM_SDMANAGER) snapGrabScreen();
+#endif
   OptionsWindow = !OptionsWindow;
   // Pause BEFORE optionsUiOpen(): its first-open file scan reads the SD card, and the C64's LOAD
   // trap must not be starting a disk read on the other core meanwhile.
@@ -330,11 +326,32 @@ void showHideOptionsWindow() {
   if (OptionsWindow) {
     optionsUiOpen();   // modern touch UI (see optionsui.ino)
   } else {
+    optionsUiClosed();         // the list pages hand their memory back
     saveConfig();              // persist all settings on close (no reboot needed)
     oskIgnoreCurrentTouch();   // closing tap must not pop up the on-screen keyboard
   }
 
   paused = OptionsWindow;
+}
+
+// Ctrl-Shift-F5: the snapshot page. It is a page of the settings window, so it pauses the machine
+// and takes the keys exactly like the settings do; closing it (Esc at the top, X, F10, or this key
+// again) goes through showHideOptionsWindow() and resumes. Not over the system menu: no system runs.
+void snapshotWindowToggle() {
+  if (optionsUiSnapRestarting() || snapBootBusy()) return;
+  sprintf(buf, "Ctrl-Shift-F5: snapshots (splash=%d opts=%d plat=%d)", splashActive, OptionsWindow, (int)currentPlatform);
+  printLog(buf);
+  if (splashActive || currentPlatform == PLATFORM_SDMANAGER) return;
+  if (OptionsWindow) {
+    if (optionsUiSnapOpen()) showHideOptionsWindow();   // close + resume
+    else optionsUiOpenSnap();                            // settings already up: switch to the page
+    return;
+  }
+  snapGrabScreen();                                      // the thumbnail, before the page covers it
+  OptionsWindow = true;
+  paused = true;
+  clearScreen();
+  optionsUiOpenSnap();
 }
 
 void showHideDebugWindow() {

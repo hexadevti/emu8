@@ -1,5 +1,6 @@
 #include "../../emu.h"
 #include "nes.h"
+#include "../shared/snapshot.h"
 
 // NES PPU (2C02) — scanline renderer. Driven from the CPU loop via ppuStep(cpuCycles): the
 // PPU runs 3 dots per CPU cycle. We process one scanline at a time (262 lines x 341 dots):
@@ -72,11 +73,11 @@ static inline uint8_t palIndex(uint16_t a) {
 }
 
 // CHR (pattern table) access — via the mapper's 8 x 1K windows ($0000..$1FFF).
-uint8_t chrRead(uint16_t addr) {
+NES_HOT uint8_t chrRead(uint16_t addr) {
   const uint8_t *p = chrMap[(addr >> 10) & 7];
   return p ? p[addr & 0x3FF] : 0;
 }
-void chrWrite(uint16_t addr, uint8_t val) {
+NES_HOT void chrWrite(uint16_t addr, uint8_t val) {
   if (!chrIsRam) return;                 // CHR-ROM is read-only
   uint8_t *p = chrMap[(addr >> 10) & 7]; // windows point into chrData (the 8K CHR-RAM)
   if (p) p[addr & 0x3FF] = val;
@@ -97,7 +98,7 @@ static inline void ppuBusWrite(uint16_t a, uint8_t val) {
 }
 
 // ---- $2007 data port (with the standard 1-byte read buffer for non-palette reads) ----
-static uint8_t ppuDataRead() {
+NES_HOT static uint8_t ppuDataRead() {
   uint16_t a = v & 0x3FFF;
   uint8_t result;
   if (a >= 0x3F00) {                 // palette reads are immediate; buffer gets the NT underneath
@@ -110,12 +111,12 @@ static uint8_t ppuDataRead() {
   v = (v + ((ctrl & 0x04) ? 32 : 1)) & 0x7FFF;
   return result;
 }
-static void ppuDataWrite(uint8_t val) {
+NES_HOT static void ppuDataWrite(uint8_t val) {
   ppuBusWrite(v & 0x3FFF, val);
   v = (v + ((ctrl & 0x04) ? 32 : 1)) & 0x7FFF;
 }
 
-void ppuRegWrite(uint16_t reg, uint8_t val) {
+NES_HOT void ppuRegWrite(uint16_t reg, uint8_t val) {
   switch (reg) {
     case 0:  // PPUCTRL
       t = (t & 0xF3FF) | ((uint16_t)(val & 3) << 10);
@@ -147,7 +148,7 @@ void ppuRegWrite(uint16_t reg, uint8_t val) {
   }
 }
 
-uint8_t ppuRegRead(uint16_t reg) {
+NES_HOT uint8_t ppuRegRead(uint16_t reg) {
   switch (reg) {
     case 2: {                       // PPUSTATUS
       uint8_t r = status & 0xE0;    // low bits = open bus (ignored)
@@ -161,7 +162,7 @@ uint8_t ppuRegRead(uint16_t reg) {
   }
 }
 
-void oamDmaWrite(uint8_t page) {
+NES_HOT void oamDmaWrite(uint8_t page) {
   uint16_t base = (uint16_t)page << 8;
   // Pages $00-$1F are internal RAM (mirrored every 2K) and that is where essentially every game
   // keeps its shadow OAM, so copy straight out of it. Going through read8() 256 times per frame
@@ -201,7 +202,7 @@ static const DRAM_ATTR uint32_t nybExpand[16] = {
   0x00000001, 0x01000001, 0x00010001, 0x01010001,
   0x00000101, 0x01000101, 0x00010101, 0x01010101 };
 
-static void renderBg(int /*line*/, uint8_t *fb) {
+NES_HOT static void renderBg(int /*line*/, uint8_t *fb) {
   uint16_t vv = v;
   int fineY = (v >> 12) & 7;
   uint16_t bgTable = (ctrl & 0x10) ? 0x1000 : 0x0000;
@@ -252,7 +253,7 @@ static void renderBg(int /*line*/, uint8_t *fb) {
   }
 }
 
-static void renderSprites(int line, uint8_t *fb) {
+NES_HOT static void renderSprites(int line, uint8_t *fb) {
   int h = (ctrl & 0x20) ? 16 : 8;
   uint16_t sprTable = (ctrl & 0x08) ? 0x1000 : 0x0000;  // 8x8 sprite pattern table
   memset(spriteDrawn, 0, sizeof(spriteDrawn));
@@ -313,7 +314,7 @@ static void renderSprites(int line, uint8_t *fb) {
 
 // Is the background pixel at screenX opaque, for the current loopy v / fine x? Only ever called
 // for the <=8 pixels of sprite 0, so walking coarse X one tile at a time is cheap enough.
-static bool bgPixelOpaque(int screenX) {
+NES_HOT static bool bgPixelOpaque(int screenX) {
   if (!(mask & 0x08)) return false;
   if (screenX < 8 && !(mask & 0x02)) return false;
   int n = screenX + (int)x;
@@ -329,7 +330,7 @@ static bool bgPixelOpaque(int screenX) {
   return (((c[patAddr & 0x3FF] | c[(patAddr + 8) & 0x3FF]) >> bit) & 1) != 0;
 }
 
-static void skipScanline(int line) {
+NES_HOT static void skipScanline(int line) {
   if (!(mask & 0x10)) return;                         // sprites off: no flags to maintain
   int h = (ctrl & 0x20) ? 16 : 8;
   int count = 0;
@@ -367,7 +368,7 @@ static void skipScanline(int line) {
   }
 }
 
-static void renderScanline(int line) {
+NES_HOT static void renderScanline(int line) {
   uint8_t *fb = framebuffer + line * 256;
   uint8_t backdrop = paletteRam[0] & 0x3F;
   memset(fb, backdrop, 256);                  // word-at-a-time fills (vs per-byte loops)
@@ -377,7 +378,7 @@ static void renderScanline(int line) {
 }
 
 // Finish the scanline that just consumed its 341 dots, then advance to the next.
-void endScanline() {
+NES_HOT void endScanline() {
   if (scanline < 240) {                          // visible line
     if (fbRendering) {
       // Overlap guard (see nes.h): core 0 may still be reading this picture out, a couple of
@@ -442,6 +443,29 @@ void ppuReset() {
   memset(oam, 0, sizeof(oam));
   memset(paletteRam, 0, sizeof(paletteRam));
 }
+
+// Snapshot (src/nes/nes_snapshot.cpp): registers, loopy v/t/x/w, the $2007 read buffer, the frame
+// position and the PPU memories. Only called with the CPU parked between instructions.
+void ppuSnapshot(SnapIO &io) {
+  io.tag("PPU ");
+  io.val(ctrl); io.val(mask); io.val(status); io.val(oamAddr);
+  io.val(v); io.val(t); io.val(x); io.flag(w); io.val(readBuffer);
+  int16_t line = (int16_t)scanline;
+  int32_t dots = dotAcc, qf = qfAcc;
+  io.val(line); io.val(dots); io.val(qf);
+  io.arr(oam);
+  io.arr(paletteRam);
+  io.bytes(vram, 0x800);
+  if (!io.loading || !io.ok) return;
+  if (line < 0 || line > 261 || dots < 0 || dots >= 341 || qf < 0 || qf >= 262) {
+    io.fail("Snapshot is damaged");
+    return;
+  }
+  scanline = line; dotAcc = dots; qfAcc = qf;
+  v &= 0x7FFF; t &= 0x7FFF; x &= 7;
+  for (int i = 0; i < 0x20; i++) paletteRam[i] &= 0x3F;   // renderBg relies on masked entries
+}
+
 
 #if defined(BOARD_DESKTOP)
 // ---- desktop debug renderers (PPU/VRAM inspector) ----

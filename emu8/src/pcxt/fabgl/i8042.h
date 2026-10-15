@@ -131,6 +131,18 @@ public:
   Mouse * mouse()       { return &m_mouse; }
   void enableMouse(bool) { }
 
+  // save state (fabgl.h PcSnap): output queue (pending scancodes), status/command, keyboard LEDs
+  void snapshot(PcSnap & s) {
+    s.bytes(m_outBuf, sizeof(m_outBuf));
+    s.i32(m_outHead); s.i32(m_outTail);
+    s.val(m_status); s.val(m_commandByte); s.val(m_pendingCmd); s.flag(m_kbdEnabled);
+    if (s.loading) { m_outHead &= QSIZE - 1; m_outTail &= QSIZE - 1; }
+    bool num, caps, scroll;
+    m_keyboard.getLEDs(&num, &caps, &scroll);
+    s.flag(num); s.flag(caps); s.flag(scroll);
+    m_keyboard.setLEDs(num, caps, scroll);
+  }
+
 private:
 
   void pushReply(uint8_t v) {

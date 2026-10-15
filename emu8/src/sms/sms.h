@@ -14,6 +14,8 @@
 #include <stdint.h>
 #include "../z80/z80.h"
 
+struct SnapIO;   // src/shared/snapshot.h (save states; only the snapshot code includes it)
+
 namespace sms {
 
 // ---- machine geometry ----
@@ -40,6 +42,7 @@ void    memWrite8(uint16_t a, uint8_t v);
 void    runFrame(bool render = true);   // one 60 Hz frame: per-scanline Z80 time + VDP line/VBlank interrupts;
                                         // render=false skips drawing the picture (frameskip)
 void    smsPause();             // SMS PAUSE button -> latched Z80 NMI (consumed at frame boundary)
+void    pauseSnapshot(SnapIO &io);   // save state: the latched PAUSE NMI
 
 // ---- I/O ports (sms_io.cpp) ----
 uint8_t ioIn(uint16_t port);
@@ -47,6 +50,7 @@ void    ioOut(uint16_t port, uint8_t val);
 void    ioReset();
 void    setInput1(uint8_t mask);// controller 1, active-LOW: b0 up b1 down b2 left b3 right b4 TL b5 TR
 void    setInput2(uint8_t mask);// controller 2 (same bit order)
+void    ioSnapshot(SnapIO &io); // save state: memory / I/O control ports
 
 // ---- VDP 315-5124 / Mode 4 (sms_vdp.cpp) ----
 void    vdpReset();
@@ -70,11 +74,14 @@ void    vdpRenderCaptured();       // display core: captured frame -> framebuffe
 uint8_t vdpShownRegister(int r);   // register / palette of the frame being shown
 void    vdpBuildShownPalette(uint16_t* lut32);
 uint8_t vdpCram(int i);            // diagnostics
+void    vdpSnapshot(SnapIO &io);   // save state: registers, CRAM, latches, line IRQ, hscroll table
+void    vdpRedraw();               // after a load: capture / draw the restored frame, status untouched
 
 // ---- SN76489 PSG (sms_psg.cpp) ----
 void    psgReset();
 void    psgWrite(uint8_t v);       // single write port ($7F/$7E range): latch/data protocol
 int     psgGenSample(int masterVol, bool mute);  // one 22050 Hz sample (0..255); used by sms_audio.cpp
+void    psgSnapshot(SnapIO &io);   // save state: registers + latch + phases/LFSR (SMS and Coleco)
 
 // ---- cartridge / Sega mapper (sms_cart.cpp) ----
 void    cartReset();
@@ -82,6 +89,10 @@ uint8_t cartRead(uint16_t a);      // CPU 0x0000-0xBFFF (ROM banks + optional ca
 void    cartWrite(uint16_t a, uint8_t v);  // cart-RAM writes + mapper registers $FFFC-$FFFF
 extern const uint8_t* cartRdPage[6];      // 8 KB read windows over 0x0000-0xBFFF; nullptr -> cartRead
 void    cartSetImage(const uint8_t* data, int len);
+uint8_t* cartRamData();            // on-cart RAM, nullptr until a game maps it (or cartRamEnsure)
+int     cartRamSize();
+bool    cartRamEnsure();           // allocate it now (the $FFFC lazy path); false = no heap
+void    cartSnapshot(SnapIO &io);  // save state: bank registers + $FFFC
 
 } // namespace sms
 
@@ -96,3 +107,4 @@ bool smsLoadSelected(const char* path);
 void smsScanFiles();
 bool smsRenderLoadWarning();
 void loadSmsFilesSync();
+void smsCancelReset();             // drop a queued reset (after a snapshot load)

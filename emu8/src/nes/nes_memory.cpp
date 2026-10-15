@@ -1,5 +1,6 @@
 #include "../../emu.h"
 #include "nes.h"
+#include "../shared/snapshot.h"
 
 // NES CPU bus ($0000-$FFFF). Layout:
 //   $0000-$1FFF  2K internal RAM, mirrored every $0800
@@ -33,7 +34,15 @@ void controllerWrite(uint8_t val) {
   if (ctrlStrobe) ctrlShift = ctrlState;
 }
 
-uint8_t controllerRead(int port) {
+// Snapshot: the serial shift register and strobe (ctrlState is the live pad, not machine state).
+void ctrlSnapshot(SnapIO &io) {
+  io.tag("PAD ");
+  io.val(ctrlShift);
+  io.flag(ctrlStrobe);
+}
+
+NES_HOT uint8_t controllerRead(int port) {
+
   if (port != 0) return 0x40;            // controller 2 not connected (open-bus high bits)
   if (ctrlStrobe) ctrlShift = ctrlState; // strobe high -> always returns button A
   uint8_t b = ctrlShift & 1;
@@ -41,7 +50,7 @@ uint8_t controllerRead(int port) {
   return b | 0x40;                       // bit6 = open-bus high (common real-hardware value)
 }
 
-unsigned char read8(unsigned short addr) {
+NES_HOT unsigned char read8(unsigned short addr) {
   if (addr < 0x2000) return cpuRam[addr & 0x07FF];
   if (addr < 0x4000) return ppuRegRead(addr & 7);
   if (addr < 0x4020) {
@@ -56,7 +65,7 @@ unsigned char read8(unsigned short addr) {
   return p ? p[addr & 0x1FFF] : 0;
 }
 
-void write8(unsigned short addr, unsigned char val) {
+NES_HOT void write8(unsigned short addr, unsigned char val) {
   if (addr < 0x2000) { cpuRam[addr & 0x07FF] = val; return; }
   if (addr < 0x4000) { ppuRegWrite(addr & 7, val); return; }
   if (addr < 0x4020) {

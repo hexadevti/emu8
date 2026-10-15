@@ -64,7 +64,7 @@ static void eepromWriteDefaults()
 {
   EEPROM.writeBool(HdDiskEEPROMaddress, false);
   EEPROM.writeBool(IIpIIeEEPROMaddress, false);
-  EEPROM.writeBool(Fast1MhzSpeedEEPROMaddress, true);
+  EEPROM.writeBool(Fast1MhzSpeedEEPROMaddress, false);
   EEPROM.writeBool(JoystickEEPROMaddress, true);
   EEPROM.writeBool(VideoColorEEPROMaddress, true);
   EEPROM.writeBool(SoundEEPROMaddress, true);
@@ -91,6 +91,9 @@ void eepromFactoryReset()
 
 void epromSetup() {
     
+#if defined(BOARD_PICOCALC)
+  picoFlashLogMap();   // under the RP2350 UF2 Loader the settings move into the app's partition
+#endif
   EEPROM.begin(EEPROM_SIZE);
   //delay(3000);
   readStringFromEEPROM(NewDeviceConfigEEPROMaddress, &NewDeviceConfig);
@@ -162,7 +165,7 @@ void epromSetup() {
   // C64 settings (validated so old/uninitialised EEPROM doesn't enable surprises).
   c64Autoload = (EEPROM.readChar(C64AutoloadEEPROMaddress) == 1);
   joyPort = EEPROM.readChar(JoyPortEEPROMaddress);
-  if (joyPort != 1 && joyPort != 2) joyPort = 2;
+  if (joyPort != 1 && joyPort != 2) joyPort = 1;
   // ==1 test (not readBool) so an uninitialised 0xFF on older devices reads as OFF, not ON.
   screenFill = (EEPROM.readChar(ScreenFillEEPROMaddress) == 1);
   { char s = EEPROM.readChar(NesDisplaySkipEEPROMaddress); nesDisplaySkip = (s >= 1 && s <= 3) ? (uint8_t)s : 3; }  // default 3; fresh EEPROM (0xFF) -> 3

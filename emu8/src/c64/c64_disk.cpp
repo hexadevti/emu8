@@ -70,10 +70,9 @@ static void c64QueueRun() {
 // trailing "/"), then matching files - all as full paths. The options UI navigates into a
 // directory entry / ".." instead of selecting it.
 
-// Cap the entry count so a huge directory can't exhaust the fragmented C64 heap (each entry
-// is a heap-backed std::string). Beyond this, the listing is truncated - organise into
-// subfolders to see the rest.
-#define C64_MAX_FILES 250
+// Entry cap: the shared one. What really limits a C64 listing on the RP2040 is its ~10KB of free
+// heap, which the scan watches itself (filebrowser.cpp, FB_HEAP_RESERVE).
+#define C64_MAX_FILES FB_MAX_ENTRIES
 
 // Every file is listed, not just the loadable ones: a folder showing one entry when it holds a
 // dozen looks broken. What cannot be loaded is kept in the list and greyed out by the options UI,

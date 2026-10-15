@@ -40,7 +40,7 @@ static bool smsEndsCI(const std::string& s, const char* suf) {
 }
 
 // Scan SD root for *.sms / *.bin into smsFiles.
-#define SMS_MAX_FILES 200
+#define SMS_MAX_FILES FB_MAX_ENTRIES
 // SD ROM browser (.sms/.bin + subdirectories); see src/shared/filebrowser.h.
 static bool smsAccept(const std::string &n) {
   return smsEndsCI(n, ".sms") || smsEndsCI(n, ".bin");
@@ -227,6 +227,7 @@ void smsRenderFrame() {
 void smsSetInput(uint8_t joyMask) { sms::setInput1(joyMask); }
 void smsPauseButton() { sms::smsPause(); }            // PAUSE button -> Z80 NMI (F11)
 void smsHardReset()   { smsResetReq = true; }         // soft power-cycle: re-run the cart (F12)
+void smsCancelReset() { smsResetReq = false; }        // snapshot loaded: resume it, do not reset
 
 // ---- settings hooks ----
 bool smsLoadSelected(const char* path) {

@@ -8,6 +8,7 @@
 #include "../desktop/debug_bridge.h"   // desktop debugger hooks (breakpoints/step/heat); no-op on device
 #endif
 #include "c64.h"
+#include "../shared/snapshot.h"
 #if defined(BOARD_PICOCALC)
 #include <hardware/timer.h>   // timer_hw (C64_NOW_US)
 #endif
@@ -231,6 +232,17 @@ volatile uint32_t c64MaxLineGapUs = 0;
 #endif
 #define C64_US_PER_CYC_Q16 66517u
 static uint32_t vicStolenCyc = 0;   // VIC DMA cycles not yet charged to the pacer   // 65536 / 0.985248 MHz (PAL): real microseconds per 6510 cycle
+// The 1 MHz pacer's running total (see cpuLoop). Restarted after every pause, so the time the
+// machine stood still is never caught up on.
+static uint32_t paceBaseUs = 0, paceTargetUs = 0, paceAccQ16 = 0;
+static void paceRestart() { paceBaseUs = C64_NOW_US(); paceTargetUs = 0; paceAccQ16 = 0; vicStolenCyc = 0; }
+
+// cpuLoop's own loop state, handed out while it idles in its paused spin: a snapshot (render task)
+// saves it from here, and a loaded one is picked up when the spin ends. cpuParked says it is there.
+static volatile bool cpuParked = false;
+static volatile int32_t parkRasterAcc = 0;
+static volatile uint8_t parkIrqShadowSR = SR_INT;
+static volatile bool parkNmiPrev = false;
 
 static void perfSample() {
   uint32_t now = millis();
@@ -302,6 +314,32 @@ static bool c64LoadTrap() {
   return true;
 }
 
+// ---- Snapshots (see c64_snapshot.cpp) ----
+bool cpuWaitParked(uint32_t ms) {
+  for (uint32_t t0 = millis(); !cpuParked && millis() - t0 < ms; ) delay(5);
+  return cpuParked;
+}
+
+// The 6510 at an instruction boundary (cpuLoop is in its paused spin), plus the loop's raster-cycle
+// accumulator and interrupt edge state. The per-instruction scratch (opcode, argument_addr, value16...)
+// is rebuilt by the next instruction and is not saved.
+void cpuSnapshot(SnapIO &io) {
+  uint16_t pc = PC, lpc = lastPC;
+  int32_t acc = parkRasterAcc;
+  uint8_t shadow = parkIrqShadowSR;
+  bool nmi = parkNmiPrev;
+  io.val(pc); io.val(lpc);
+  io.val(STP); io.val(A); io.val(X); io.val(Y); io.val(SR);
+  io.val(acc); io.val(shadow); io.flag(nmi);
+  if (!io.loading || !io.ok) return;
+  PC = pc; lastPC = lpc;
+  parkRasterAcc = (acc >= 0 && acc < 63 + 64) ? acc : 0;
+  parkIrqShadowSR = shadow;
+  parkNmiPrev = nmi;
+  perfLastMs = 0;
+  paceRestart();
+}
+
 C64_HOT void cpuLoop() {
   write8(0, 0x2f);
   write8(1, 0x37);
@@ -322,13 +360,25 @@ C64_HOT void cpuLoop() {
     if (g_dbgRunToPC >= 0 && PC == (uint16_t)g_dbgRunToPC) { paused = true; g_dbgRunToPC = -1; }  // run-to / step-over
     if (g_dbgRunUntilSP >= 0 && STP > (uint8_t)g_dbgRunUntilSP) { paused = true; g_dbgRunUntilSP = -1; } // step-out
 #endif
-    while (paused)
+    if (paused)
     {
+      parkRasterAcc = rasterCycleAcc;                // a snapshot may save (or replace) these
+      parkIrqShadowSR = irqShadowSR;
+      parkNmiPrev = nmiPrev;
+      cpuParked = true;
+      while (paused)
+      {
 #if defined(BOARD_DESKTOP)
-      if (dbgStepReq > 0) { dbgStepReq--; break; }   // debugger single-step: run exactly one instruction
+        if (dbgStepReq > 0) { dbgStepReq--; break; }   // debugger single-step: run exactly one instruction
 #endif
-      delay(100);
-      perfLastMs = 0;                                // restart the speed meter after the pause
+        delay(100);
+        perfLastMs = 0;                              // restart the speed meter after the pause
+      }
+      cpuParked = false;
+      rasterCycleAcc = parkRasterAcc;
+      irqShadowSR = parkIrqShadowSR;
+      nmiPrev = parkNmiPrev;
+      paceRestart();                                 // no racing to catch up on the pause
     }
 #if defined(BOARD_DESKTOP)
     g_dbgBreakArmed = true;                          // re-arm after passing the breakpoint check once
@@ -398,7 +448,6 @@ C64_HOT void cpuLoop() {
       // instruction was measured on its own, the time spent rendering a VIC line was never won back
       // -- about 0.5 MHz in practice. Here the target is a running total, so a slow instruction or a
       // rendered line is caught up on by the ones after it (re-anchored if it falls 100 ms behind).
-      static uint32_t paceBaseUs = 0, paceTargetUs = 0, paceAccQ16 = 0;
       paceAccQ16 += ((uint32_t)instrCycles + vicStolenCyc) * C64_US_PER_CYC_Q16;
       vicStolenCyc = 0;
       paceTargetUs += paceAccQ16 >> 16;

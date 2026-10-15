@@ -50,6 +50,9 @@ public:
 
   uint8_t & reg(int address) { return m_regs[address & 0x3F]; }
 
+  // save state (fabgl.h PcSnap)
+  void snapshot(PcSnap & s) { s.bytes(m_regs, sizeof(m_regs)); s.val(m_index); }
+
   // BIOS reads regs 0x00/0x02/0x04 (sec/min/hour, BCD) to seed BIOS_SYSTICKS.
   void updateTime() {
     m_regs[0x00] = 0; // seconds

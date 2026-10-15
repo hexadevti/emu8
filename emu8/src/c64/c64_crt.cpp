@@ -1,5 +1,6 @@
 #include "../../emu.h"
 #include "c64.h"
+#include "../shared/snapshot.h"
 
 // C64 cartridge (.crt) loader with bank switching.
 //
@@ -28,6 +29,8 @@ static int      cartChipCount = 0;
 static String   cartPath;
 static int      cartType = 0;       // .crt hardware type (0=generic, 5=Ocean, 19=Magic Desk...)
 static int      cartCurBank = -1;
+static int16_t  cartRomlChip = -1;  // the chip ROML / ROMH were last filled from (-1: none), for
+static int16_t  cartRomhChip = -1;  // snapshots: a bank that maps one window leaves the other as was
 #if BOARD_ROM_IN_FLASH
 static const uint8_t *cartFlash = nullptr;         // the .crt image in XIP flash
 static const uint8_t  cartBlank[0x2000] = { 0 };   // a window the current bank leaves unmapped
@@ -57,6 +60,7 @@ void c64CartUnmount() {
 #endif
   cartChipCount = 0;
   cartCurBank = -1;
+  cartRomlChip = cartRomhChip = -1;
   cartPath = "";
 }
 
@@ -79,9 +83,11 @@ static void loadCartBank(int bank) {
     const uint8_t *p = cartFlash + cartChips[i].fileOff;
     if (la >= 0x8000 && la <= 0x9fff) {
       c64::cartROML = (uint8_t *)(p - (la - 0x8000));
-      if (sz > 0x2000) c64::cartROMH = (uint8_t *)(p + 0x2000);   // 16K chip spills into ROMH
+      cartRomlChip = i;
+      if (sz > 0x2000) { c64::cartROMH = (uint8_t *)(p + 0x2000); cartRomhChip = i; }   // 16K chip spills into ROMH
     } else if (la >= 0xa000) {
       c64::cartROMH = (uint8_t *)(p - (la & 0x1fff));
+      cartRomhChip = i;
     }
   }
 #else
@@ -94,10 +100,12 @@ static void loadCartBank(int bank) {
     if (la >= 0x8000 && la <= 0x9fff) {       // ROML window ($8000)
       uint16_t n = sz > 0x2000 ? 0x2000 : sz;
       cartFile.read(c64::cartROML + (la - 0x8000), n);
-      if (sz > 0x2000) cartFile.read(c64::cartROMH, sz - 0x2000);  // 16K chip spills into ROMH
+      cartRomlChip = i;
+      if (sz > 0x2000) { cartFile.read(c64::cartROMH, sz - 0x2000); cartRomhChip = i; }  // 16K chip spills into ROMH
     } else if (la >= 0xa000) {                // ROMH window ($A000 or $E000)
       uint16_t n = sz > 0x2000 ? 0x2000 : sz;
       cartFile.read(c64::cartROMH + (la & 0x1fff), n);
+      cartRomhChip = i;
     }
   }
 #endif
@@ -228,6 +236,7 @@ static bool c64LoadCRTLocked(const char *path)
   cartType = hwType;
   cartChipCount = 0;
   cartCurBank = -1;
+  cartRomlChip = cartRomhChip = -1;
   f.seek(hdrLen);
   uint8_t ch[16];
   while (cartChipCount < CART_MAX_CHIPS) {
@@ -277,4 +286,171 @@ static bool c64LoadCRTLocked(const char *path)
   sprintf(buf, "crt: %s hwType=%u, %d bank-chips -> reset", kind, hwType, cartChipCount);
   printLog(buf);
   return true;
+}
+
+// ---- Snapshots (c64_snapshot.cpp) ----
+// A snapshot names the cartridge it was made with and holds its banking state, not its ROM: the
+// same .crt has to be mounted before loading it. Identity: the hardware type, the CHIP table
+// (offsets / banks / load addresses / sizes) and samples of the ROM bytes -- of every chip where
+// the whole image is in flash (PicoCalc), of the mapped bank's chips everywhere. A sample another
+// build cannot take is 0 and is not compared.
+struct CartSnapId {
+  uint8_t  active;
+  uint16_t type, chips;
+  uint32_t table;          // FNV-1a of the CHIP table
+  uint32_t image;          // FNV-1a of each chip's first 64 bytes (flash builds; 0 = not taken)
+  int16_t  bank;           // the mapped bank
+  uint32_t bankSample;     // FNV-1a of that bank's chips' first 64 bytes, read through the windows
+};
+
+static uint32_t fnv(uint32_t h, const uint8_t *p, size_t n) {
+  while (n--) h = (h ^ *p++) * 16777619u;
+  return h;
+}
+static uint32_t fnvU32(uint32_t h, uint32_t v) {
+  const uint8_t b[4] = { (uint8_t)v, (uint8_t)(v >> 8), (uint8_t)(v >> 16), (uint8_t)(v >> 24) };
+  return fnv(h, b, 4);
+}
+
+// Where chip i's first byte sits in the ROML / ROMH window (nullptr: not in one); `room` is what
+// is left of the window from there.
+static const uint8_t *cartChipInWindow(int i, uint16_t &room) {
+  const uint16_t la = cartChips[i].loadAddr;
+  uint16_t off;
+  const uint8_t *w;
+  if (la >= 0x8000 && la <= 0x9fff) { off = la - 0x8000; w = c64::cartROML; }
+  else if (la >= 0xa000)            { off = la & 0x1fff;  w = c64::cartROMH; }
+  else return nullptr;
+  room = 0x2000 - off;
+  return w ? w + off : nullptr;
+}
+
+static CartSnapId cartSnapId() {
+  CartSnapId id = {};
+  id.bank = -1;
+  if (!c64::cartActive) return id;
+  id.active = 1;
+  id.type = (uint16_t)cartType;
+  id.chips = (uint16_t)cartChipCount;
+  id.table = 2166136261u;
+  for (int i = 0; i < cartChipCount; i++) {
+    const CartChip &c = cartChips[i];
+    id.table = fnvU32(id.table, c.fileOff);
+    id.table = fnvU32(id.table, ((uint32_t)c.bank << 16) | c.loadAddr);
+    id.table = fnvU32(id.table, c.size);
+  }
+#if BOARD_ROM_IN_FLASH
+  if (cartFlash) {
+    uint32_t h = 2166136261u;
+    for (int i = 0; i < cartChipCount; i++)
+      h = fnv(h, cartFlash + cartChips[i].fileOff, cartChips[i].size < 64 ? cartChips[i].size : 64);
+    id.image = h ? h : 1;
+  }
+#endif
+  id.bank = (int16_t)cartCurBank;
+  uint32_t h = 2166136261u;
+  for (int i = 0; i < cartChipCount; i++) {
+    if (cartChips[i].bank != cartCurBank) continue;
+    uint16_t room = 0;
+    const uint8_t *p = cartChipInWindow(i, room);
+    if (!p) continue;
+    uint16_t n = cartChips[i].size < 64 ? cartChips[i].size : 64;
+    h = fnv(h, p, n < room ? n : room);
+  }
+  id.bankSample = h ? h : 1;
+  return id;
+}
+
+// First thing in the C64 stream. Loading: reads the saved identity into locals and rejects a
+// snapshot made with another cartridge (or with / without one) before anything is changed.
+bool c64CartSnapCheck(SnapIO &io) {
+  const CartSnapId cur = cartSnapId();
+  CartSnapId s = cur;
+  io.val(s.active); io.val(s.type); io.val(s.chips); io.val(s.table);
+  io.val(s.image); io.val(s.bank); io.val(s.bankSample);
+  if (!io.ok) return false;
+  if (!io.loading) return true;
+  if (s.active != cur.active) {
+    io.reject(s.active ? "Mount the snapshot's cartridge first" : "Remove the cartridge first");
+    return false;
+  }
+  if (!s.active) return true;
+  if (s.type != cur.type || s.chips != cur.chips || s.table != cur.table ||
+      (s.image && cur.image && s.image != cur.image) ||
+      (s.bank == cur.bank && s.bankSample != cur.bankSample)) {
+    io.reject("Snapshot is for another cartridge");
+    return false;
+  }
+  return true;
+}
+
+// Point (flash) or fill (RAM buffers) one window from chip i, as loadCartBank does. False when the
+// RAM-buffer build has no open image to read it from.
+static bool cartSnapMap(int i, bool high) {
+  if (i < 0 || i >= cartChipCount) {
+#if BOARD_ROM_IN_FLASH
+    (high ? c64::cartROMH : c64::cartROML) = (uint8_t *)cartBlank;
+#endif
+    (high ? cartRomhChip : cartRomlChip) = -1;
+    return true;
+  }
+  const uint16_t la = cartChips[i].loadAddr, sz = cartChips[i].size;
+  const bool lowChip = la >= 0x8000 && la <= 0x9fff;
+#if BOARD_ROM_IN_FLASH
+  (void)sz;
+  if (!cartFlash) return false;
+  const uint8_t *p = cartFlash + cartChips[i].fileOff;
+  if (!high)        c64::cartROML = (uint8_t *)(p - (la - 0x8000));
+  else if (lowChip) c64::cartROMH = (uint8_t *)(p + 0x2000);
+  else              c64::cartROMH = (uint8_t *)(p - (la & 0x1fff));
+#else
+  // Only reached for a snapshot taken on a flash build (no windows in it): the caller holds the SD
+  // bus, and this is the open image the CPU core streams its banks from.
+  if (!cartFile || !c64::cartROML || !c64::cartROMH) return false;
+  uint32_t from = cartChips[i].fileOff;
+  uint8_t *const base = high ? c64::cartROMH : c64::cartROML;
+  uint8_t *to;
+  uint32_t n;
+  if (!high)        { to = base + (la - 0x8000); n = sz; }
+  else if (lowChip) { to = base; from += 0x2000; n = sz > 0x2000 ? sz - 0x2000 : 0; }
+  else              { to = base + (la & 0x1fff); n = sz; }
+  if (n > (uint32_t)(base + 0x2000 - to)) n = (uint32_t)(base + 0x2000 - to);
+  if (!cartFile.seek(from) || (uint32_t)cartFile.read(to, n) != n) return false;
+#endif
+  (high ? cartRomhChip : cartRomlChip) = (int16_t)i;
+  return true;
+}
+
+// The cartridge's live state: EXROM/GAME, the mapped bank and the chip each window was filled from,
+// the EasyFlash RAM, and -- on builds that copy banks into RAM -- the two 8K windows themselves.
+void c64CartSnapState(SnapIO &io) {
+  if (!c64::cartActive) return;               // c64CartSnapCheck: the same on both sides
+  bool exrom = c64::cartExrom, game = c64::cartGame;
+  int16_t bank = (int16_t)cartCurBank, roml = cartRomlChip, romh = cartRomhChip;
+  io.flag(exrom); io.flag(game);
+  io.val(bank); io.val(roml); io.val(romh);
+  io.arr(efRam);
+  uint8_t windows = BOARD_ROM_IN_FLASH ? 0 : 1;
+  io.val(windows);
+  if (windows) {
+#if BOARD_ROM_IN_FLASH
+    if (io.loading) {                         // a RAM-buffer build's windows: not needed here
+      uint8_t skip[64];
+      for (int n = 0; n < 0x4000 && io.ok; n += sizeof(skip)) io.bytes(skip, sizeof(skip));
+    }
+#else
+    io.bytes(c64::cartROML, 0x2000);
+    io.bytes(c64::cartROMH, 0x2000);
+#endif
+  }
+  if (!io.loading || !io.ok) return;
+  c64::cartExrom = exrom;
+  c64::cartGame = game;
+  cartCurBank = bank;
+  if (windows && !BOARD_ROM_IN_FLASH) {       // the bytes came with the snapshot
+    cartRomlChip = roml;
+    cartRomhChip = romh;
+  } else if (!cartSnapMap(roml, false) || !cartSnapMap(romh, true)) {
+    io.fail("Cartridge image not available");
+  }
 }

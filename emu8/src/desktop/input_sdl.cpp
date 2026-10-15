@@ -145,9 +145,9 @@ static void desktopTypeInject() {
   static size_t idx = 0; static bool down = false;
   if (fr < at || (fr % 6) != 0) return;         // wait for boot, then ~1 transition / 6 frames
   if (!s[idx]) return;
-  // {F10} {UP} {DOWN} {LEFT} {RIGHT} {ENTER} {ESC} {DEL} name a special key; {WAIT} idles one step.
+  // {F10} {F1} {F5} {UP} {DOWN} {LEFT} {RIGHT} {ENTER} {ESC} {DEL} name a special key; {WAIT} idles one step.
   static const struct { const char *name; SDL_Scancode sc; } kTok[] = {
-    {"F10", SDL_SCANCODE_F10}, {"UP", SDL_SCANCODE_UP}, {"DOWN", SDL_SCANCODE_DOWN},
+    {"F10", SDL_SCANCODE_F10}, {"F1", SDL_SCANCODE_F1}, {"F5", SDL_SCANCODE_F5}, {"UP", SDL_SCANCODE_UP}, {"DOWN", SDL_SCANCODE_DOWN},
     {"LEFT", SDL_SCANCODE_LEFT}, {"RIGHT", SDL_SCANCODE_RIGHT}, {"ENTER", SDL_SCANCODE_RETURN},
     {"ESC", SDL_SCANCODE_ESCAPE}, {"DEL", SDL_SCANCODE_DELETE}, {"WAIT", SDL_SCANCODE_UNKNOWN}};
   size_t len = 1;
@@ -158,6 +158,22 @@ static void desktopTypeInject() {
     len = (size_t)(end - (s + idx)) + 1;
     for (const auto &t : kTok)
       if (strlen(t.name) == len - 2 && !strncmp(s + idx + 1, t.name, len - 2)) sc = t.sc;
+    // {CTRL+} / {CTRL-} ({SHIFT+} / {SHIFT-}) hold / release Left Ctrl (Shift) around the next keys,
+    // e.g. "{CTRL+}{F1}{CTRL-}".
+    const bool isCtrl = len == 7 && !strncmp(s + idx + 1, "CTRL", 4);
+    const bool isShift = len == 8 && !strncmp(s + idx + 1, "SHIFT", 5);
+    if ((isCtrl || isShift) && (s[idx + len - 2] == '+' || s[idx + len - 2] == '-')) {
+      SDL_Event c; memset(&c, 0, sizeof(c));
+      const bool press = s[idx + len - 2] == '+';
+      c.type = press ? SDL_KEYDOWN : SDL_KEYUP; c.key.state = press ? SDL_PRESSED : SDL_RELEASED;
+      c.key.keysym.scancode = isCtrl ? SDL_SCANCODE_LCTRL : SDL_SCANCODE_LSHIFT;
+      c.key.keysym.sym = isCtrl ? SDLK_LCTRL : SDLK_LSHIFT;
+      const SDL_Keymod bit = isCtrl ? KMOD_LCTRL : KMOD_LSHIFT;     // hidModifiers() reads the mod state,
+      SDL_SetModState((SDL_Keymod)(press ? (SDL_GetModState() | bit) : (SDL_GetModState() & ~bit)));   // which a pushed event does not set
+      SDL_PushEvent(&c);
+      idx += len;
+      return;
+    }
     if (sc == SDL_SCANCODE_UNKNOWN) { idx += len; return; }
   } else {
     sc = scancodeForChar(s[idx]);
@@ -166,6 +182,7 @@ static void desktopTypeInject() {
   SDL_Event e; memset(&e, 0, sizeof(e));
   e.key.keysym.scancode = sc;
   e.key.keysym.sym = SDL_GetKeyFromScancode(sc);
+  e.key.keysym.mod = (Uint16)SDL_GetModState();     // as a real key event carries it (ImGui reads it)
   if (!down) { e.type = SDL_KEYDOWN; e.key.state = SDL_PRESSED;  down = true; }
   else       { e.type = SDL_KEYUP;   e.key.state = SDL_RELEASED; down = false; idx += len; }
   SDL_PushEvent(&e);

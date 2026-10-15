@@ -45,7 +45,8 @@
 //   Ctrl-F3                  -> HID_KEY_F11  CPU reset (Apple II); PAUSE/NMI on SMS
 //   Ctrl-Shift-F1            -> the system selection menu (reboots only if another system is picked)
 //   Ctrl-Shift-F3            -> hard reset: reboot straight back into the running system, no menu
-// The keyboard sends Shift-F1..F5 as F6..F10, so these two arrive as Ctrl-F6 and Ctrl-F8; the
+//   Ctrl-Shift-F5            -> snapshots: save / load the machine's state (snapshot.cpp)
+// The keyboard sends Shift-F1..F5 as F6..F10, so these three arrive as Ctrl-F6, Ctrl-F8, Ctrl-F10; the
 // unshifted-code-plus-Shift forms are matched too, in case a keyboard firmware sends those.
 //   Ctrl-Shift-Up            -> reboot into the UF2 Loader menu (loader_picocalc.cpp)
 // Bare keys pass through:
@@ -84,7 +85,7 @@
 enum {
   PCK_BACKSPACE = 0x08, PCK_TAB = 0x09, PCK_ENTER = 0x0A,
   PCK_F1 = 0x81, PCK_F2 = 0x82, PCK_F3 = 0x83, PCK_F4 = 0x84, PCK_F5 = 0x85,
-  PCK_F6 = 0x86, PCK_F7 = 0x87, PCK_F8 = 0x88, PCK_F9 = 0x89, PCK_F10 = 0x8A,
+  PCK_F6 = 0x86, PCK_F7 = 0x87, PCK_F8 = 0x88, PCK_F9 = 0x89, PCK_F10 = 0x90,   // 0x90, not 0x8A: the keyboard skips 0x8A-0x8F
   PCK_MOD_ALT = 0xA1, PCK_MOD_SHL = 0xA2, PCK_MOD_SHR = 0xA3,
   PCK_MOD_SYM = 0xA4, PCK_MOD_CTRL = 0xA5,
   PCK_ESC = 0xB1,
@@ -300,6 +301,13 @@ static void handleEvent(uint8_t state, uint8_t code)
       return;
     }
 
+    // Ctrl-Shift-F5 (arrives as F10) -> the snapshot page: save / load the machine's state
+    // (snapshot.cpp). Pressing it again closes the page and resumes.
+    if (code == PCK_F10 || (code == PCK_F5 && g_shiftHeld)) {
+      snapshotWindowToggle();
+      return;
+    }
+
     // Settings and CPU reset. These MUST stay below the Shift branches above: Ctrl-F1/Ctrl-Shift-F1 and
     // Ctrl-F3/Ctrl-Shift-F3 may share a key code, told apart only by shift.
     if (code == PCK_F1) { tapHid(HID_KEY_F10); return; }              // settings menu
@@ -344,12 +352,55 @@ static void handleEvent(uint8_t state, uint8_t code)
 // ---------------------------------------------------------------------------------------------
 static bool g_kbdReady   = false;   // Wire1 brought up
 static bool g_selPending = false;   // a FIFO-register write is outstanding; its result is readable
+static bool g_batPending = false;   // ...a battery-register write instead (picocalcPumpInput)
 
 static void selectFifoReg()
 {
+  g_batPending = false;
   Wire1.beginTransmission(KBD_I2C_ADDR);
   Wire1.write((uint8_t)KBD_REG_FIF);
   g_selPending = (Wire1.endTransmission() == 0);
+}
+
+// Battery. REG_ID_BAT (0x0B) is the STM32's reading of the 18650 gauge: selected like the FIFO
+// and read back as two bytes, {0x0B, value}, where value bits 0..6 are the charge in percent and
+// bit 7 is set while the charger is running. It rides the same split-phase poll -- every
+// PCKBD_BAT_POLL_MS one poll selects it instead of the FIFO -- so it never blocks either; the
+// FIFO just waits one extra 10 ms tick, which its 31 entries absorb.
+#define KBD_REG_BAT 0x0B
+#ifndef PCKBD_BAT_POLL_MS
+#define PCKBD_BAT_POLL_MS 10000
+#endif
+static int  g_batPercent  = -1;     // -1 until the first good read
+static bool g_batCharging = false;
+
+int  picocalcBatteryPercent()  { return g_batPercent; }
+bool picocalcBatteryCharging() { return g_batCharging; }
+
+static void selectBatReg()
+{
+  g_selPending = false;
+  Wire1.beginTransmission(KBD_I2C_ADDR);
+  Wire1.write((uint8_t)KBD_REG_BAT);
+  g_batPending = (Wire1.endTransmission() == 0);
+}
+
+static void readBat()
+{
+  g_batPending = false;
+  if (Wire1.requestFrom((uint8_t)KBD_I2C_ADDR, (size_t)2) != 2) return;
+  uint8_t r = (uint8_t)Wire1.read();
+  uint8_t v = (uint8_t)Wire1.read();
+  if (r != KBD_REG_BAT) return;                       // not our answer (STM32 lost the selection)
+  int pct = v & 0x7F;
+  if (pct > 100) return;
+  if (g_batPercent != pct || g_batCharging != (bool)(v & 0x80)) {
+    g_batPercent  = pct;
+    g_batCharging = (v & 0x80) != 0;
+    char m[48];
+    sprintf(m, "battery: %d%%%s", pct, g_batCharging ? " (charging)" : "");
+    printLog(m);
+  }
 }
 
 // Reads the pending FIFO word. Returns false when nothing was read or the FIFO is empty.
@@ -568,8 +619,24 @@ void picocalcPumpInput()
   if (now - lastPoll < 10) return;
   lastPoll = now;
 
+  // A battery read was armed last tick: collect it, and go back to the FIFO.
+  if (g_batPending) { readBat(); selectFifoReg(); return; }
+
   uint8_t state, code;
-  if (!readFifo(&state, &code)) {selectFifoReg();return; }
+  if (!readFifo(&state, &code)) {
+    // The STM32 dequeues a FIFO event when the FIFO register is SELECTED, so the battery may only
+    // take the place of a FIFO select, right after one that came back empty -- never of a read.
+    static uint32_t lastBat = 0;
+    static bool batOnce = false;
+    if (!batOnce || now - lastBat >= PCKBD_BAT_POLL_MS) {
+      batOnce = true;
+      lastBat = now;
+      selectBatReg();
+    } else {
+      selectFifoReg();
+    }
+    return;
+  }
   handleEvent(state, code);
 
 #if PCKBD_DRAIN_EXTRA > 0

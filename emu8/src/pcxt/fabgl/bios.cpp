@@ -1391,4 +1391,13 @@ void BIOS::videoHandlerEntry()
 
   }
 }
+
+
+void BIOS::snapshot(PcSnap & s)
+{
+  s.val(m_kbdScancodeComp);
+  s.val(m_origInt1EAddr);
+  for (int i = 0; i < DISKCOUNT; ++i)
+    s.e32(m_mediaType[i]);
+}
 #endif // !(BOARD_PICOCALC && RP2040)

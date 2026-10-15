@@ -18,6 +18,7 @@
 // RGB565 8-line bands using MSX_PALETTE (see msx.cpp / video.cpp), like the NES/Atari paths.
 
 #include "msx.h"
+#include "../z80/z80_snapshot.h"
 #include <string.h>
 
 namespace msx {
@@ -243,6 +244,27 @@ void vdpRender() {
   else if (m3) renderMulticolor(fb);
   else         renderGraphic1(fb);
   renderSprites(fb);
+}
+
+// ---- save state (msx_snapshot.cpp, coleco_snapshot.cpp) -----------------------------------------
+// "TMS " record: R0-R7, status, VRAM address (u16), control latch toggle + first byte, read-ahead.
+// VRAM itself is saved by the machine (it owns the buffer).
+void vdpSnapshot(SnapIO &io) {
+  io.tag("TMS ");
+  io.arr(vreg);
+  io.val(vstatus);
+  io.val(vaddr);
+  io.flag(vlatched);
+  io.val(vlatch);
+  io.val(vreadAhead);
+}
+
+// Repaint the framebuffer from the restored VRAM/registers without disturbing the restored status
+// (vdpRender recomputes the 5th-sprite / collision bits as a side effect).
+void vdpRedraw() {
+  const uint8_t s = vstatus;
+  vdpRender();
+  vstatus = s;
 }
 
 } // namespace msx

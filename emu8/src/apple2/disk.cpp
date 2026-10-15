@@ -406,7 +406,7 @@ static bool diskAccept(const std::string &name) {
     if ((int)name.find(diskFileExtensions[j].c_str()) > 0) return true;
   return false;
 }
-static FileBrowser diskBrowser = { "DiskII", &diskFiles, diskAccept, nullptr, 250, "" };
+static FileBrowser diskBrowser = { "DiskII", &diskFiles, diskAccept, nullptr, FB_MAX_ENTRIES, "" };
 
 // Rescan the current browse directory into diskFiles. Synchronous so it can be called
 // directly (e.g. from the Settings device toggle) without racing the renderer.

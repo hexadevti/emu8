@@ -88,7 +88,8 @@ extern int freeSpace;
 // FSSetup()). Raw opendir()/readdir() need the full VFS path, so file scans prefix their
 // SD-relative directory with this. If FSSetup() ever passes a different mountpoint, update it.
 #if defined(BOARD_DESKTOP)
-#define SD_VFS_ROOT "./sdcard"   // desktop: the emulated SD card is this host dir (see sd_host.cpp).
+const char *desktopSdRoot();     // sd_host.cpp: the host dir backing the emulated SD card (repo sdcard/)
+#define SD_VFS_ROOT desktopSdRoot()   // desktop: the same root every other SD access maps under (not cwd)
 #elif defined(BOARD_PICOCALC)
 #define SD_VFS_ROOT ""           // arduino-pico has no global VFS: SDFS paths ARE SD-relative.
 #else
@@ -107,16 +108,18 @@ extern SPIClass hspi;          // SD HSPI bus (shared with the XPT2046 touch on 
 extern SemaphoreHandle_t gBusLock;
 static inline void busTake() { if (gBusLock) xSemaphoreTake(gBusLock, portMAX_DELAY); }
 static inline void busGive() { if (gBusLock) xSemaphoreGive(gBusLock); }
-extern std::vector<std::string> hdFiles;
-extern std::vector<std::string> diskFiles;
-extern std::vector<std::string> c64Files;
-extern std::vector<std::string> nesFiles;
-extern std::vector<std::string> atariFiles;   // Atari 2600 .a26/.bin ROMs on SD
-extern std::vector<std::string> msxFiles;      // MSX1 .rom/.mx1/.dsk images on SD
-extern std::vector<std::string> smsFiles;      // SMS .sms/.bin ROM images on SD
-extern std::vector<std::string> colecoFiles;   // ColecoVision .col/.rom/.bin cartridges on SD
-extern std::vector<std::string> zxFiles;       // ZX Spectrum .sna/.z80/.tap/.tzx on SD
-extern std::vector<std::string> pcFiles;       // PCXT .img/.ima/.dsk/.vhd disk images on SD
+// SD browser lists: FileList (src/shared/filebrowser.h) -- one packed pool per list, not a vector of strings.
+#include "src/shared/filebrowser.h"
+extern FileList hdFiles;
+extern FileList diskFiles;
+extern FileList c64Files;
+extern FileList nesFiles;
+extern FileList atariFiles;   // Atari 2600 .a26/.bin ROMs on SD
+extern FileList msxFiles;      // MSX1 .rom/.mx1/.dsk images on SD
+extern FileList smsFiles;      // SMS .sms/.bin ROM images on SD
+extern FileList colecoFiles;   // ColecoVision .col/.rom/.bin cartridges on SD
+extern FileList zxFiles;       // ZX Spectrum .sna/.z80/.tap/.tzx on SD
+extern FileList pcFiles;       // PCXT .img/.ima/.dsk/.vhd disk images on SD
 
 // Board Pins, capability macros, and the display backend selection now live in board.h
 // (included above). Pins: SD_*, KEYBOARD_*, ANALOG_*, LED_PIN, DIGITAL_BUTTON12_PIN, SPEAKER_PIN.
@@ -163,7 +166,7 @@ extern char keymem;
 // their own, read in place (romsel.cpp) -- the EEPROM stops at the Apple IIe HD name.
 #define EEPROM_SIZE 1792
 #else
-#define EEPROM_SIZE 2752   // ... + the ColecoVision cartridge name (1280) + the ZX Spectrum file name (1408) + the Apple IIe's own disk/HD names (1536, 1664) + the picked system ROMs (1792, ROMSEL_COUNT x ROMSEL_SLOT_LEN) + the ROM / apps base folders (2624, 2688)
+#define EEPROM_SIZE 2816   // ... + the ColecoVision cartridge name (1280) + the ZX Spectrum file name (1408) + the Apple IIe's own disk/HD names (1536, 1664) + the picked system ROMs (1792, ROMSEL_COUNT x ROMSEL_SLOT_LEN) + the ROM / apps / snapshot base folders (2624, 2688, 2752)
 #endif
 extern int fnSelected;
 extern int joystickCycles0;
@@ -281,11 +284,13 @@ enum RomSlot : uint8_t {
   ROMSEL_MSX_BIOS, ROMSEL_MSX_DISK, ROMSEL_COLECO_BIOS, ROMSEL_ZX_ROM, ROMSEL_PCXT_BIOS,
   ROMSEL_COUNT                            // 13 x 64 = 832 bytes: 1792..2623
 };
-// Two more records of the same shape right after the ROM slots (general settings, splash Ctrl-F1):
-// the folder the default ROM names live in, and the folder every file browser starts in.
+// Three more records of the same shape right after the ROM slots (general settings, splash Ctrl-F1):
+// the folder the default ROM names live in, the folder every file browser starts in, and the folder
+// the save states go to (one subfolder per system).
 #define ROMSEL_BASE_ROMS  ROMSEL_COUNT          // 2624..2687, empty = "/roms"
 #define ROMSEL_BASE_APPS  (ROMSEL_COUNT + 1)    // 2688..2751, empty = "/"
-#define ROMSEL_RECORDS    (ROMSEL_COUNT + 2)
+#define ROMSEL_BASE_SNAP  (ROMSEL_COUNT + 2)    // 2752..2815, empty = "/emu8-snapshot" (snapshot.cpp)
+#define ROMSEL_RECORDS    (ROMSEL_COUNT + 3)
 struct RomSlotInfo {
   uint8_t platform;                       // Platform the ROM belongs to
   int8_t  a2Model;                        // Apple II only: 0 = II+, 1 = IIe, -1 = both
@@ -331,8 +336,11 @@ extern bool c64Autoload;          // C64: auto-load selectedC64FileName on boot
 extern uint8_t joyPort;           // C64: joystick port (1 or 2)
 extern String NewDeviceConfig;
 extern byte selectedHdFile;
-extern uint8_t firstShowFile;
-extern uint8_t shownFile;
+// File-list scroll position and highlighted entry. 16-bit: a folder may list more than 255 entries
+// (the cap is FB_MAX_ENTRIES and the free heap, see filebrowser.cpp). SHOWN_NONE = nothing picked.
+#define SHOWN_NONE 0xffff
+extern uint16_t firstShowFile;
+extern uint16_t shownFile;
 
 // Softswitches Config
 extern bool Graphics_Text;

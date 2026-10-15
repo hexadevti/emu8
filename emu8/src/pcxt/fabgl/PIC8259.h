@@ -68,6 +68,9 @@ public:
   // CPU->8259: CPU acks the pending interrupt to 8259
   void ackPendingInterrupt();
 
+  // save state (fabgl.h PcSnap): every register, both directions
+  void snapshot(PcSnap & s);
+
 
 private:
 
