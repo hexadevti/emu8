@@ -189,4 +189,57 @@ bool PicoEEPROMClass::commit()
 // Bring-up checkpoints (see pico_shim.h). Written by the render task on core 1, read by the
 // 6502 meter on core 0.
 
+// --- fast XIP after a flash write (RP2350) ----------------------------------------------------
+// Every flash_range_erase/program ends by re-entering XIP. The RP2040 does that by re-running
+// boot2, which puts the fast quad read mode back. The RP2350 build has no boot2 (rpipico2
+// build.boot2=none), so the SDK falls back to the bootrom's flash_enter_cmd_xip(): serial 03h
+// reads at a conservative divider. It saves and restores QMI CS1 (PSRAM) over the call, but not
+// CS0, the flash all the code runs from -- so after the first write every flash fetch was several
+// times slower until the next reboot. That was "every system is slow the FIRST time it runs, fine
+// after a restart": the first run copies its BIOS/cart into flash (romflash_picocalc.cpp), later
+// boots find it already there and write nothing. Settings saves (EEPROM.commit) did it too.
+//
+// The RP2350 builds link with -Wl,--wrap=flash_range_erase,--wrap=flash_range_program
+// (.vscode/tasks.json, tools/release.ps1), so every caller -- ours and the EEPROM library's --
+// lands here. These run from SRAM, inside the window where the caller has the other core parked,
+// and put CS0's read setup back exactly as it was before the write. Without the link flags these
+// are simply unused; on the RP2040 they would only pass through.
+#include <hardware/flash.h>
+#if !PICO_RP2040
+#include <hardware/structs/qmi.h>
+#endif
+
+extern "C" {
+void __real_flash_range_erase(uint32_t flash_offs, size_t count);
+void __real_flash_range_program(uint32_t flash_offs, const uint8_t *data, size_t count);
+
+volatile uint32_t picocalcXipRestores = 0;   // writes that left CS0 slow and were put right
+
+void __no_inline_not_in_flash_func(__wrap_flash_range_erase)(uint32_t flash_offs, size_t count) {
+#if !PICO_RP2040
+  const uint32_t timing = qmi_hw->m[0].timing, rcmd = qmi_hw->m[0].rcmd, rfmt = qmi_hw->m[0].rfmt;
+  __real_flash_range_erase(flash_offs, count);
+  if (qmi_hw->m[0].timing != timing || qmi_hw->m[0].rcmd != rcmd || qmi_hw->m[0].rfmt != rfmt) {
+    qmi_hw->m[0].timing = timing; qmi_hw->m[0].rcmd = rcmd; qmi_hw->m[0].rfmt = rfmt;
+    picocalcXipRestores++;
+  }
+#else
+  __real_flash_range_erase(flash_offs, count);
+#endif
+}
+
+void __no_inline_not_in_flash_func(__wrap_flash_range_program)(uint32_t flash_offs, const uint8_t *data, size_t count) {
+#if !PICO_RP2040
+  const uint32_t timing = qmi_hw->m[0].timing, rcmd = qmi_hw->m[0].rcmd, rfmt = qmi_hw->m[0].rfmt;
+  __real_flash_range_program(flash_offs, data, count);
+  if (qmi_hw->m[0].timing != timing || qmi_hw->m[0].rcmd != rcmd || qmi_hw->m[0].rfmt != rfmt) {
+    qmi_hw->m[0].timing = timing; qmi_hw->m[0].rcmd = rcmd; qmi_hw->m[0].rfmt = rfmt;
+    picocalcXipRestores++;
+  }
+#else
+  __real_flash_range_program(flash_offs, data, count);
+#endif
+}
+}   // extern "C"
+
 #endif // BOARD_PICOCALC

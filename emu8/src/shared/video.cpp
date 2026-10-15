@@ -34,7 +34,17 @@ volatile int8_t splashKeyEvent = 0;
 // just before restarting. Selecting a platform on the splash, and the mount+reboot paths, restart
 // WITHOUT the magic, so they boot straight into the chosen system without re-showing the banner.
 
+#if defined(BOARD_PICOCALC)
+// Not plain RAM here: on the RP2350 "@sdmgr" rebooted into the normal system instead of SD Manager
+// (and the deploy script, asking again, kept the board rebooting) -- the UF2 loader, which runs
+// between our reset and our main(), is the suspect for clobbering .uninitialized_data. The watchdog
+// scratch registers survive a watchdog reboot whatever runs in SRAM; the SDK only uses 4..7.
+#include <hardware/structs/watchdog.h>
+#define splashOnBootMagic    (watchdog_hw->scratch[0])
+#define sdManagerOnBootMagic (watchdog_hw->scratch[1])
+#else
 RTC_NOINIT_ATTR static uint32_t splashOnBootMagic;
+#endif
 #define SPLASH_ON_BOOT_MAGIC 0x5350A5AAu
 void requestSplashOnNextBoot() { splashOnBootMagic = SPLASH_ON_BOOT_MAGIC; }
 
@@ -42,7 +52,9 @@ void requestSplashOnNextBoot() { splashOnBootMagic = SPLASH_ON_BOOT_MAGIC; }
 // splash leaves the choice here instead of in EEPROM and reboots. Honoured only after a software
 // reset -- RTC_NOINIT memory holds garbage at power-on -- and consumed on read, so the boot after
 // this one (Ctrl-F6, a power cycle) comes back to the system the user was running.
+#if !defined(BOARD_PICOCALC)
 RTC_NOINIT_ATTR static uint32_t sdManagerOnBootMagic;
+#endif
 #define SDMGR_ON_BOOT_MAGIC 0x53444D47u
 static void requestSdManagerOnNextBoot() { sdManagerOnBootMagic = SDMGR_ON_BOOT_MAGIC; }
 void rebootToSdManager() { requestSdManagerOnNextBoot(); delay(50); ESP.restart(); }   // also: USB serial "@sdmgr"

@@ -56,12 +56,14 @@ $ESP_BOARDS = @{
 }
 $PICO_BOARDS = @(
   @{ Tag = 'rp2350'; Name = 'Pico 2 (RP2350)'
-     Fqbn = 'rp2040:rp2040:rpipico2:arch=arm,os=freertos,freq=250,flash=4194304_65536,usbstack=picosdk,opt=Optimize2,exceptions=Enabled' }
+     Fqbn = 'rp2040:rp2040:rpipico2:arch=arm,os=freertos,freq=250,flash=4194304_65536,usbstack=picosdk,opt=Optimize2,exceptions=Enabled'
+     # Flash writes go through pico_shim.cpp, which puts fast XIP back afterwards (see there).
+     LinkFlags = '-Wl,--wrap=flash_range_erase -Wl,--wrap=flash_range_program' }
   @{ Tag = 'rp2040'; Name = 'Pico (RP2040)'
      Fqbn = 'rp2040:rp2040:rpipico:os=freertos,freq=250,flash=2097152_65536,usbstack=picosdk,opt=Optimize2,exceptions=Enabled' }
 )
 
-function Invoke-Arduino([string]$Fqbn, [string]$Flags, [string]$BuildDir, [string]$OutDir, [hashtable]$Env = @{}) {
+function Invoke-Arduino([string]$Fqbn, [string]$Flags, [string]$BuildDir, [string]$OutDir, [hashtable]$Env = @{}, [string]$LinkFlags = '') {
   $saved = @{}
   foreach ($k in $Env.Keys) { $saved[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $Env[$k]) }
   try {
@@ -71,6 +73,7 @@ function Invoke-Arduino([string]$Fqbn, [string]$Flags, [string]$BuildDir, [strin
     if ($Flags) {
       $cmd += @('--build-property', "compiler.cpp.extra_flags=$Flags", '--build-property', "compiler.c.extra_flags=$Flags")
     }
+    if ($LinkFlags) { $cmd += @('--build-property', "compiler.c.elf.extra_flags=$LinkFlags") }
     # Compiler warnings go to stderr, which Windows PowerShell 5.1 turns into terminating errors under
     # 'Stop' whenever the output is redirected; the exit code is what says whether it failed.
     $ErrorActionPreference = 'Continue'
@@ -150,7 +153,7 @@ function Build-PicoCalc {
   foreach ($p in $PICO_BOARDS) {
     $bin = Join-Path $work "picocalc-$($p.Tag)-out"
     $flags = "-DBOARD_PICOCALC -I$sketch/src/picocalc/pico_shim"
-    Invoke-Arduino $p.Fqbn $flags (Join-Path $work "picocalc-$($p.Tag)-build") $bin
+    Invoke-Arduino $p.Fqbn $flags (Join-Path $work "picocalc-$($p.Tag)-build") $bin -LinkFlags $p.LinkFlags
     $uf2 = Join-Path $out "emu8-picocalc-$($p.Tag)-v$Version.uf2"
     Copy-Item (Join-Path $bin 'emu8.ino.uf2') $uf2 -Force
     Write-Host "  -> $uf2"

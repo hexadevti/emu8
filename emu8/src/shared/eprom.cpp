@@ -64,7 +64,7 @@ static void eepromWriteDefaults()
 {
   EEPROM.writeBool(HdDiskEEPROMaddress, false);
   EEPROM.writeBool(IIpIIeEEPROMaddress, false);
-  EEPROM.writeBool(Fast1MhzSpeedEEPROMaddress, true);
+  EEPROM.writeBool(Fast1MhzSpeedEEPROMaddress, false);
   EEPROM.writeBool(JoystickEEPROMaddress, true);
   EEPROM.writeBool(VideoColorEEPROMaddress, true);
   EEPROM.writeBool(SoundEEPROMaddress, true);

@@ -209,6 +209,9 @@
         "compiler.cpp.extra_flags=-DBOARD_PICOCALC -I${workspaceFolder}/emu8/src/picocalc/pico_shim",
         "--build-property",
         "compiler.c.extra_flags=-DBOARD_PICOCALC -I${workspaceFolder}/emu8/src/picocalc/pico_shim",
+        // Route every flash write through pico_shim.cpp, which restores fast XIP afterwards (RP2350 only).
+        "--build-property",
+        "compiler.c.elf.extra_flags=-Wl,--wrap=flash_range_erase -Wl,--wrap=flash_range_program",
         "--build-path",
         "${workspaceFolder}/.picocalc-rp2350-build",
         "--output-dir",

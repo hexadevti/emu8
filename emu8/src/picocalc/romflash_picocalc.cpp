@@ -40,6 +40,7 @@
 
 extern "C" uint8_t _FS_start;
 extern "C" uint8_t __flash_binary_end;
+extern "C" volatile uint32_t picocalcXipRestores;   // pico_shim.cpp: fast XIP put back after writes
 
 static const uint32_t kSector     = FLASH_SECTOR_SIZE;   // 4096: the erase granule
 static const uint32_t kBiosWindow = 0x8000;              // 32K, the largest MSX1 main BIOS
@@ -120,8 +121,9 @@ const uint8_t *romFlashLoad(RomFlashWindow w, File &f, uint32_t len, uint8_t *st
   if (!staging) free(chunk);
 
   if (!ok) { printLog("ROMFLASH: SD read came up short"); return nullptr; }
-  sprintf(buf, "ROMFLASH: %uK at 0x%08x, %u of %u sectors rewritten", (unsigned)(len / 1024),
-          (unsigned)base, (unsigned)written, (unsigned)((len + kSector - 1) / kSector));
+  sprintf(buf, "ROMFLASH: %uK at 0x%08x, %u of %u sectors rewritten, xip restores %u", (unsigned)(len / 1024),
+          (unsigned)base, (unsigned)written, (unsigned)((len + kSector - 1) / kSector),
+          (unsigned)picocalcXipRestores);
   printLog(buf);
   return (const uint8_t *)base;
 }

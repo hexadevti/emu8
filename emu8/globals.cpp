@@ -84,7 +84,7 @@ bool menuOpen() { return OptionsWindow || splashActive; }
 bool ClearWindow = false;
 bool initializedHdDisk = false;
 bool HdDisk = false;
-bool Fast1MhzSpeed = true;
+bool Fast1MhzSpeed = false;
 bool joystick = true;
 bool mouse = true;
 bool diskAttached = false;
