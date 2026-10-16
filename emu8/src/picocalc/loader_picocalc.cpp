@@ -91,4 +91,40 @@ void picocalcCheckLoaderCmd()
   }
 }
 
-#endif  // BOARD_PICOCALC
+#elif defined(BOARD_PICOCALC_P4)
+
+// The P4 counterpart is esp32loader: its bootloader boots the loader instead of the app when
+// LP_STORE15 holds its magic across a software reset (esp32loader main/loader_api.h). Without
+// esp32loader installed this is a plain restart. Same entry points as above: Ctrl-Shift-Up, and
+// PICOCALC_LOADER_CMD on the console UART, so the PC can get to the loader's web upload (F4)
+// without a hand on the keyboard.
+#include "soc/soc.h"
+#include "soc/lp_system_reg.h"
+#include "esp_system.h"
+
+#define ESP32LOADER_MAGIC   0x10ADE125u
+#define PICOCALC_LOADER_CMD "@uf2menu\n"
+
+void picocalcRebootToLoaderMenu(const char *why)
+{
+  printLog(why);
+  if (currentPlatform != PLATFORM_SDMANAGER) saveConfig();
+  delay(50);
+  REG_WRITE(LP_SYSTEM_REG_LP_STORE15_REG, ESP32LOADER_MAGIC);
+  esp_restart();
+}
+
+void picocalcCheckLoaderCmd()
+{
+  static const char menu[] = PICOCALC_LOADER_CMD;
+  static uint8_t matched = 0;
+  if (currentPlatform == PLATFORM_SDMANAGER) return;       // sdserial reads the port there
+  while (Serial.available()) {
+    int c = Serial.read();
+    if (c < 0) break;
+    if (c != (uint8_t)menu[matched]) matched = 0;
+    if (c == (uint8_t)menu[matched] && !menu[++matched]) picocalcRebootToLoaderMenu("Serial asked for esp32loader");
+  }
+}
+
+#endif  // BOARD_PICOCALC / BOARD_PICOCALC_P4

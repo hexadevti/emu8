@@ -25,9 +25,11 @@ bool bootHintShowing();   // the hint owns panel rows 280..319 right now (full-p
 bool picocalcWaitForMainboard();   // block until the PicoCalc's own power rail is up
 bool picocalcWaitAnyKey(uint32_t timeoutMs);   // hold the screen until a key is pressed
 #endif
-#if defined(BOARD_PICOCALC)
-void picocalcRebootToLoaderMenu(const char *why);   // loader_picocalc.cpp: reboot into the UF2 Loader's SD menu
+#if defined(BOARD_PICOCALC) || defined(BOARD_PICOCALC_P4)
+void picocalcRebootToLoaderMenu(const char *why);   // loader_picocalc.cpp: reboot into the UF2 Loader's SD menu (P4: esp32loader)
 void picocalcCheckLoaderCmd();                      // ...if the PC sent PICOCALC_LOADER_CMD over USB serial
+#endif
+#if defined(BOARD_PICOCALC)
 bool picocalcLoaderCmdFeed(uint8_t c);              // ...the same, fed byte by byte (sdserial, between frames)
 #endif
 void printSequence(int seq);

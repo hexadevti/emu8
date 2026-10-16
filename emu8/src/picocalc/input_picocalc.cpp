@@ -307,13 +307,7 @@ static void handleEvent(uint8_t state, uint8_t code)
     // On the P4 the counterpart is esp32loader: its bootloader boots the loader instead of the app
     // when LP_STORE15 holds its magic across a software reset (esp32loader main/loader_api.h).
     // Without esp32loader installed this is a plain restart.
-    if (code == PCK_PAGE_UP || (code == PCK_UP && g_shiftHeld)) {
-      printLog("Ctrl-Shift-Up: rebooting to esp32loader");
-      if (currentPlatform != PLATFORM_SDMANAGER) saveConfig();
-      delay(50);
-      REG_WRITE(LP_SYSTEM_REG_LP_STORE15_REG, 0x10ADE125u);
-      esp_restart();
-    }
+    if (code == PCK_PAGE_UP || (code == PCK_UP && g_shiftHeld)) picocalcRebootToLoaderMenu("Ctrl-Shift-Up: rebooting to esp32loader");
 #endif
 
     // Ctrl-Shift-F1 (arrives as F6) -> the system selection menu, drawn over the paused emulator (splashOpen in
@@ -623,9 +617,7 @@ bool picocalcWaitAnyKey(uint32_t timeoutMs)
 // Called once per frame from DisplayGFX::flush().
 void picocalcPumpInput()
 {
-#if defined(BOARD_PICOCALC)
   picocalcCheckLoaderCmd();
-#endif
   if (!g_kbdReady) picocalcInputSetup();
 
   // We booted against a dead mainboard (the wait in setup() timed out), so the SD never

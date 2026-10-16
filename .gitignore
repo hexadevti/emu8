@@ -57,3 +57,4 @@ roms/
 *.rom
 
 .claude/
+.picocalc-p4-build/
