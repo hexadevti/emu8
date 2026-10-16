@@ -30,7 +30,11 @@ static uint8_t  instat        = 0;      // bit7 = timer underflowed since last I
 void riotReset() {
   if (!riotRam) riotRam = (uint8_t *)malloc(128);
   outa = ddra = outb = ddrb = 0;
-  timerValue = 0; timerInterval = 1024; timerCycleAcc = 0; instat = 0;
+  // Power-on: the real 6532 timer comes up with an arbitrary count at the /1024 rate. Not 0: that
+  // expires ~1000 cycles in, before a boot that polls INTIM ever sets it (H.E.R.O. waits with an
+  // 8-cycle LDA INTIM/BNE loop, which phase-locks against the 256-cycle post-expiry wrap and
+  // never reads 0). 0x20 runs out ~27 ms after reset, well after any init.
+  timerValue = 0x20; timerInterval = 1024; timerCycleAcc = 0; instat = 0;
 }
 
 uint8_t riotRead(uint16_t addr) {

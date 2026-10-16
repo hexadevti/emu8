@@ -142,8 +142,12 @@ static inline void c64BuildScanline(uint16_t *buf, int sy, uint16_t bg) {
 // No frame within 100 ms (paused, reset, menu): nothing is pushed and the panel keeps the last one.
 // Centred with a top/bottom border when the keyboard is hidden; vertically flattened into the top
 // 112px when it is open (so all 200 lines stay visible above the keys).
+#if defined(PICOCALC_MAINBOARD)
 #if defined(BOARD_PICOCALC)
 #define C64_BARRIER() __asm volatile("dmb" ::: "memory")
+#else
+#define C64_BARRIER() __sync_synchronize()
+#endif
 static inline void c64StripPush(int y, int n, const uint16_t *p) { tft.pushImageAsync(0, y, 320, n, p); }
 static inline bool c64StripBusy() { return tft.pushBusy(); }
 static inline void c64StripWait() { tft.pushWait(); }
@@ -373,7 +377,7 @@ static void c64RenderBitmap() {
               (unsigned long)c64VidLagFrames, (unsigned long)c64::c64PerfKhz, (unsigned)c64::c64PerfVicPct,
               (unsigned long)c64::c64MaxLineGapUs,
               (unsigned)ESP.getFreeHeap(),
-#if defined(BOARD_PICOCALC)
+#if defined(PICOCALC_MAINBOARD)
               (unsigned long)(lcdSpiHz() / 1000));
 #else
               0UL);

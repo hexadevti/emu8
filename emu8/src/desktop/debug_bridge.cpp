@@ -197,12 +197,12 @@ float dbgClockDefaultMhz() { return 1.0f; }                        // stock Appl
 float dbgGetMeasuredMhz()  { return appleMeasuredMhz; }
 
 // --- full host speed (uncapped), for EVERY platform. The cores honor a per-platform "Fast" flag in
-// their pacing loop (Apple II/C64 share Fast1MhzSpeed; NES/MSX/SMS have their own); Atari and
-// PC-XT have no real-time throttle on the desktop, so they always run uncapped (Fixed = true). ---
+// their pacing loop (Apple II/C64 share Fast1MhzSpeed; NES/MSX/SMS/Atari have their own); PC-XT
+// has no real-time throttle on the desktop, so it always runs uncapped (Fixed = true). ---
 bool dbgFullSpeedSupported() { return true; }   // every desktop platform can run at full host speed
 bool dbgFullSpeedFixed() {
   switch (currentPlatform) {
-    case PLATFORM_ATARI: case PLATFORM_PCXT: return true;   // always uncapped on desktop
+    case PLATFORM_PCXT: return true;   // always uncapped on desktop
     default: return false;
   }
 }
@@ -214,7 +214,8 @@ bool dbgGetFullSpeed() {
     case PLATFORM_SMS: return smsFast;
     case PLATFORM_COLECO: return colecoFast;
     case PLATFORM_ZX: return zxFast;
-    default: return true;                                                          // Atari/PCXT
+    case PLATFORM_ATARI: return atariFast;
+    default: return true;                                                          // PCXT
   }
 }
 void dbgSetFullSpeed(bool on) {
@@ -225,6 +226,7 @@ void dbgSetFullSpeed(bool on) {
     case PLATFORM_SMS: smsFast = on; break;
     case PLATFORM_COLECO: colecoFast = on; break;
     case PLATFORM_ZX: zxFast = on; break;
+    case PLATFORM_ATARI: atariFast = on; break;
     default: return;                                                               // fixed-uncapped platforms
   }
   saveConfig();   // persist where the flag has EEPROM backing (Apple II's Fast1MhzSpeed)

@@ -293,7 +293,7 @@ IRAM_ATTR void cpuLoop() {
 
     if (!Fast1MhzSpeed)
     {
-#if defined(BOARD_DESKTOP) || defined(BOARD_PICOCALC)
+#if defined(BOARD_DESKTOP) || defined(BOARD_PICOCALC) || defined(BOARD_PICOCALC_P4)
       // Pace against REAL TIME -- 1 emulated cycle == 1 us at 1 MHz -- instead of against a count
       // of host CPU cycles. The ESP branch below charges each emulated cycle a fixed 300 host
       // cycles, which only works out to 1 MHz on a 240 MHz ESP32. Anywhere else that constant is

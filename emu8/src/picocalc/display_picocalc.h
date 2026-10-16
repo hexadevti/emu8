@@ -16,7 +16,7 @@
 
 #include "../../board.h"
 
-#if defined(BOARD_PICOCALC)
+#if defined(PICOCALC_MAINBOARD)
 
 #include <Arduino.h>
 #include <stdint.h>
@@ -187,4 +187,4 @@ void displaySetUiMode(bool ui);
 void displaySetVideoRect(int topLogical, int hLogical);
 void displaySetVideoFill(int leftLogical, int wLogical, bool stretch);
 
-#endif // BOARD_PICOCALC
+#endif // PICOCALC_MAINBOARD

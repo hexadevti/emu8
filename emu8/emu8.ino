@@ -5,7 +5,7 @@ void setup() {
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, HIGH); // Turn off green LED (boards without an LED define LED_PIN = -1)
   }
-#if defined(BOARD_PICOCALC)
+#if defined(PICOCALC_MAINBOARD)
   // Order matters twice over. The panel, the SD slot and the keyboard are all on the PicoCalc
   // mainboard, which the Pico's own USB does NOT power, so nothing may be initialised until the
   // unit is switched on. Serial.begin() comes first so the mainboard wait can still log;

@@ -313,7 +313,7 @@ void showHideOptionsWindow() {
     return;
   }
   if (optionsUiSnapRestarting() || snapBootBusy()) return;   // restored snapshot settings: closing would save over them
-#if !defined(BOARD_PICOCALC) && !defined(EMU_SIM_PICOCALC)
+#if !UI_PICOCALC
   // Touch boards reach the snapshot page from here (SNAP in the title bar): its thumbnail is the
   // picture on screen right now, before the window covers it.
   if (!OptionsWindow && currentPlatform != PLATFORM_SDMANAGER) snapGrabScreen();

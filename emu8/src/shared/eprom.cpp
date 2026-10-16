@@ -176,6 +176,9 @@ void epromSetup() {
   smsFast = (EEPROM.readChar(SmsSpeedEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> NORMAL
   colecoFast = (EEPROM.readChar(ColecoSpeedEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> NORMAL
   zxFast = (EEPROM.readChar(ZxSpeedEEPROMaddress) == 1);           // ==1 so fresh EEPROM (0xFF) -> NORMAL
+#if defined(BOARD_PICOCALC_P4) || defined(BOARD_DESKTOP)
+  atariFast = (EEPROM.readChar(AtariSpeedEEPROMaddress) == 1);     // ==1 so fresh EEPROM (0xFF) -> NORMAL
+#endif
   readStringFromEEPROM(C64FileNameEEPROMaddress, &selectedC64FileName);
   if (selectedC64FileName.length() == 0 || selectedC64FileName.length() > 120 ||
       selectedC64FileName[0] != '/') {
@@ -324,6 +327,9 @@ void saveEEPROM() {
     EEPROM.writeChar(SmsSpeedEEPROMaddress, smsFast ? 1 : 0);
     EEPROM.writeChar(ColecoSpeedEEPROMaddress, colecoFast ? 1 : 0);
     EEPROM.writeChar(ZxSpeedEEPROMaddress, zxFast ? 1 : 0);
+#if defined(BOARD_PICOCALC_P4) || defined(BOARD_DESKTOP)
+    EEPROM.writeChar(AtariSpeedEEPROMaddress, atariFast ? 1 : 0);
+#endif
   }
 
 // Persist every user-configurable option (all toggles, volume, and the selected

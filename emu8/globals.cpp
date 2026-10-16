@@ -117,6 +117,7 @@ String selectedColecoFileName;   // currently-loaded ColecoVision cartridge (for
 bool colecoFast = false;         // Coleco: NORMAL (paced to 3.58 MHz) by default; true = FAST (uncapped)
 float colecoMeasuredMhz = 0.0f;  // Coleco: measured uncapped Z80 speed from the boot benchmark
 String selectedZxFileName;       // currently-loaded ZX Spectrum snapshot / tape (for the settings file browser)
+bool atariFast = false;          // Atari: NORMAL (paced, PicoCalc P4 + desktop) by default; true = FAST (uncapped)
 bool zxFast = false;             // ZX Spectrum: NORMAL (paced to 3.5 MHz) by default; true = FAST (uncapped)
 float zxMeasuredMhz = 0.0f;      // ZX Spectrum: measured uncapped Z80 speed from the boot benchmark
 String selectedPcFileName;    // PCXT A: floppy image (for the settings file browser)

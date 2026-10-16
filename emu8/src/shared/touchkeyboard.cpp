@@ -3,7 +3,7 @@
 // PicoCalc has no touch panel: the whole on-screen keyboard (and its ~30 KB of layout
 // tables) is compiled out there. src/picocalc/input_picocalc.cpp supplies the osk*/
 // touchRead stubs this file would otherwise export.
-#if !defined(BOARD_PICOCALC)
+#if !defined(PICOCALC_MAINBOARD)
 
 
 #if BOARD_TOUCH_GT911
@@ -962,4 +962,4 @@ void oskIgnoreCurrentTouch()
   osk_prevDown = true;   // require a release before the next tap can open the keyboard
 }
 
-#endif // !BOARD_PICOCALC
+#endif // !PICOCALC_MAINBOARD

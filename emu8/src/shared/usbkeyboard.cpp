@@ -24,7 +24,9 @@
 
 #if BOARD_INPUT_USB
 
-#if BOARD_PANEL_DSI
+#if defined(BOARD_PICOCALC_P4)
+#include "../picocalc/pico_shim/EspUsbHost.h"   // no USB host: just the HID_KEY_* tables (input_picocalc.cpp feeds us)
+#elif BOARD_PANEL_DSI
 #include "p4/usb/EspUsbHost.h"   // P4: vendored EspUsbHost fork, patched for IDF 5.x (in-repo)
 #else
 #include "EspUsbHost.h"   // S3: external fork — HID_KEY_* / KEYBOARD_MODIFIER_* + HID_KEYCODE_TO_ASCII
@@ -561,9 +563,21 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
         case HID_KEY_DELETE:
         case HID_KEY_BACKSPACE:    optionsUiKeyUnmount(); break;   // file list: unmount the loaded entry
         case HID_KEY_F10:          showHideOptionsWindow(); break;
+#if defined(BOARD_PICOCALC_P4)
+        default: {                                         // letters / digits
+          char c = 0;
+          if (kc >= HID_KEY_A && kc <= HID_KEY_Z) c = (char)('a' + (kc - HID_KEY_A));
+          else if (kc >= HID_KEY_1 && kc <= HID_KEY_9) c = (char)('1' + (kc - HID_KEY_1));
+          else if (kc == HID_KEY_0) c = '0';
+          // snapshot page: S save / L load / D delete; anywhere else the file list jumps to the letter
+          if (c && !optionsUiSnapKey(c)) optionsUiKeyLetter(c);
+          break;
+        }
+#else
         case HID_KEY_S:            optionsUiSnapKey('s'); break;   // snapshot page: SAVE (S) / LOAD (L) / DELETE (D)
         case HID_KEY_L:            optionsUiSnapKey('l'); break;
         case HID_KEY_D:            optionsUiSnapKey('d'); break;
+#endif
       }
       continue;   // menu swallows every key
     }

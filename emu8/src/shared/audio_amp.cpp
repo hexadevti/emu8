@@ -10,8 +10,9 @@
 #include "../../emu.h"
 
 // Boards with PWM audio instead (PicoCalc) supply the same three entry points from
-// src/picocalc/audio_picocalc.cpp -- there is no I2S peripheral to drive there.
-#if !BOARD_AUDIO_DAC && !BOARD_AUDIO_PWM
+// src/picocalc/audio_picocalc.cpp -- there is no I2S peripheral to drive there. The PicoCalc
+// with the ESP32-P4 module (BOARD_AUDIO_PDM) uses src/picocalc/audio_picocalc_p4.cpp.
+#if !BOARD_AUDIO_DAC && !BOARD_AUDIO_PWM && !BOARD_AUDIO_PDM
 
 #include "driver/i2s.h"
 #if BOARD_AUDIO_CODEC
@@ -90,4 +91,4 @@ void ampWriteMono(const int16_t *mono, int n) {
   }
 }
 
-#endif // !BOARD_AUDIO_DAC && !BOARD_AUDIO_PWM
+#endif // !BOARD_AUDIO_DAC && !BOARD_AUDIO_PWM && !BOARD_AUDIO_PDM

@@ -200,6 +200,12 @@ to some components).
 - 6507 CPU, **TIA** (video + audio) and **RIOT** (RAM + timer + I/O).
 - Cartridge bank-switching: 2K/4K (non-banked), 8K **F8**, 16K **F6**, 32K **F4**, with Superchip RAM
   auto-detection. Whole ROM held in RAM (no SD streaming).
+- Cycle-exact CPU timing, including the 6502's extra cycle for page-crossing indexed reads and
+  branches, which tightly timed kernels depend on. The TIA applies mid-line register writes at the beam
+  position: colour changes take effect from the current pixel, and sprite graphics (`GRPx`), enables
+  and reflect writes take effect one pixel later, as on the real chip.
+- **SPEED** setting (PicoCalc P4 and desktop): **NORMAL** runs at the real NTSC clock (1.19 MHz,
+  60 fps) and **FAST** runs uncapped. The other boards are slow enough that they always run uncapped.
 - Analog stick / USB gamepad → joystick + console switches.
 
 ### MSX1

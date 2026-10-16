@@ -21,9 +21,11 @@ void bootProgressEnd();                 // hand the panel to the render loop
 void bootHintTick();
 void bootHintDismiss();
 bool bootHintShowing();   // the hint owns panel rows 280..319 right now (full-panel video must stay clear)
-#if defined(BOARD_PICOCALC)
+#if defined(PICOCALC_MAINBOARD)
 bool picocalcWaitForMainboard();   // block until the PicoCalc's own power rail is up
 bool picocalcWaitAnyKey(uint32_t timeoutMs);   // hold the screen until a key is pressed
+#endif
+#if defined(BOARD_PICOCALC)
 void picocalcRebootToLoaderMenu(const char *why);   // loader_picocalc.cpp: reboot into the UF2 Loader's SD menu
 void picocalcCheckLoaderCmd();                      // ...if the PC sent PICOCALC_LOADER_CMD over USB serial
 bool picocalcLoaderCmdFeed(uint8_t c);              // ...the same, fed byte by byte (sdserial, between frames)
@@ -491,6 +493,7 @@ void optionsUiActivate();
 // Keyboard menu navigation (separate from the joystick trio above -- see optionsui.cpp).
 void optionsUiKeyArrow(int dx, int dy);   // -1 = left/up, +1 = right/down
 void optionsUiKeyEnter(bool ctrl = false, bool shift = false);   // ctrl: file list -> mount AND reboot; shift: snapshot page -> load
+void optionsUiKeyLetter(char c);           // file list: jump to the next name starting with c
 bool optionsUiSnapKey(char c);             // snapshot page: S save / L load / D delete (false: not open)
 void optionsUiKeyUnmount();               // Del/Backspace: file list -> unmount the highlighted loaded entry
 bool optionsUiKeyEscape();                // false = nothing was open, caller closes the window

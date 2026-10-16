@@ -16,6 +16,10 @@
 //                          spi0, PWM stereo audio. Built with the earlephilhower arduino-pico
 //                          core (NOT Arduino-ESP32) -- see the PicoCalc build task. The ESP-only
 //                          APIs the shared code uses are shimmed in src/picocalc/pico_shim/.
+//   * BOARD_PICOCALC_P4    The same PicoCalc mainboard with a Waveshare ESP32-P4-WIFI6 module in the
+//                          Pico socket: the PicoCalc panel/keyboard code (PICOCALC_MAINBOARD) on an
+//                          ESP32-P4 (PSRAM, Arduino-ESP32 core 3.x, ChipVariant=postv3). Audio is
+//                          I2S PDM in DAC line mode on the two speaker pins (BOARD_AUDIO_PDM).
 //   * BOARD_DESKTOP        Windows/Linux SDL2 debug target (set by CMake, never by arduino-cli).
 //
 // The non-default boards are selected by defining their macro from the build task (e.g.
@@ -31,10 +35,18 @@
 // the keyboard, Ctrl-function-key hotkeys, the boot hint bar, its function-row key meanings). Set
 // on the real board and on the desktop PicoCalc simulator (emu8-picocalc, EMU_SIM_PICOCALC), so the
 // simulator behaves like the device. Hardware/performance code keeps testing BOARD_PICOCALC.
-#if defined(BOARD_PICOCALC) || defined(EMU_SIM_PICOCALC)
+#if defined(BOARD_PICOCALC) || defined(BOARD_PICOCALC_P4) || defined(EMU_SIM_PICOCALC)
 #define UI_PICOCALC 1
 #else
 #define UI_PICOCALC 0
+#endif
+
+// PICOCALC_MAINBOARD: the PicoCalc's own peripherals -- its 320x320 SPI panel
+// (src/picocalc/display_picocalc), its STM32 I2C keyboard (input_picocalc) -- whichever module sits
+// in the Pico socket. BOARD_PICOCALC stays the RP2040/RP2350 module (memory pools, ROM-in-flash,
+// pico_shim); BOARD_PICOCALC_P4 is the ESP32-P4 module and otherwise takes the ESP32 code paths.
+#if defined(BOARD_PICOCALC) || defined(BOARD_PICOCALC_P4)
+#define PICOCALC_MAINBOARD 1
 #endif
 
 #if defined(BOARD_DESKTOP)
@@ -181,6 +193,79 @@
 #define LED_PIN              -1   // the Pico's LED is on the module, not visible in the case
 #define SPEAKER_PIN          -1   // no DAC pin; audio goes through AUDIO_PWM_*
 #define KEYBOARD_DATA_PIN    -1   // no PS/2 header (the I2C keyboard replaces it)
+#define KEYBOARD_IRQ_PIN     -1
+#define ANALOG_X_PIN         -1
+#define ANALOG_Y_PIN         -1
+#define DIGITAL_BUTTON12_PIN -1
+
+#elif defined(BOARD_PICOCALC_P4)
+
+// ===================== ClockworkPi PicoCalc + Waveshare ESP32-P4-WIFI6 =====================
+// The PicoCalc mainboard (same panel, keyboard, SD slot and speakers as BOARD_PICOCALC) with an
+// ESP32-P4 module in the Pico socket. 32MB PSRAM, so everything takes the ESP32/PSRAM paths; only
+// the mainboard peripherals reuse the PicoCalc code (PICOCALC_MAINBOARD). The pins are the P4 GPIOs
+// the module's castellations route to the Pico pin positions (verified in tools/picocalc-p4-bringup).
+// FQBN esp32:esp32:esp32p4:PSRAM=enabled,FlashSize=16M,ChipVariant=postv3 -- this unit is silicon
+// v3.2, and a prev3 build boot-loops on the LP watchdog.
+#define BOARD_NAME            "ClockworkPi PicoCalc (ESP32-P4)"
+
+// --- capabilities (1 = present / use this path) ---
+#define BOARD_HAS_TFT_ESPI    0   // display: the PicoCalc DisplayGFX backend (display_picocalc.cpp)
+#define BOARD_DISPLAY_GFX     0
+#define BOARD_PANEL_DSI       0   // the PicoCalc's SPI panel, not the module's DSI connector
+#define BOARD_AUDIO_DAC       0
+#define BOARD_AUDIO_CODEC     0   // the module's ES8311 drives its own speaker header, not the PicoCalc's
+#define BOARD_AUDIO_PDM       1   // NEW: I2S0 PDM TX, DAC line mode, straight onto the two speaker pins
+#define BOARD_INPUT_ANALOG    0
+#define BOARD_INPUT_USB       1   // usbkeyboard.cpp's HID dispatcher, fed by input_picocalc.cpp (no USB host)
+#define BOARD_TOUCH_VIA_TFT   0
+#define BOARD_TOUCH_GT911     0
+#define BOARD_SD_MMC          0   // microSD over SPI (the PicoCalc slot), not SDMMC
+#define BOARD_HAS_BLE         0   // the P4 has no radio (the C6 on the module is not used)
+
+// --- display: ST7365P/ILI9488 320x320 on SPI2 (FSPI), CS held low (display_picocalc.cpp).
+//     DC/RST land on GPIO24/25, the USB-Serial-JTAG pads: begin() releases them first. ---
+#define LCD_SCK_PIN       3
+#define LCD_MOSI_PIN      2
+#define LCD_MISO_PIN      8
+#define LCD_CS_PIN        7
+#define LCD_DC_PIN        24
+#define LCD_RST_PIN       25
+#define PANEL_NATIVE_W    320
+#define PANEL_NATIVE_H    320
+#define LCD_SPI_HZ        80000000   // clean at 80MHz on this unit (bring-up sketch)
+
+// --- keyboard: STM32F103 at 0x1F, 10kHz ---
+#define KBD_I2C_SDA_PIN   50
+#define KBD_I2C_SCL_PIN   49
+#define KBD_I2C_ADDR      0x1F
+#define KBD_I2C_HZ        10000
+#define PICOCALC_MAINBOARD_WAIT_MS 30000
+
+// --- microSD (SPI3/HSPI). GPIO39-48 sit in the VDDPST_5 domain, powered by the P4's internal LDO
+//     channel 4: sdSetup() turns it on (3.3V) before the bus, or 46/47/48 stay dead. ---
+#define SD_SCK_PIN        46
+#define SD_MISO_PIN       48
+#define SD_MOSI_PIN       33
+#define SD_CS_PIN         47
+#define SD_IO_LDO_CHAN    4
+
+// --- audio: the speaker nets the RP2350 drives as PWM. Here they are the two PDM DAC lines. ---
+#define AUDIO_L_PIN       23
+#define AUDIO_R_PIN       22
+
+// --- peripherals not present on this board: harmless placeholders ---
+#define TOUCH_SCK_PIN        -1
+#define TOUCH_MISO_PIN       -1
+#define TOUCH_MOSI_PIN       -1
+#define TOUCH_CS_PIN         -1
+#define TOUCH_INT_PIN        -1
+#define I2S_BCLK_PIN         -1
+#define I2S_LRCLK_PIN        -1
+#define I2S_DOUT_PIN         -1
+#define LED_PIN              -1
+#define SPEAKER_PIN          -1
+#define KEYBOARD_DATA_PIN    -1
 #define KEYBOARD_IRQ_PIN     -1
 #define ANALOG_X_PIN         -1
 #define ANALOG_Y_PIN         -1
@@ -364,7 +449,7 @@
 // fill is effectively mandatory — centered 320x240 would be tiny); the CYD is already 320x240.
 // On the PicoCalc (320x320) the toggle reads SCREEN: SMOOTH / ORIG: every core scales up to fill the
 // screen with bilinear blending (dband::smooth5 and friends), at the cost of more SPI time per frame.
-#if defined(BOARD_DESKTOP) || defined(BOARD_PICOCALC)
+#if defined(BOARD_DESKTOP) || defined(PICOCALC_MAINBOARD)
   #define BOARD_HAS_SCREENFILL 1
 #else
   #define BOARD_HAS_SCREENFILL BOARD_DISPLAY_GFX
@@ -381,6 +466,9 @@
 // clears BOARD_HAS_PSRAM -- every ESP32 target here has real, memory-mapped PSRAM behind ps_malloc.
 #ifndef BOARD_AUDIO_PWM
 #define BOARD_AUDIO_PWM 0
+#endif
+#ifndef BOARD_AUDIO_PDM
+#define BOARD_AUDIO_PDM 0
 #endif
 #ifndef BOARD_HAS_PSRAM
 #define BOARD_HAS_PSRAM 1
