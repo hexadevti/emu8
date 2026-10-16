@@ -166,8 +166,8 @@ void epromSetup() {
   c64Autoload = (EEPROM.readChar(C64AutoloadEEPROMaddress) == 1);
   joyPort = EEPROM.readChar(JoyPortEEPROMaddress);
   if (joyPort != 1 && joyPort != 2) joyPort = 1;
-  // ==1 test (not readBool) so an uninitialised 0xFF on older devices reads as OFF, not ON.
-  screenFill = (EEPROM.readChar(ScreenFillEEPROMaddress) == 1);
+  // Range-checked so an uninitialised 0xFF on older devices reads as ORIG (old ON = 1 = ENLARGE).
+  { char s = EEPROM.readChar(ScreenFillEEPROMaddress); screenFill = (s >= 0 && s < SCREEN_MODES) ? (uint8_t)s : SCREEN_ORIG; }
   { char s = EEPROM.readChar(NesDisplaySkipEEPROMaddress); nesDisplaySkip = (s >= 1 && s <= 3) ? (uint8_t)s : 3; }  // default 3; fresh EEPROM (0xFF) -> 3
   msxFast = (EEPROM.readChar(MsxSpeedEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> NORMAL
   msxDiskRom = (uint8_t)EEPROM.readChar(MsxDiskRomEEPROMaddress);
@@ -319,7 +319,7 @@ void saveEEPROM() {
     // SD Manager is a one-boot mode, not a system (emu.h): keep the emulator it was entered from.
     if (currentPlatform != PLATFORM_SDMANAGER)
       EEPROM.writeChar(PlatformEEPROMaddress, currentPlatform);
-    EEPROM.writeChar(ScreenFillEEPROMaddress, screenFill ? 1 : 0);
+    EEPROM.writeChar(ScreenFillEEPROMaddress, (char)screenFill);
     EEPROM.writeChar(NesDisplaySkipEEPROMaddress, (char)nesDisplaySkip);
     EEPROM.writeChar(MsxSpeedEEPROMaddress, msxFast ? 1 : 0);
     EEPROM.writeChar(MsxDiskRomEEPROMaddress, msxDiskRom);

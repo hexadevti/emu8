@@ -355,7 +355,15 @@ static void ouiDrawToggle(int idx, const char *label, const char *value, uint16_
   tft.drawString(label, x + 8, y + 5, 1);
   tft.setTextDatum(BL_DATUM);
   tft.setTextColor(valColor, OUI_CARD);
-  tft.drawString(value, x + 8, y + OUI_TG_H - 7, 2);
+  // Font 2, unless the value (SCREEN: ENLARGE / STRETCH) would run past the card.
+  int vf = 2;
+#if UI_PICOCALC
+  if (tft.textWidth(value, vf) > OUI_TG_W - 12) vf = 3;
+  if (tft.textWidth(value, vf) > OUI_TG_W - 12) vf = 1;
+#else
+  if (strlen(value) >= 7) vf = 1;
+#endif
+  tft.drawString(value, x + 8, y + OUI_TG_H - 7, vf);
 }
 
 // Blank a toggle slot (so stale Apple labels don't linger on the C64 screen).
@@ -379,13 +387,13 @@ static void ouiClearToggles(int first)
   }
 }
 
-// S3 panel + desktop only: a SCREEN toggle (drawn after the platform toggles clear the rest).
-// FILL = video scaled to fill the panel (keep 4:3); ORIG = centered 320x240 with a border.
+// Boards with BOARD_HAS_SCREENFILL: a SCREEN toggle (drawn after the platform toggles clear the
+// rest). ORIG = native picture; ENLARGE = scaled up keeping its shape; STRETCH = the whole screen.
 static void ouiDrawScreenToggle()
 {
 #if BOARD_HAS_SCREENFILL
-  // The PicoCalc's FILL is always upscaled bilinear, hence its name there.
-  ouiDrawToggle(ouiScreenSlot(), "SCREEN", !screenFill ? "ORIG" : UI_PICOCALC ? "SMOOTH" : "FILL", OUI_TXT);
+  static const char *const kScreenMode[SCREEN_MODES] = { "ORIG", "ENLARGE", "STRETCH" };
+  ouiDrawToggle(ouiScreenSlot(), "SCREEN", kScreenMode[screenFill < SCREEN_MODES ? screenFill : 0], OUI_TXT);
 #endif
 }
 
@@ -1999,7 +2007,7 @@ void optionsUiRender()
 // Actions
 // ---------------------------------------------------------------------------
 #if BOARD_HAS_SCREENFILL
-static void ouiToggleScreenFill() { screenFill = !screenFill; optionsUiDirty = true; }
+static void ouiToggleScreenFill() { screenFill = (uint8_t)((screenFill + 1) % SCREEN_MODES); optionsUiDirty = true; }
 #endif
 
 // Any grid slot (0..7): platform toggles, SCREEN, ROMS and HELP.

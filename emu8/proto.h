@@ -21,6 +21,7 @@ void bootProgressEnd();                 // hand the panel to the render loop
 void bootHintTick();
 void bootHintDismiss();
 bool bootHintShowing();   // the hint owns panel rows 280..319 right now (full-panel video must stay clear)
+uint8_t screenFillNow();  // screenFill, but STRETCH reads as ENLARGE while the hint is up (video.cpp)
 #if defined(PICOCALC_MAINBOARD)
 bool picocalcWaitForMainboard();   // block until the PicoCalc's own power rail is up
 bool picocalcWaitAnyKey(uint32_t timeoutMs);   // hold the screen until a key is pressed

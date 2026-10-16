@@ -201,7 +201,7 @@ static void zxPaperLine(int y, uint16_t* dst) {
 
 #if UI_PICOCALC
 // Paper pixels x..x+3 (x a multiple of 4) of bitmap line y, decoded straight from the snapshot:
-// SCREEN: SMOOTH blends two lines at a time and sharedBigBuf has no room for a second line buffer.
+// SCREEN: ENLARGE / STRETCH blend two lines at a time and sharedBigBuf has no room for a second line buffer.
 static inline void zxPaper4(int y, int x, uint16_t* o) {
   const uint8_t a = zx::screen[6144 + (y >> 3) * 32 + (x >> 3)];
   const int br = (a & 0x40) >> 3;
@@ -243,11 +243,13 @@ static uint32_t zxBandSum(int b, bool fill) {
   return h;
 }
 
-// Dirty-band push: 1:1 is 30 bands of 8 rows (border included); FILL is the 24 paper bands, 10
-// output rows each. Runs of consecutive dirty bands share one address window.
-static void zxPushDirty(bool fill, bool repaint) {
+// Dirty-band push: ORIG (1:1) is 30 bands of 8 rows (border included); ENLARGE is the 24 paper
+// bands, 10 output rows each; STRETCH the 24 paper bands on the raw 320x320 panel, band b owning
+// rows stretchRow(b*8)..stretchRow(b*8 + 8). Runs of consecutive dirty bands share one window.
+static void zxPushDirty(uint8_t mode, bool repaint) {
+  const bool fill = mode != SCREEN_ORIG, stretch = mode == SCREEN_STRETCH;
   const int bands = fill ? 24 : zx::OUT_H / 8, rowsPer = fill ? 10 : 8;
-  dband::begin(dband::mix(dband::hash(0x5A583438u, (const uint8_t*)zxPal, sizeof(zxPal)), fill), repaint);
+  dband::begin(dband::mix(dband::hash(0x5A583438u, (const uint8_t*)zxPal, sizeof(zxPal)), mode), repaint);
   bool dirty[zx::OUT_H / 8];
   for (int b = 0; b < bands; b++) dirty[b] = dband::changed(b, zxBandSum(b, fill));
   int sent = 0;
@@ -256,9 +258,34 @@ static void zxPushDirty(bool fill, bool repaint) {
     int e = b;
     while (e < bands && dirty[e]) e++;
     sent += e - b;
-    tft.setAddrWindow(0, b * rowsPer, zx::OUT_W, (e - b) * rowsPer);
+    if (stretch) {
+      const int r0 = dband::stretchRow(b * 8, 192, PANEL_NATIVE_H), r1 = dband::stretchRow(e * 8, 192, PANEL_NATIVE_H);
+      tft.setPanelAddrWindow(0, r0, zx::OUT_W, r1 - r0);
+    } else {
+      tft.setAddrWindow(0, b * rowsPer, zx::OUT_W, (e - b) * rowsPer);
+    }
     tft.startWrite();
-    if (fill) {
+    if (stretch) {
+      // 5:4 across (smooth5), 5:3 down: each row blends its two nearest paper lines in quarters,
+      // clamped to its own band (as dband::writeStretchLines256).
+      for (int k = b; k < e; k++) {
+        const int y0 = k * 8, r1 = dband::stretchRow(y0 + 8, 192, PANEL_NATIVE_H);
+        for (int oy = dband::stretchRow(y0, 192, PANEL_NATIVE_H); oy < r1; oy++) {
+          int s4 = ((2 * oy + 1) * 192 * 2 - 2 * PANEL_NATIVE_H) / PANEL_NATIVE_H;
+          if (s4 < 0) s4 = 0;
+          int sa = s4 >> 2, q = s4 & 3;
+          if (sa < y0)      { sa = y0; q = 0; }
+          if (sa >= y0 + 7) { sa = y0 + 7; q = 0; }
+          uint16_t c[4], d[4], o[5];
+          for (int x = 0; x < 256; x += 4) {
+            zxPaper4(sa, x, c);
+            if (q) { zxPaper4(sa + 1, x, d); for (int i = 0; i < 4; i++) c[i] = dband::blendQ(c[i], d[i], q); }
+            dband::smooth5(c[0], c[1], c[2], c[3], o);
+            for (int i = 0; i < 5; i++) tft.writeColor(o[i], 1);
+          }
+        }
+      }
+    } else if (fill) {
       // Bilinear 5:4 (dband::smooth5): row k of each 5-row group blends two of its 4 paper lines.
       for (int oy = b * 10; oy < e * 10; oy++) {
         const int base = oy / 5 * 4, k = oy % 5, w = dband::kRowW[k];
@@ -307,9 +334,13 @@ void zxRenderFrame() {
 #endif
   const int outTop = 0;
 #if UI_PICOCALC
-  // SCREEN: SMOOTH drops the border and scales the 256x192 paper 5:4 bilinear to the whole 320x240 screen.
-  extern bool screenFill;
-  const bool fill = screenFill && !osk;
+  // SCREEN: ENLARGE drops the border and scales the 256x192 paper 5:4 bilinear to the whole 320x240
+  // screen; STRETCH 5:4 x 5:3 to the whole raw 320x320 panel. Leaving STRETCH blackens its bars.
+  extern uint8_t screenFill;
+  static uint8_t lastFill = SCREEN_ORIG;
+  const uint8_t fill = osk ? (uint8_t)SCREEN_ORIG : screenFillNow();
+  if (lastFill == SCREEN_STRETCH && fill != SCREEN_STRETCH) tft.fillPanelBlack();
+  lastFill = fill;
   const bool repaint = clearScr;                     // a menu closed: anything may be on the panel
   clearScr = false;
   if (!osk) { zxPushDirty(fill, repaint); zx::frameReady = false; return; }

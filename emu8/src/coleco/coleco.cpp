@@ -191,13 +191,15 @@ void colecoRenderFrame() {
   const int outH   = oskRasterHeight();
   const int belowY = outTop + outH;
 #if UI_PICOCALC
-  // Borders are painted only when something may have drawn over them; SCREEN: FILL scales 5:4 to
-  // the whole 320x240 screen (see smsRenderFrame for the details).
-  extern bool screenFill;
+  // Borders are painted only when something may have drawn over them; SCREEN: ENLARGE / STRETCH
+  // scale to the whole screen (see smsRenderFrame for the details).
+  extern uint8_t screenFill;
   static int  lastTop = -1, lastH = -1;
-  static bool lastOsk = false, lastFill = false;
+  static bool lastOsk = false;
+  static uint8_t lastFill = SCREEN_ORIG;
   const bool osk  = oskActive();
-  const bool fill = screenFill && !osk;
+  const uint8_t fill = osk ? (uint8_t)SCREEN_ORIG : screenFillNow();
+  if (lastFill == SCREEN_STRETCH && fill != SCREEN_STRETCH) tft.fillPanelBlack();   // its bars
   const bool borders = !fill && (clearScr || outTop != lastTop || outH != lastH || osk != lastOsk || lastFill);
   const bool repaint = borders || clearScr;          // anything may have drawn over the picture
   clearScr = false;
@@ -213,7 +215,7 @@ void colecoRenderFrame() {
     tft.fillRect(C_OX + C_W, outTop, 320 - (C_OX + C_W), outH, TFT_BLACK);
   }
 #if UI_PICOCALC
-  // Fill or 1:1: only the 8-line bands that changed since the last push go out (dirty_bands.h).
+  // ENLARGE / STRETCH or 1:1: only the 8-line bands that changed since the last push go out (dirty_bands.h).
   if (fill || outH == C_H) {
     const int sent = dband::pushIndexed256(msx::framebuffer, pal, 0x0F, C_OX, outTop, fill, false,
                                            0x434F4C31u, repaint);

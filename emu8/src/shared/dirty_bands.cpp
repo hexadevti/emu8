@@ -96,10 +96,32 @@ void writeSmoothBand256(const uint8_t* band, const uint16_t* pal, uint8_t mask, 
   }
 }
 
+void writeStretchLines256(const uint8_t* fb, int y0, int n, int srcH, int outH,
+                          const uint16_t* pal, uint8_t mask, bool hideLeft8) {
+  const int r1 = stretchRow(y0 + n, srcH, outH);
+  for (int oy = stretchRow(y0, srcH, outH); oy < r1; oy++) {
+    // Row oy samples source line (oy + 0.5) * srcH / outH - 0.5, in quarters.
+    int s4 = ((2 * oy + 1) * srcH * 2 - 2 * outH) / outH;
+    if (s4 < 0) s4 = 0;
+    int sa = s4 >> 2, q = s4 & 3;
+    if (sa < y0)          { sa = y0; q = 0; }
+    if (sa >= y0 + n - 1) { sa = y0 + n - 1; q = 0; }
+    const uint8_t *a = fb + sa * 256, *b = a + (q ? 256 : 0);
+    int x = 0;
+    if (hideLeft8) { tft.writeColor(0x0000, 10); x = 8; }
+    uint16_t c[4], o[5];
+    for (; x < 256; x += 4) {
+      for (int i = 0; i < 4; i++) c[i] = blendQ(pal[a[x + i] & mask], pal[b[x + i] & mask], q);
+      smooth5(c[0], c[1], c[2], c[3], o);
+      for (int i = 0; i < 5; i++) tft.writeColor(o[i], 1);
+    }
+  }
+}
+
 // One window per run of consecutive dirty bands, so the pixels of a run stream through
 // writeColor()'s ping-pong DMA staging without a drain between bands.
 int pushIndexed256(const uint8_t* fb, const uint16_t* pal, uint8_t mask, int ox, int top,
-                   bool fill, bool hideLeft8, uint32_t modeKey, bool force) {
+                   uint8_t fill, bool hideLeft8, uint32_t modeKey, bool force) {
   const int W = 256, BANDS = 192 / 8;
   uint32_t ph = SEED;
   for (int i = 0; i <= mask; i++) ph = mix(ph, pal[i]);
@@ -114,7 +136,13 @@ int pushIndexed256(const uint8_t* fb, const uint16_t* pal, uint8_t mask, int ox,
     int e = b;
     while (e < BANDS && dirty[e]) e++;               // bands b..e-1
     sent += e - b;
-    if (fill) {
+    if (fill == SCREEN_STRETCH) {
+      // 256x192 -> the raw 320x320 panel: bands b..e-1 own rows stretchRow(b*8)..stretchRow(e*8).
+      const int r0 = stretchRow(b * 8, 192, PANEL_NATIVE_H), r1 = stretchRow(e * 8, 192, PANEL_NATIVE_H);
+      tft.setPanelAddrWindow(0, r0, 320, r1 - r0);
+      tft.startWrite();
+      for (int k = b; k < e; k++) writeStretchLines256(fb, k * 8, 8, 192, PANEL_NATIVE_H, pal, mask, hideLeft8);
+    } else if (fill) {
       // 256x192 -> 320x240 bilinear: each 8-line band becomes 10 rows.
       tft.setAddrWindow(0, b * 10, 320, (e - b) * 10);
       tft.startWrite();

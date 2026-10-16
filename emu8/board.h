@@ -444,11 +444,15 @@
 
 #endif
 
-// Fill-screen video toggle (SCREEN: FILL / ORIG) in Settings. The S3 panel (480x272), the P4 DSI
-// panel (1024x600) and the desktop window can scale the 320x240 video to fill (on the big P4 panel
-// fill is effectively mandatory — centered 320x240 would be tiny); the CYD is already 320x240.
-// On the PicoCalc (320x320) the toggle reads SCREEN: SMOOTH / ORIG: every core scales up to fill the
-// screen with bilinear blending (dband::smooth5 and friends), at the cost of more SPI time per frame.
+// Screen mode (SCREEN: ORIG / ENLARGE / STRETCH) in Settings, stored in screenFill. ORIG is the
+// native picture; ENLARGE scales it up as far as it goes keeping its shape (the S3 480x272 panel,
+// the P4 DSI 1024x600 panel and the desktop window keep 4:3; on the PicoCalc 320x320 every core
+// scales up with bilinear blending -- dband::smooth5 and friends); STRETCH covers the whole screen,
+// aspect ignored. The CYD is already 320x240, so it has no toggle.
+#define SCREEN_ORIG    0
+#define SCREEN_ENLARGE 1
+#define SCREEN_STRETCH 2
+#define SCREEN_MODES   3
 #if defined(BOARD_DESKTOP) || defined(PICOCALC_MAINBOARD)
   #define BOARD_HAS_SCREENFILL 1
 #else

@@ -7,6 +7,7 @@
 #include "debug_bridge.h"            // uniform debug facade over the cores (regs / memory / exec control)
 #include "device.h"                  // which board is simulated (Device menu, panel presentation)
 #include "picocalc_sim.h"            // emu8-picocalc: the device picture with clickable keys
+#include "../../board.h"             // SCREEN_ORIG / SCREEN_ENLARGE / SCREEN_STRETCH
 #include "imgui.h"
 #include "imgui_internal.h"          // DockBuilder* for the one-time default layout
 #include "imgui_memory_editor.h"     // vendored hex viewer/editor (imgui_club)
@@ -28,7 +29,7 @@
 // displaySetVideoRect/Fill). "Crop borders" samples just this sub-rect. Defined in display_sdl.cpp.
 void desktopGetVideoRect(int *l, int *t, int *w, int *h);
 bool desktopUiModeActive();   // display_sdl.cpp — the frame is UI (menus / splash), not emulator video
-bool desktopVideoStretch();   // display_sdl.cpp — the core asked for a full-width stretch in SCREEN FILL
+bool desktopVideoStretch();   // display_sdl.cpp — the core asked for a full-width stretch in SCREEN: STRETCH
 #if defined(EMU_SIM_PICOCALC)
 static const bool kSimPicoCalc = true;
 #else
@@ -38,7 +39,8 @@ static const bool kSimPicoCalc = false;
 extern bool running;     // globals.cpp — cleared on Quit (kept light; we don't pull in all of emu.h here)
 
 // Settings globals (emu.h) the native Settings window flips live; saveConfig persists them.
-extern bool sound, videoColor, smoothUpscale, screenFill, Fast1MhzSpeed;
+extern bool sound, videoColor, smoothUpscale, Fast1MhzSpeed;
+extern uint8_t screenFill;   // SCREEN_ORIG / SCREEN_ENLARGE / SCREEN_STRETCH (board.h)
 void        saveConfig();
 const char *desktopSdRoot();              // sd_host.cpp — host dir backing the emulated SD (file browser)
 void        desktopGetCurrentWindowSize(int *w, int *h);   // display_sdl.cpp — live SDL window size
@@ -822,8 +824,9 @@ static void buildHeatPanel()
 // --- emulator display window ----------------------------------------------------------------------
 // Where the framebuffer lands on the simulated panel (panel pixels), like src/shared/display_gfx.cpp
 // does on the S3 / P4: UI frames are stretched over the whole panel, emulator video is centred 1:1,
-// or with SCREEN FILL the active video rect is scaled to the panel height (full width if the core
-// asked for a stretch). Frames bigger than the panel (PC-XT) are fitted.
+// or with SCREEN: ENLARGE the active video rect is scaled to the panel height keeping its aspect,
+// with STRETCH across the full width too (if the core allows it). Frames bigger than the panel
+// (PC-XT) are fitted.
 static void panelPlacement(int fbW, int fbH, int pw, int ph, SDL_Rect &src, SDL_FRect &dst)
 {
   src = SDL_Rect{0, 0, fbW, fbH};
@@ -831,7 +834,7 @@ static void panelPlacement(int fbW, int fbH, int pw, int ph, SDL_Rect &src, SDL_
   int l, t, w, h; desktopGetVideoRect(&l, &t, &w, &h);
   if (screenFill && w > 0 && h > 0 && l >= 0 && t >= 0 && l + w <= fbW && t + h <= fbH) {
     src = SDL_Rect{l, t, w, h};
-    float dw = desktopVideoStretch() ? (float)pw : (float)w * ph / h;
+    float dw = (screenFill == SCREEN_STRETCH && desktopVideoStretch()) ? (float)pw : (float)w * ph / h;
     if (dw > pw) dw = (float)pw;
     dst = SDL_FRect{(pw - dw) * 0.5f, 0, dw, (float)ph};
     return;
@@ -882,9 +885,11 @@ static void buildDisplayWindow(SDL_Texture *emuTex, int fbW, int fbH)
       return;
     }
 
-    // CYD (and "Crop borders"): the framebuffer itself, aspect-fit
+    // CYD (and "Crop borders"): the framebuffer itself, aspect-fit. SCREEN: ENLARGE crops to the
+    // video like "Crop borders"; STRETCH also fills the whole window height, aspect ignored.
+    const uint8_t mode = desktopUiModeActive() ? (uint8_t)SCREEN_ORIG : screenFill;
     int sx = 0, sy = 0, sw = fbW, sh = fbH;
-    if (g_cropToVideo) {
+    if (g_cropToVideo || mode != SCREEN_ORIG) {
       int l, t, w, h; desktopGetVideoRect(&l, &t, &w, &h);
       if (w > 0 && h > 0) { sx = l; sy = t; sw = w; sh = h; }
     }
@@ -893,7 +898,8 @@ static void buildDisplayWindow(SDL_Texture *emuTex, int fbW, int fbH)
     // aspect-fit the source rect into the window's content area, centered (letterbox/pillarbox)
     float ar = (float)sw / (float)sh;
     float dw = avail.x, dh = dw / ar;
-    if (dh > avail.y) { dh = avail.y; dw = dh * ar; }
+    if (mode == SCREEN_STRETCH) dh = avail.y;
+    else if (dh > avail.y) { dh = avail.y; dw = dh * ar; }
     ImVec2 pos = ImVec2(cur.x + (avail.x - dw) * 0.5f, cur.y + (avail.y - dh) * 0.5f);
     ImGui::SetCursorScreenPos(pos);
 
@@ -1078,6 +1084,12 @@ static void buildSettings()
   ImGui::SetNextWindowSize(ImVec2(340, 240), ImGuiCond_FirstUseEver);
   if (ImGui::Begin("Settings", &g_showSettings)) {
     ImGui::Checkbox("Sound", &sound);
+    int mode = screenFill < SCREEN_MODES ? screenFill : SCREEN_ORIG;
+    ImGui::TextUnformatted("Screen"); ImGui::SameLine();
+    ImGui::RadioButton("Original", &mode, SCREEN_ORIG);    ImGui::SameLine();
+    ImGui::RadioButton("Enlarge",  &mode, SCREEN_ENLARGE); ImGui::SameLine();
+    ImGui::RadioButton("Stretch",  &mode, SCREEN_STRETCH);
+    screenFill = (uint8_t)mode;
     if (dbgAppleModelSupported()) {
       ImGui::SeparatorText("Apple II");
       bool iie = dbgGetAppleIIe();

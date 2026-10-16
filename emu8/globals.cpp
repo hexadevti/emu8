@@ -73,7 +73,7 @@ bool sound = true;
 bool dacSound = false;
 bool upscale = false;
 bool smoothUpscale = false;
-bool screenFill = false;   // JC4827W543: fill the 480x272 panel with the 320x240 video (keep 4:3)
+uint8_t screenFill = SCREEN_ORIG;   // Settings SCREEN: ORIG / ENLARGE / STRETCH (board.h)
 uint8_t nesDisplaySkip = 3; // JC4827W543 NES: draw 1 of every N frames (core-0 display-skip frees the core-1 interpreter)
 bool nesFast = false;       // NES: NORMAL (paced ~60fps) by default; true = FAST (uncapped)
 float nesMeasuredMhz = 0.0f; // NES: measured 2A03 speed (fps-derived), updated in cpuLoop

@@ -265,13 +265,16 @@ void msxRenderFrame() {
   // PicoCalc: SPI is the bottleneck (50MHz, ~16ms for the 256x192 picture alone), so the black
   // borders -- another ~28K pixels -- are painted only when something may have drawn over them
   // (a menu closed -> clearScr) or the raster moved, not every frame.
-  // SCREEN: FILL (Settings) scales the picture 5:4 on both axes to the whole 320x240 logical screen,
-  // so there are no borders to paint -- but leaving FILL must repaint them over the old picture.
-  extern bool screenFill;
+  // SCREEN: ENLARGE (Settings) scales the picture 5:4 on both axes to the whole 320x240 logical
+  // screen, STRETCH 5:4 x 5:3 to the whole raw 320x320 panel, so there are no borders to paint --
+  // but leaving either must repaint them over the old picture (and leaving STRETCH the bars).
+  extern uint8_t screenFill;
   static int  lastTop = -1, lastH = -1;
-  static bool lastOsk = false, lastFill = false;
+  static bool lastOsk = false;
+  static uint8_t lastFill = SCREEN_ORIG;
   const bool osk  = oskActive();
-  const bool fill = screenFill && !osk;
+  const uint8_t fill = osk ? (uint8_t)SCREEN_ORIG : screenFillNow();
+  if (lastFill == SCREEN_STRETCH && fill != SCREEN_STRETCH) tft.fillPanelBlack();   // its bars
   const bool borders = !fill && (clearScr || outTop != lastTop || outH != lastH || osk != lastOsk || lastFill);
   const bool repaint = borders || clearScr;          // anything may have drawn over the picture
   clearScr = false;
@@ -289,7 +292,7 @@ void msxRenderFrame() {
     tft.fillRect(M_OX + M_W, outTop, 320 - (M_OX + M_W), outH, TFT_BLACK); // right border
   }
 #if UI_PICOCALC
-  // Fill or 1:1: only the 8-line bands that changed since the last push go out (dirty_bands.h).
+  // ENLARGE / STRETCH or 1:1: only the 8-line bands that changed since the last push go out (dirty_bands.h).
   if (fill || outH == M_H) {
     const int sent = dband::pushIndexed256(msx::framebuffer, pal, 0x0F, M_OX, outTop, fill, false,
                                            0x4D535831u, repaint);

@@ -3,7 +3,7 @@
 #include "bootlogo.h"
 #if UI_PICOCALC
 #include "dirty_bands.h"
-// Apple II SCREEN: SMOOTH: the 8:7 line repeat sends some source lines twice; one copy is blended
+// Apple II SCREEN: ENLARGE / STRETCH: the 8:7 (5:3) line repeat sends some source lines twice; one copy is blended
 // with the neighbouring line (tft.setRowBlend: 1 = with the row above, 2 = with the row below). The
 // neighbour is always in the same 8-line band, so a band redraws the same no matter which bands
 // around it are skipped as unchanged: line 0 of a band blends its second copy with line 1, any
@@ -253,6 +253,11 @@ void bootHintTick() {}
 void bootHintDismiss() {}
 bool bootHintShowing() { return false; }
 #endif
+
+uint8_t screenFillNow()
+{
+  return (screenFill == SCREEN_STRETCH && bootHintShowing()) ? (uint8_t)SCREEN_ENLARGE : screenFill;
+}
 
 void videoSetup()
 {
@@ -1087,15 +1092,23 @@ void renderLoop(void *pvParameters)
     screen_width = 280;
     screen_height = oskRasterHeight();
 #if UI_PICOCALC
-    // SCREEN: SMOOTH (Settings): 280x192 scaled ~8:7 on both axes to 320x220 (rows 10..229) of the 320x240
-    // logical screen. Vertically that is the existing coef192 line repeat; horizontally the display
-    // doubles every 7th pixel (setHScale78 below); setSmooth blends both repeats. A mode change wipes the screen once, so the
-    // bigger picture's edges do not linger around the smaller one.
-    extern bool screenFill;
-    static bool appleLastFill = false;
-    const bool appleFill = screenFill && !oskActive();
-    if (appleFill != appleLastFill) { appleLastFill = appleFill; clearScr = true; }
-    if (appleFill) { screen_height = 219; margin_y = (240 - 219) / 2; }
+    // SCREEN (Settings): ENLARGE = 280x192 scaled ~8:7 on both axes to 320x220 (rows 10..229) of the
+    // 320x240 logical screen. Vertically that is the existing coef192 line repeat; horizontally the
+    // display doubles every 7th pixel (setHScale78 below); setSmooth blends both repeats. STRETCH =
+    // the same 7:8 across, 5:3 down to the whole raw 320x320 panel: the display is switched to
+    // full-panel addressing for the frame (and back after endWrite), except under a menu or a wipe,
+    // which keep the 320x240 window. A mode change wipes the screen once (and leaving STRETCH
+    // blackens the bars), so the bigger picture's edges do not linger around the smaller one.
+    static uint8_t appleLastMode = SCREEN_ORIG;
+    const uint8_t appleMode = oskActive() ? (uint8_t)SCREEN_ORIG : screenFillNow();
+    if (appleMode != appleLastMode) {
+      if (appleLastMode == SCREEN_STRETCH) tft.fillPanelBlack();
+      appleLastMode = appleMode; clearScr = true;
+    }
+    const bool appleFill = (appleMode != SCREEN_ORIG);
+    const bool appleStretch = (appleMode == SCREEN_STRETCH) && !OptionsWindow && !DebugWindow && !clearScr;
+    if (appleStretch)   { screen_height = PANEL_NATIVE_H; margin_y = 0; }
+    else if (appleFill) { screen_height = 219; margin_y = (240 - 219) / 2; }
 #endif
     displaySetVideoRect(margin_y, (int)screen_height);   // Apple raster (192 lines at margin_y); fill-screen scales just that
     last_y = margin_y;
@@ -1109,9 +1122,11 @@ void renderLoop(void *pvParameters)
     int rasterH = (int)screen_height; // matches the line count produced by coef192
 #if UI_PICOCALC
     // ...only while margin_y is 0 or the scale is 1:1: the line repeat below measures from margin_y,
-    // so with FILL (219/192 = 73/64, exact in float) it emits floor(coef192*202)-10 = 220 lines.
-    // Size the window by that same expression or the extra line would wrap to the top.
+    // so with ENLARGE (219/192 = 73/64, exact in float) it emits floor(coef192*202)-10 = 220 lines.
+    // Size the window by that same expression or the extra line would wrap to the top. (STRETCH:
+    // margin_y 0, floor(320/192*192) = 320 in float.)
     if (appleFill) rasterH = (int)floor(coef192 * (float)(margin_y + 192)) - margin_y;
+    if (appleStretch) tft.setFullPanel(true);   // logical = the raw 320x320 panel until endWrite
 #endif
 
     // clearScr is tested FIRST: the wipe below writes exactly 320*240 pixels, so the window has
@@ -1150,14 +1165,14 @@ void renderLoop(void *pvParameters)
     if (!OptionsWindow && wide80) displaySetVideoFill(0, 320, true);
     else                          displaySetVideoFill(margin_x, (int)screen_width, true);
 #if UI_PICOCALC
-    // FILL: every 280-wide branch widens 7:8 to the full 320. (The 80-col text branch above is
+    // ENLARGE / STRETCH: every 280-wide branch widens 7:8 to the full 320. (The 80-col text branch above is
     // already 320 wide; the clear and the menu keep their unscaled 320x240 window.)
     if (appleFill && !OptionsWindow && !DebugWindow && !clearScr) {
       if (!wide80) {
         tft.setAddrWindow(0, margin_y, 320, rasterH);
         tft.setHScale78(true);
       }
-      tft.setSmooth(true);         // SCREEN: SMOOTH -- see APPLE_ROW_BLEND
+      tft.setSmooth(true);         // SCREEN: ENLARGE / STRETCH -- see APPLE_ROW_BLEND
     }
 #endif
     tft.startWrite();
@@ -1252,14 +1267,14 @@ void renderLoop(void *pvParameters)
     {
 #if UI_PICOCALC
       // Dirty bands (see appleBandHash). Anything that changes how bytes become pixels -- mode
-      // switches, colour, FILL, the II+ flash phase -- forces a full frame, and so does a periodic
+      // switches, colour, SCREEN mode, the II+ flash phase -- forces a full frame, and so does a periodic
       // refresh (every 60th pass, ~1s) so nothing drawn over the raster by other code can stick.
       static uint32_t bandSig[24];
       static uint32_t modeSig = 0;
       static uint8_t  refresh = 0;
       uint32_t ms = 2166136261u;
       const uint32_t modeBits[] = { vGfx, vFull, vLores, vDhr,
-                                    v40, AppleIIe, videoColor, appleFill,
+                                    v40, AppleIIe, videoColor, appleMode,
                                     (uint32_t)(!AppleIIe && inversed), (uint32_t)rasterH,
                                     (uint32_t)margin_y };
       for (uint32_t v : modeBits) ms = (ms ^ v) * 16777619u;
@@ -1673,6 +1688,7 @@ void renderLoop(void *pvParameters)
     unsigned long endTime2 = millis();
     tft.endWrite();
 #if UI_PICOCALC
+    if (appleStretch) tft.setFullPanel(false);
     dband::frameDone("Apple", appleBands);   // counts the frame (fpsFrameShown) and logs every 5s
 #else
     fpsFrameShown();
@@ -1687,10 +1703,12 @@ void renderLoop(void *pvParameters)
     // Redrawn only when it changes. The frame rate here is ~18fps and this is a 12x12 square
     // that is usually not changing, so an unconditional write would be an SPI transaction and a
     // pxFlush() per frame for nothing.
+    // In STRETCH the raster owns the bar too: no light then, and it is redrawn on leaving.
     {
       static int8_t ledOn = -1;                       // -1 = never drawn
       int8_t want = DriveMotorON_OFF ? 1 : 0;
-      if (want != ledOn) {
+      if (appleStretch) ledOn = -1;
+      else if (want != ledOn) {
         ledOn = want;
         tft.fillPanelRect(PANEL_NATIVE_W - 20, PANEL_NATIVE_H - 20, 12, 12,
                           want ? tft.color565(255, 40, 40) : TFT_BLACK);

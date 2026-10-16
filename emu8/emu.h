@@ -192,7 +192,7 @@ extern bool sound;
 extern bool dacSound;
 extern bool upscale;
 extern bool smoothUpscale;
-extern bool screenFill;   // JC4827W543: scale the emulator video to fill the panel (keep 4:3 aspect)
+extern uint8_t screenFill;   // SCREEN_ORIG / SCREEN_ENLARGE (keep aspect) / SCREEN_STRETCH (whole screen), board.h
 extern uint8_t nesDisplaySkip;  // JC4827W543 NES: draw 1 of every N emulated frames (1=every frame; 2-3 trade picture smoothness for game speed)
 extern bool nesFast;            // NES: false = NORMAL (paced ~60fps/1.79MHz), true = FAST (uncapped)
 // The Apple II guest's OWN clock, in microseconds, published by the pacer in src/apple2/cpu.cpp

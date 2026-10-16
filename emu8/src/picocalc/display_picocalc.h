@@ -11,7 +11,7 @@
 // LETTERBOX: the panel is 320x320 but the emulator's logical screen is 320x240, so logical row 0
 // lands on panel row DISP_OFFSET_Y (40) and rows 0..39 / 280..319 stay black (fillPanelBlack()).
 // Every logical->panel mapping in the .cpp is that one constant; there is no scaling anywhere
-// (SCREEN: FILL is done by the MSX/SMS renderers themselves: they scale into the 320x240 window).
+// (SCREEN: ENLARGE / STRETCH is done by the MSX/SMS renderers themselves: they scale into the 320x240 window).
 #pragma once
 
 #include "../../board.h"
@@ -126,11 +126,11 @@ public:
     }
   }
   void endWrite();
-  // Apple II SCREEN: FILL. For the NEXT startWrite()..endWrite() only: every 7th writeColor() pixel
+  // Apple II SCREEN: ENLARGE / STRETCH. For the NEXT startWrite()..endWrite() only: every 7th writeColor() pixel
   // goes out twice, so a 280-wide raster fills a 320-wide window (7:8, nearest neighbour). One-shot
   // so no other window can inherit it; endWrite() turns it off.
   void setHScale78(bool on) { _hscale = on; }
-  // Apple II SCREEN: SMOOTH. Also one-shot per window, rows must be exactly the 320-px stage: each
+  // Apple II SCREEN: ENLARGE / STRETCH. Also one-shot per window, rows must be exactly the 320-px stage: each
   // full row is post-processed before it is sent. With setHScale78 the inserted 8th pixel of every
   // group becomes the average of its neighbours; a row marked setRowBlend(1) is averaged with the
   // row above it, and one marked 2 is held back and averaged with the row that follows it.

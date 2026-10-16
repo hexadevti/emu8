@@ -20,15 +20,15 @@
 #include "p4/jd9165_dsi.h"          // ESP32-P4: flush the canvas to a JD9165 MIPI-DSI panel (esp_lcd)
 #endif
 
-extern bool screenFill;   // user option: scale the emulator video to fill the panel (keep aspect)
+extern uint8_t screenFill; // Settings SCREEN: ORIG / ENLARGE (keep aspect) / STRETCH (whole panel)
 
 // Fill-screen: the render reports the ACTIVE video content rect (top + height, in the logical
 // 320x240 space) before drawing, so fill-screen can scale just the content to the panel's full
 // height — dropping the cores' black top/bottom margins (Apple/Atari center 192 lines in 240; the
 // C64 screen is 200) — instead of the whole 320x240 (which would scale those margins up too).
-// gVideoLeft/Width are the matching horizontal rect, and gVideoStretch asks the fill flush to
-// stretch that rect across the FULL panel width (ignoring 4:3 aspect) instead of letterboxing —
-// every core sets it so its picture fills the whole screen in FILL mode. displaySetVideoRect()
+// gVideoLeft/Width are the matching horizontal rect, and gVideoStretch lets the fill flush stretch
+// that rect across the FULL panel width (ignoring 4:3 aspect) in SCREEN: STRETCH; ENLARGE keeps the
+// aspect and letterboxes the sides. Every core sets it. displaySetVideoRect()
 // resets the horizontal rect + stretch to defaults each frame; displaySetVideoFill() overrides after.
 static int gVideoTop = 0, gVideoHeight = DISP_LOGICAL_H;
 static int gVideoLeft = 0, gVideoWidth = DISP_LOGICAL_W;
@@ -259,14 +259,15 @@ void DisplayGFX::flush() {
   // the canvas (the cores draw centered at DISP_OFFSET_X/Y) up to the panel's full HEIGHT. By
   // default it keeps aspect (same scale horizontally -> scaledW) and centers with black side bars,
   // dropping the cores' black top/bottom margins so the picture fills the screen vertically. When
-  // gVideoStretch is set (all cores do) it stretches the rect across the FULL width — true 100%.
+  // SCREEN: STRETCH (and gVideoStretch, which all cores set) it stretches the rect across the FULL
+  // width — true 100%; ENLARGE keeps the aspect.
   int vTop = gVideoTop, vH = gVideoHeight;
   if (vH <= 0 || vTop < 0 || vTop + vH > DISP_LOGICAL_H) { vTop = 0; vH = DISP_LOGICAL_H; }   // sanity
   int vLeft = gVideoLeft, vW = gVideoWidth;
   if (vW <= 0 || vLeft < 0 || vLeft + vW > DISP_LOGICAL_W) { vLeft = 0; vW = DISP_LOGICAL_W; }  // sanity
 
   int scaledW, outX;
-  if (gVideoStretch) {                  // stretch the content rect over the whole width
+  if (gVideoStretch && screenFill == SCREEN_STRETCH) {   // the content rect over the whole width
     scaledW = PANEL_NATIVE_W; outX = 0; //   (no 4:3 aspect, no side bars)
   } else {                              // keep aspect: horizontal scale == vertical, letterbox sides
     scaledW = (int)((long)vW * PANEL_NATIVE_H / vH);
@@ -359,8 +360,8 @@ void DisplayGFX::fillVideoFrame(uint16_t *out) {
   if (vW <= 0 || vLeft < 0 || vLeft + vW > DISP_LOGICAL_W) { vLeft = 0; vW = DISP_LOGICAL_W; }
 
   int scaledW, outX;
-  if (gVideoStretch) { scaledW = PANEL_NATIVE_W; outX = 0; }    // stretch over the whole width
-  else {                                                        // keep 4:3 aspect, letterbox sides
+  if (gVideoStretch && screenFill == SCREEN_STRETCH) { scaledW = PANEL_NATIVE_W; outX = 0; }   // STRETCH
+  else {                                                        // ENLARGE: keep aspect, letterbox sides
     scaledW = (int)((long)vW * PANEL_NATIVE_H / vH);
     if (scaledW > PANEL_NATIVE_W) scaledW = PANEL_NATIVE_W;
     outX = (PANEL_NATIVE_W - scaledW) / 2;

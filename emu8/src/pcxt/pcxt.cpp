@@ -14,7 +14,7 @@
 
 #include "../../emu.h"
 #include "pcxt.h"
-#include "../shared/dirty_bands.h"     // PicoCalc SCREEN: SMOOTH blends (dband::avg565)
+#include "../shared/dirty_bands.h"     // PicoCalc SCREEN: ENLARGE / STRETCH blends (dband::blendQ)
 #include "fabgl/machine.h"
 #include "../shared/filebrowser.h"   // shared SD image browser (subdirectories + sorting)
 #include "../shared/speedmeter.h"     // live 8086 MHz-equiv for the settings title
@@ -886,11 +886,23 @@ static void pcxtRenderGraphicsDesktop(fabgl::GraphicsAdapter::Emulation emu) {
 // ---- PicoCalc: CGA streamed straight to the 320x320 panel (no canvas; see display_picocalc.h) ----
 // Text uses the BIOS's own IBM 8x8 font. 80 columns get 4 px each: glyph columns are OR'd in pairs,
 // so single-pixel strokes survive the halving. 25 rows are 9 panel px (8 glyph rows + row 7 again,
-// which keeps CP437 box lines joined), or 12 px with SCREEN: SMOOTH (row pairs a, b go out as a,
-// (a+b)/2, b). Graphics are 320 wide and scaled 6:5 vertically into the 240-line window, or 3:2 to
-// 300 lines with SMOOTH (same blend).
+// which keeps CP437 box lines joined), or 12 px with SCREEN: ENLARGE (row pairs a, b go out as a,
+// (a+b)/2, b), or 12-13 px filling all 320 panel rows with STRETCH (bilinear in quarter steps).
+// Graphics are 320 wide and scaled 6:5 vertically into the 240-line window, or 3:2 to 300 lines
+// with ENLARGE (same blend), or 8:5 to all 320 rows with STRETCH. Held at ORIG while the boot
+// hint owns rows 280..319.
 // Only text rows / graphics bands whose bytes changed are re-sent: the SPI link is the bottleneck.
-extern bool screenFill;
+extern uint8_t screenFill;
+static uint8_t pcPcMode() { return bootHintShowing() ? (uint8_t)SCREEN_ORIG : screenFill; }
+
+// Bilinear in quarter steps within one band: output row y of O samples source line
+// (y + 0.5) * G / O - 0.5 of the band's G. *q is the weight of line *s + 1 (0 = line *s alone).
+static inline void pcPcSample(int y, int G, int O, int *s, int *q) {
+  int s4 = ((2 * y + 1) * G * 2 - 2 * O) / O;
+  if (s4 < 0) s4 = 0;
+  *s = s4 >> 2; *q = s4 & 3;
+  if (*s >= G - 1) { *s = G - 1; *q = 0; }
+}
 const uint8_t *pcBiosFont8x8();
 
 static bool     pcPcForce = true;          // repaint everything (set by pcxtForceRedraw / mode change)
@@ -901,8 +913,8 @@ static inline uint8_t pcVb(uint32_t i) {
   return g_pcxtMachine.cgaBase()[(g_pcxtMachine.cgaMemOffset() + i) & (PCXT_VIDEOMEM_SIZE - 1)];
 }
 
-static bool pcPcRepaintCheck(bool fill) {
-  static bool lastFill = false;
+static bool pcPcRepaintCheck(uint8_t fill) {
+  static uint8_t lastFill = SCREEN_ORIG;
   bool force = pcPcForce || fill != lastFill;
   lastFill = fill; pcPcForce = false;
   if (force) tft.fillPanelRect(0, 0, PANEL_NATIVE_W, PANEL_NATIVE_H, TFT_BLACK);
@@ -915,10 +927,11 @@ static void pcxtRenderTextPico() {
   fabgl::GraphicsAdapter* ga = g_pcxtMachine.graphicsAdapter();
   const bool text80 = (ga->emulation() == fabgl::GraphicsAdapter::Emulation::PC_Text_80x25_16Colors);
   const int  cols   = text80 ? 80 : 40;
-  const bool fill   = screenFill && !bootHintShowing();
-  const int  RH     = fill ? 12 : 9;
-  const int  top    = fill ? (PANEL_NATIVE_H - 25 * 12) / 2 : DISP_OFFSET_Y + (DISP_LOGICAL_H - 25 * 9) / 2;
-  const bool force  = pcPcRepaintCheck(fill);
+  const uint8_t mode = pcPcMode();
+  const bool fill   = mode != SCREEN_ORIG;
+  const bool stretch = mode == SCREEN_STRETCH;
+  const int  top    = stretch ? 0 : fill ? (PANEL_NATIVE_H - 25 * 12) / 2 : DISP_OFFSET_Y + (DISP_LOGICAL_H - 25 * 9) / 2;
+  const bool force  = pcPcRepaintCheck(mode);
 
   const int  curR = (ga->cursorVisible() && ((millis() / 400) & 1) == 0) ? ga->cursorRow() : -1;
   const int  curC = ga->cursorCol();
@@ -936,12 +949,19 @@ static void pcxtRenderTextPico() {
     if (!force && dig == pcPcDig[r]) continue;
     pcPcDig[r] = dig;
 
-    tft.setPanelAddrWindow(0, top + r * RH, 320, RH);
+    // STRETCH: row r owns panel rows r*320/25 .. (r+1)*320/25 (12 or 13).
+    const int y0 = stretch ? r * PANEL_NATIVE_H / 25 : top + r * (fill ? 12 : 9);
+    const int RH = stretch ? (r + 1) * PANEL_NATIVE_H / 25 - y0 : (fill ? 12 : 9);
+    tft.setPanelAddrWindow(0, y0, 320, RH);
     tft.startWrite();
     for (int y = 0; y < RH; y++) {
-      // SMOOTH: glyph rows 2p, 2p+1 -> panel rows 3p (2p), 3p+1 (their average), 3p+2 (2p+1).
-      const int gy = fill ? (y / 3 * 2 + (y % 3 == 2)) : (y < 8 ? y : 7);
-      const bool mix = fill && y % 3 == 1;
+      // ENLARGE: glyph rows 2p, 2p+1 -> panel rows 3p (2p), 3p+1 (their average), 3p+2 (2p+1).
+      // STRETCH: glyph row gy blended with gy + 1 by q quarters.
+      int gy, q = 0;
+      if (stretch)   pcPcSample(y, 8, RH, &gy, &q);
+      else if (fill) { gy = y / 3 * 2 + (y % 3 == 2); q = (y % 3 == 1) ? 2 : 0; }
+      else           gy = y < 8 ? y : 7;
+      const bool mix = q != 0;
       const int gy2 = gy + 1;
       for (int c = 0; c < cols; c++) {
         uint8_t ch = pcVb(base + c * 2), at = pcVb(base + c * 2 + 1);
@@ -959,13 +979,13 @@ static void pcxtRenderTextPico() {
           uint8_t m2 = bits2 | (bits2 >> 1);
           for (int b = 7; b >= 1; b -= 2) {
             uint16_t p = ((m >> b) & 1) ? fg : bg;
-            tft.writeColor(mix ? dband::avg565(p, ((m2 >> b) & 1) ? fg : bg) : p, 1);
+            tft.writeColor(mix ? dband::blendQ(p, ((m2 >> b) & 1) ? fg : bg, q) : p, 1);
           }
         } else if (!mix) {
           for (int b = 7; b >= 0; b--) tft.writeColor(((bits >> b) & 1) ? fg : bg, 1);
         } else {
           for (int b = 7; b >= 0; b--)
-            tft.writeColor(dband::avg565(((bits >> b) & 1) ? fg : bg, ((bits2 >> b) & 1) ? fg : bg), 1);
+            tft.writeColor(dband::blendQ(((bits >> b) & 1) ? fg : bg, ((bits2 >> b) & 1) ? fg : bg, q), 1);
         }
       }
     }
@@ -987,11 +1007,13 @@ static void pcxtRenderGraphicsPico(fabgl::GraphicsAdapter::Emulation emu) {
     int fg = ga->graphForegroundIndex() & 0x0F;
     pal[0] = kCgaRgb565[0]; pal[1] = pal[2] = pal[3] = kCgaRgb565[fg ? fg : 15];
   }
-  const bool fill = screenFill && !bootHintShowing();
-  const int  G    = fill ? 2 : 5;              // source lines per band
-  const int  O    = fill ? 3 : 6;              // panel rows per band
-  const int  top  = fill ? (PANEL_NATIVE_H - 300) / 2 : DISP_OFFSET_Y;
-  const bool force = pcPcRepaintCheck(fill);
+  const uint8_t mode = pcPcMode();
+  const bool fill = mode != SCREEN_ORIG;
+  const bool stretch = mode == SCREEN_STRETCH;
+  const int  G    = stretch ? 5 : fill ? 2 : 5;  // source lines per band
+  const int  O    = stretch ? 8 : fill ? 3 : 6;  // panel rows per band
+  const int  top  = stretch ? 0 : fill ? (PANEL_NATIVE_H - 300) / 2 : DISP_OFFSET_Y;
+  const bool force = pcPcRepaintCheck(mode);
   const uint32_t palDig = pal[0] ^ ((uint32_t)pal[1] << 7) ^ ((uint32_t)pal[2] << 13) ^
                           ((uint32_t)pal[3] << 19) ^ ((uint32_t)mode640 << 30);
 
@@ -1007,16 +1029,19 @@ static void pcxtRenderGraphicsPico(fabgl::GraphicsAdapter::Emulation emu) {
     tft.setPanelAddrWindow(0, top + b * O, 320, O);
     tft.startWrite();
     for (int y = 0; y < O; y++) {
-      int sy = b * G + y * G / O;
+      // ORIG: nearest line. ENLARGE / STRETCH: bilinear within the band (ENLARGE's 3 rows from 2
+      // lines come out as a, (a+b)/2, b).
+      int sy, q = 0;
+      if (fill) { pcPcSample(y, G, O, &sy, &q); sy += b * G; }
+      else      sy = b * G + y * G / O;
       const uint8_t* srow = vm + (sy & 1) * 0x2000 + (sy >> 1) * 80;
-      if (fill && y == 1) {
-        // SMOOTH: the middle row of 3 is the average of the band's two lines (sy and sy + 1).
-        const uint8_t* srow2 = vm + 0x2000 + (sy >> 1) * 80;            // sy is even here
+      if (q) {
+        const uint8_t* srow2 = vm + ((sy + 1) & 1) * 0x2000 + ((sy + 1) >> 1) * 80;
         for (int i = 0; i < 80; i++) {
           uint8_t v = srow[i], u = srow2[i];
           if (mode640) { v = ((v | v >> 1) >> 1) & 0x55; u = ((u | u >> 1) >> 1) & 0x55; }  // as below
           for (int s = 6; s >= 0; s -= 2)
-            tft.writeColor(dband::avg565(pal[(v >> s) & 3], pal[(u >> s) & 3]), 1);
+            tft.writeColor(dband::blendQ(pal[(v >> s) & 3], pal[(u >> s) & 3], q), 1);
         }
       } else if (!mode640) {
         for (int i = 0; i < 80; i++) {
@@ -1063,7 +1088,7 @@ bool pcxtRenderFrame() {
   // byte-wise (the 6845 offset may be odd -> M0+ faults on unaligned words) and wrapped to 16KB
   if (gfx) { const uint8_t* vm = g_pcxtMachine.cgaBase(); for (int i = 0; i < 16000; i++) sig = (sig ^ vm[i]) * 16777619u; }
   else     { for (int i = 0; i < 4000; i++) sig = (sig ^ pcVb(i)) * 16777619u; }
-  sig ^= (uint32_t)(screenFill && !bootHintShowing()) * 0x51ED270Bu;
+  sig ^= (uint32_t)pcPcMode() * 0x51ED270Bu;
   if (pcPcForce) sig ^= 0x7F4A7C15u;
 #else
   const uint8_t* vbuf = g_pcxtMachine.cgaBase() + g_pcxtMachine.cgaMemOffset();

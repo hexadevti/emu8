@@ -32,13 +32,15 @@ bool changed(int b, uint32_t sum);
 // Count one frame shown and the bands it sent; logs "<tag>: panel fps=.. bands/frame=.." every 5 s.
 void frameDone(const char* tag, int bandsSent);
 
-// 256x192 indexed framebuffer -> panel, used by MSX, ColecoVision and SMS. 1:1 at (ox, top), or
-// with fill the whole 320x240 logical screen scaled 5:4 bilinear (writeSmoothBand256). hideLeft8
-// paints source pixels 0..7 black (SMS left-column blanking). Returns the number of bands sent.
+// 256x192 indexed framebuffer -> panel, used by MSX, ColecoVision and SMS. fill is the SCREEN mode:
+// ORIG 1:1 at (ox, top); ENLARGE the whole 320x240 logical screen scaled 5:4 bilinear
+// (writeSmoothBand256); STRETCH the whole raw 320x320 panel, 5:4 across and 5:3 down
+// (writeStretchLines256). hideLeft8 paints source pixels 0..7 black (SMS left-column blanking).
+// Returns the number of bands sent.
 int pushIndexed256(const uint8_t* fb, const uint16_t* pal, uint8_t mask, int ox, int top,
-                   bool fill, bool hideLeft8, uint32_t modeKey, bool force);
+                   uint8_t fill, bool hideLeft8, uint32_t modeKey, bool force);
 
-// ---- SCREEN: SMOOTH (the PicoCalc's FILL): bilinear upscaling in quarter steps ----------------
+// ---- SCREEN: ENLARGE / STRETCH: bilinear upscaling in quarter steps ---------------------------
 // RGB565 blends. avg565 is the exact per-channel floor average (the low bit of each channel is
 // masked off before the shift, so no carry crosses a channel); q3_565 weighs a 3/4, b 1/4;
 // blendQ weighs b q/4 (q 0..4).
@@ -62,5 +64,14 @@ extern const uint8_t kRowMain[5], kRowOther[5], kRowW[5];
 void writeSmoothRow45(const uint16_t* m, const uint16_t* t, int w, int n);
 // 8 lines of a 256-wide indexed picture -> 10 rows of 320, through writeColor().
 void writeSmoothBand256(const uint8_t* band, const uint16_t* pal, uint8_t mask, bool hideLeft8);
+
+// SCREEN: STRETCH, any height. Source lines [y0, y0 + n) of a srcH-line picture own output rows
+// [stretchRow(y0), stretchRow(y0 + n)) of outH, so consecutive bands tile the output exactly.
+inline int stretchRow(int y, int srcH, int outH) { return (y * outH + srcH - 1) / srcH; }
+// Those rows of a 256-wide indexed picture (fb = line 0): 5:4 across (smooth5), and down each row
+// blends its two nearest source lines in quarters -- clamped to [y0, y0 + n), so a band redraws the
+// same whichever bands around it are skipped as unchanged. Through writeColor(), 320 px per row.
+void writeStretchLines256(const uint8_t* fb, int y0, int n, int srcH, int outH,
+                          const uint16_t* pal, uint8_t mask, bool hideLeft8);
 
 }  // namespace dband

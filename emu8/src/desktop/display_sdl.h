@@ -94,10 +94,10 @@ public:
   }
   void writeColor(uint16_t color, uint32_t len);
   void endWrite() { _hsc = 0; _hscale = _smooth = _smoothOn = false; }
-  // PicoCalc Apple II SCREEN: FILL (display_picocalc.h): for the next startWrite()..endWrite() only,
+  // PicoCalc Apple II SCREEN: ENLARGE / STRETCH (display_picocalc.h): for the next startWrite()..endWrite() only,
   // every 7th writeColor() pixel goes out twice, so a 280-wide raster fills a 320-wide window.
   void setHScale78(bool on) { _hscale = on; }
-  // ...and SCREEN: SMOOTH (display_picocalc.h): blend the 7:8 inserted pixels and the marked rows.
+  // ...and SCREEN: ENLARGE / STRETCH (display_picocalc.h): blend the 7:8 inserted pixels and the marked rows.
   void setSmooth(bool on) { _smooth = on; }
   void setRowBlend(uint8_t mode) { _rowBlend = mode; }
 
