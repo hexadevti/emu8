@@ -92,7 +92,7 @@ static StaticTask_t renderTaskTCB;
 #endif
 static StackType_t  renderTaskStack[RENDER_TASK_STACK];
 
-#if !BOARD_DISPLAY_GFX && !defined(BOARD_DESKTOP) && !defined(BOARD_PICOCALC)
+#if !BOARD_DISPLAY_GFX && !defined(BOARD_DESKTOP) && !defined(PICOCALC_MAINBOARD)
 // On TFT_eSPI boards drawing goes straight to the 320x240 panel; the canvas flush and the
 // UI/video mode switch are no-ops. (The Arduino_GFX boards define these in display_gfx.cpp;
 // the desktop SDL backend defines them in src/desktop/display_sdl.cpp; the PicoCalc in
@@ -437,7 +437,7 @@ static void splashDrawBtn(int i, bool enabled)
   tft.drawRoundRect(x, y, w, h, 6, active ? TFT_WHITE : tft.color565(70, 78, 92));
   tft.setTextDatum(MC_DATUM);
   tft.setTextColor(enabled ? TFT_WHITE : tft.color565(110, 118, 130), face);
-#if defined(BOARD_PICOCALC) || defined(BOARD_DESKTOP)
+#if defined(PICOCALC_MAINBOARD) || defined(BOARD_DESKTOP)
   int lblFont = (tft.textWidth(label, 2) <= w - 6) ? 2 : 1;      // 1:1 bitmap fonts (uitext.h)
 #else
   int lblFont = ((int)strlen(label) * 12 <= w - 2) ? 2 : 1;   // font 2 is 12px/char, font 1 is 6px
@@ -755,7 +755,7 @@ void renderLoop(void *pvParameters)
     // direct NES draw (nothing in the canvas to flush) but runs normally for UI / menus / C64 / Atari.
     tft.setBypassCanvas(false);
 #endif
-#if defined(BOARD_PICOCALC) || defined(EMU_SIM_PICOCALC)
+#if defined(PICOCALC_MAINBOARD) || defined(EMU_SIM_PICOCALC)
     // The settings menu draws on the whole 320x320 panel (optionsui.cpp). Once it has closed, go
     // back to the letterboxed 320x240 and blacken the bars it drew over; the logical area is
     // repainted by the platform code below (showHideOptionsWindow() already set clearScr).

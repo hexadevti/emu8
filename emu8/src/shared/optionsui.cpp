@@ -4,7 +4,7 @@
 
 // The PicoCalc's 320x320 keyboard-driven menu. The desktop build can simulate it
 // (-DEMU8_SIM_PICOCALC=ON, see CMakeLists.txt) so layout changes can be checked without the board.
-#if defined(BOARD_PICOCALC) || defined(EMU_SIM_PICOCALC)
+#if UI_PICOCALC
 #define OUI_PICOCALC 1
 #else
 #define OUI_PICOCALC 0
@@ -442,7 +442,12 @@ static void ouiDrawToggles()
       ouiClearToggles(4);
 #endif
     } else {
+#if defined(BOARD_PICOCALC_P4) || defined(BOARD_DESKTOP)
+      ouiDrawToggle(3, "SPEED", atariFast ? "FAST" : "NORMAL", OUI_TXT);   // the hosts with an Atari pacer
+      ouiClearToggles(4);
+#else
       ouiClearToggles(3);   // Atari: no speed control
+#endif
     }
     ouiDrawScreenToggle();   // slot 6 (S3); drawn after the clears
     return;
@@ -511,14 +516,27 @@ static void ouiDrawFiles()
   // The focus ring is drawn over the rows, so turning it off (or recolouring it) means repainting
   // every row underneath; while it stays on, only a repainted row needs it put back.
   const uint8_t ring = (uint8_t)ouiFocusState(OUI_FOC_FILES);
-  if (ring != ouiRingDrawn) { ouiInvalidateRows(); ouiRingDrawn = ring; }
+  bool ringNew = false;
+  if (ring != ouiRingDrawn) { ouiInvalidateRows(); ouiRingDrawn = ring; ringNew = true; }
   bool rowsDrawn = false;
+  // OUI_RING_INSET: while the ring is up the rows paint INSIDE it (2px in from every edge), so a
+  // scroll repaints rows without touching the ring and the ring is drawn once, when it appears.
+  // Elsewhere the rows fill the full width and the ring is put back after every repaint.
+#if defined(BOARD_PICOCALC_P4)
+  const int ix = ring ? 2 : 0;
+#else
+  const int ix = 0;
+#endif
+  auto rowFill = [&](int r, int ry, uint16_t c) {
+    const int t = (r == 0) ? ix : 0, b = (r == OUI_FB_ROWS - 1) ? ix : 0;
+    tft.fillRect(ix, ry + t, 300 - 2 * ix, OUI_FB_ROWH - t - b, c);
+  };
 
   int listH = OUI_FB_ROWS * OUI_FB_ROWH;
   if (files.empty()) {
     if (ouiSigRow[0] != OUI_SIG_NOFILES) {
       for (int r = 0; r < OUI_FB_ROWS; r++) ouiSigRow[r] = OUI_SIG_NOFILES;
-      tft.fillRect(0, OUI_FB_LIST, 300, listH, OUI_CARD2);
+      tft.fillRect(ix, OUI_FB_LIST + ix, 300 - 2 * ix, listH - 2 * ix, OUI_CARD2);
       tft.setTextDatum(MC_DATUM);
       tft.setTextColor(OUI_LBL, OUI_CARD2);
       tft.drawString("No images on SD card", 150, OUI_FB_LIST + listH / 2, 1);
@@ -529,7 +547,7 @@ static void ouiDrawFiles()
       int idx = firstShowFile + r;
       int ry = OUI_FB_LIST + r * OUI_FB_ROWH;
       if (idx >= (int)files.size()) {
-        if (ouiChanged(ouiSigRow[r], OUI_SIG_EMPTY)) { tft.fillRect(0, ry, 300, OUI_FB_ROWH, OUI_CARD2); rowsDrawn = true; }
+        if (ouiChanged(ouiSigRow[r], OUI_SIG_EMPTY)) { rowFill(r, ry, OUI_CARD2); rowsDrawn = true; }
         continue;
       }
 
@@ -542,8 +560,8 @@ static void ouiDrawFiles()
       if (!ouiChanged(ouiSigRow[r], ouiHash(flags, ouiHash(files[idx].c_str())))) continue;
       rowsDrawn = true;
       uint16_t rowbg = selected ? OUI_SEL : OUI_CARD2;
-      tft.fillRect(0, ry, 300, OUI_FB_ROWH, rowbg);
-      if (mounted) tft.fillRect(0, ry, 3, OUI_FB_ROWH, OUI_ON);
+      rowFill(r, ry, rowbg);
+      if (mounted) tft.fillRect(ix, ry + (r == 0 ? ix : 0), 3, OUI_FB_ROWH - (r == 0 || r == OUI_FB_ROWS - 1 ? ix : 0), OUI_ON);
 
       // Every browser can now be inside a subdirectory, so every row gets the same treatment:
       // ".." as-is, "[name]" for a directory, otherwise the basename with the path stripped.
@@ -583,7 +601,7 @@ static void ouiDrawFiles()
     ouiScrollDrawn = true;
   }
 
-  if (ring && rowsDrawn) ouiFocusRing(0, OUI_FB_LIST, 300, listH, 2);
+  if (ring && (ix ? ringNew : rowsDrawn)) ouiFocusRing(0, OUI_FB_LIST, 300, listH, 2);
 }
 
 // Called from the (slow) directory scan in the render task: shows a "Loading… N" bar in the
@@ -2063,8 +2081,12 @@ static void ouiToggle(int idx)
       case 0: sound = !sound;           break;
       case 1: joystick = !joystick;     break;
       case 2: videoColor = !videoColor; break;
-      case 3: if (!ouiIsNES()) return;        // NES: SPEED NORMAL <-> FAST
-              nesFast = !nesFast; break;
+      case 3: if (ouiIsNES()) { nesFast = !nesFast; break; }   // NES: SPEED NORMAL <-> FAST
+#if defined(BOARD_PICOCALC_P4) || defined(BOARD_DESKTOP)
+              atariFast = !atariFast; break;                  // Atari: SPEED NORMAL <-> FAST
+#else
+              return;
+#endif
 #if BOARD_DISPLAY_GFX
       case 4: if (!ouiIsNES()) return;        // NES (S3): cycle display frame-skip 1(off)->2->3
               nesDisplaySkip = (nesDisplaySkip >= 3) ? 1 : nesDisplaySkip + 1;
@@ -2285,7 +2307,11 @@ static bool ouiFocusable(int f)
     if (ouiIsMsx()) return f <= 4;                                                // 4 = DISK ROM
     if (ouiIsSms() || ouiIsColeco() || ouiIsZx()) return f <= 3;
     if (ouiIsPcxt())  return f <= 1;
+#if defined(BOARD_PICOCALC_P4) || defined(BOARD_DESKTOP)
+    if (ouiIsAtari()) return f <= 3;                                              // 3 = SPEED
+#else
     if (ouiIsAtari()) return f <= 2;
+#endif
     if (ouiIsNES())   return f <= 3 || (BOARD_DISPLAY_GFX && f == 4);             // 4 = SKIP (S3)
     return f <= 4;                                                                // C64, Apple II
   }
@@ -2541,6 +2567,49 @@ bool optionsUiSnapKey(char c)
     case 'd': ouiSnapDelete(); break;
   }
   return true;
+}
+
+// A letter or digit typed while the file list has the focus: jump to the next entry whose name starts
+// with it (again = the one after that, wrapping), or, when none does, to the first name that sorts
+// after it -- the nearest. Directories go by their own name, not the brackets; ".." is skipped.
+static char ouiInitial(const std::string &e)
+{
+  if (e == "..") return 0;
+  for (char ch : ouiDisplayName(e)) {
+    if (ch >= 'A' && ch <= 'Z') return (char)(ch - 'A' + 'a');
+    if ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) return ch;
+  }
+  return 0;
+}
+
+void optionsUiKeyLetter(char c)
+{
+  if (ouiHelpOpen || ouiSnapMode || ouiRomMode || ouiGenMode || optionsUiFocus != OUI_FOC_FILES) return;
+  if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+  FileList &files = ouiFiles();
+  const int n = (int)files.size();
+  if (n == 0) return;
+  int hit = -1;
+  for (int k = 1; k <= n && hit < 0; k++) {           // starting after the current row, wrapping
+    const int i = ((int)shownFile + k) % n;
+    if (ouiInitial(files[i]) == c) hit = i;
+  }
+  if (hit < 0) {                                      // none: the nearest name after the letter
+    char best = 0;
+    for (int i = 0; i < n; i++) {
+      const char ini = ouiInitial(files[i]);
+      if (ini > c && (!best || ini < best)) { best = ini; hit = i; }
+    }
+  }
+  if (hit < 0 || hit == (int)shownFile) return;
+  shownFile = (uint16_t)hit;
+  if (shownFile < firstShowFile || shownFile >= firstShowFile + OUI_FB_ROWS) {
+    int top = hit - OUI_FB_ROWS / 2;                  // land it mid-list, so its neighbours show
+    if (top > n - OUI_FB_ROWS) top = n - OUI_FB_ROWS;
+    firstShowFile = (uint16_t)(top < 0 ? 0 : top);
+  }
+  ouiEditing = true;                                  // the arrows now move inside the list
+  optionsUiDirty = true;
 }
 
 void optionsUiKeyUnmount()

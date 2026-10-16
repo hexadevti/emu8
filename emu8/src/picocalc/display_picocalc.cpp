@@ -3,9 +3,11 @@
 // with the bitmap fonts in src/shared/uitext.h (same as the desktop backend) so this file needs NO
 // graphics library at all -- no Adafruit_GFX, no Arduino_GFX, no TFT_eSPI.
 //
-// The whole file is inside `#if defined(BOARD_PICOCALC)`: arduino-cli compiles every .cpp under
-// src/ for every board, so the guard is what keeps it out of the ESP32 binaries (the same pattern
-// as src/desktop/display_sdl.cpp).
+// The whole file is inside `#if defined(PICOCALC_MAINBOARD)`: arduino-cli compiles every .cpp under
+// src/ for every board, so the guard is what keeps it out of the other binaries (the same pattern
+// as src/desktop/display_sdl.cpp). The same panel also runs behind an ESP32-P4 module
+// (BOARD_PICOCALC_P4): only the transport (txBuf/txSolid/txWait, wrCmd/wrArgs, lcdHwInit and the
+// read-back helpers) differs; the notes below describe the RP2040/RP2350 one.
 //
 // THREE decisions worth knowing before reading the code:
 //
@@ -27,13 +29,19 @@
 //     the format back (fmt8/fmt16 below); the switch is cheap and happens once per window setup.
 #include "../../board.h"
 
-#if defined(BOARD_PICOCALC)
+#if defined(PICOCALC_MAINBOARD)
 
 #include "display_picocalc.h"
+#if defined(BOARD_PICOCALC)
 #include <hardware/spi.h>
 #include <hardware/dma.h>
 #include <hardware/gpio.h>
 #include <hardware/clocks.h>
+#else
+#include <driver/spi_master.h>
+#include <driver/gpio.h>
+#include "hal/usb_serial_jtag_ll.h"
+#endif
 #include <string.h>
 
 // Pixel format. 0 (default) = COLMOD 0x55, RGB565, 2 bytes/px -- community-confirmed working on the
@@ -50,7 +58,8 @@ extern DisplayGFX tft;
 extern void picocalcPumpInput();   // input_picocalc.cpp: drains the I2C keyboard into usbKeyboardReport()
 extern void picocalcBacklightOn(); // input_picocalc.cpp: LCD backlight lives on the STM32, not a GPIO
 
-#define LCD_SPI spi1
+// RAMRD runs at a read clock far below the write one (see the read-back section at the end).
+#define LCD_READ_HZ 5000000
 
 // ============================== staging buffers (declared in the header) ======================
 namespace pcd {
@@ -65,6 +74,11 @@ namespace pcd {
 }
 
 // ============================== low-level panel I/O ===========================================
+static uint32_t s_spiHz;                // the LCD SPI clock actually set
+uint32_t lcdSpiHz() { return s_spiHz; }
+
+#if defined(BOARD_PICOCALC)
+#define LCD_SPI spi1
 static int  s_dma = -1;
 static dma_channel_config s_cfgInc;    // read-increment ON  (a pixel buffer)
 static dma_channel_config s_cfgSolid;  // read-increment OFF (one color repeated)
@@ -154,6 +168,249 @@ static void wrCmd(uint8_t c) {
 static void wrArgs(const uint8_t *d, size_t n) {
   if (n) spi_write_blocking(LCD_SPI, d, n);
 }
+static bool txBusy() { return s_dma >= 0 && dma_channel_is_busy(s_dma); }
+
+// Read-back helpers (the read-back section at the end of the file).
+static void rdClock(bool slow) { spi_set_baudrate(LCD_SPI, slow ? LCD_READ_HZ : s_spiHz); }
+static void rdBytes(uint8_t *d, size_t n) { rdBytes(d, n); }
+static void csPulse() {
+  gpio_put(LCD_CS_PIN, 1);
+  busy_wait_us_32(2);
+  gpio_put(LCD_CS_PIN, 0);
+  busy_wait_us_32(1);
+}
+
+// Pins, SPI, DMA and the panel's hardware reset; leaves CS asserted for good (note 2).
+static void lcdHwInit() {
+  // --- GPIO: CS/DC/RST are plain outputs (see note 2 at the top); SCK/TX/RX go to the SPI mux ---
+  gpio_init(LCD_CS_PIN);  gpio_set_dir(LCD_CS_PIN,  GPIO_OUT); gpio_put(LCD_CS_PIN,  1);
+  gpio_init(LCD_DC_PIN);  gpio_set_dir(LCD_DC_PIN,  GPIO_OUT); gpio_put(LCD_DC_PIN,  1);
+  gpio_init(LCD_RST_PIN); gpio_set_dir(LCD_RST_PIN, GPIO_OUT); gpio_put(LCD_RST_PIN, 1);
+
+  // clk_peri (the SPI clock) runs from clk_sys. arduino-pico's set_sys_clock_khz() leaves it on the
+  // 48MHz USB PLL, which caps SPI at 24MHz: a full C64 frame then took ~45ms on the wire and the
+  // panel showed one frame in three. From clk_sys (250MHz) LCD_SPI_HZ gets its 62.5MHz. This runs
+  // first thing in setup(), before the SD card's spi0 is set up; Arduino SPI computes its divider
+  // from clock_get_hz(clk_peri) at each transaction anyway.
+  if (clock_get_hz(clk_peri) != clock_get_hz(clk_sys))
+    clock_configure(clk_peri, 0, CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLK_SYS,
+                    clock_get_hz(clk_sys), clock_get_hz(clk_sys));
+  s_spiHz = spi_init(LCD_SPI, LCD_SPI_HZ);
+  spi_set_format(LCD_SPI, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
+  s_fmt16 = false;
+  gpio_set_function(LCD_SCK_PIN,  GPIO_FUNC_SPI);
+  gpio_set_function(LCD_MOSI_PIN, GPIO_FUNC_SPI);
+  gpio_set_function(LCD_MISO_PIN, GPIO_FUNC_SPI);
+
+  // --- DMA channel: pace on the SPI TX DREQ, write the data register without incrementing ---
+  if (s_dma < 0) s_dma = dma_claim_unused_channel(true);   // once only; see begin()'s note
+  s_cfgInc = dma_channel_get_default_config(s_dma);
+#if PICOCALC_LCD_18BIT
+  channel_config_set_transfer_data_size(&s_cfgInc, DMA_SIZE_8);
+#else
+  channel_config_set_transfer_data_size(&s_cfgInc, DMA_SIZE_16);
+#endif
+  channel_config_set_dreq(&s_cfgInc, spi_get_dreq(LCD_SPI, true));
+  channel_config_set_read_increment(&s_cfgInc, true);
+  channel_config_set_write_increment(&s_cfgInc, false);
+  s_cfgSolid = s_cfgInc;
+  channel_config_set_read_increment(&s_cfgSolid, false);
+
+  // --- hardware reset (ClockworkPi timings: 10ms low, 200ms settle) ---
+  gpio_put(LCD_RST_PIN, 1); delay(10);
+  gpio_put(LCD_RST_PIN, 0); delay(10);
+  gpio_put(LCD_RST_PIN, 1); delay(200);
+
+  gpio_put(LCD_CS_PIN, 0);                   // asserted from here on, for good (note 2)
+}
+
+#else  // BOARD_PICOCALC_P4
+
+// ESP32-P4: ESP-IDF spi_master on SPI2 with DMA, CS a plain GPIO held low as on the RP build (the
+// panel is alone on this bus). Two differences from the PL022 path:
+//  * ESP SPI sends bytes in memory order and has no 16-bit frame mode, so RGB565 must be swapped
+//    to big-endian first. Every pixel transfer therefore goes through one of a few DMA-capable
+//    bounce buffers, swapped while copying -- which also means the caller's buffer is free as soon
+//    as txBuf() returns, even though the transfer itself is still queued (async, like the DMA).
+//  * Commands and their parameters are short polling transactions, issued only once every queued
+//    pixel transfer has finished (wrCmd() joins first, exactly where the RP build calls fmt8()).
+// 18-bit mode is not implemented here; RGB565 is confirmed on this panel.
+#if PICOCALC_LCD_18BIT
+#error "PICOCALC_LCD_18BIT is RP2040/RP2350 only"
+#endif
+#define P4_BOUNCE_PX 8192                    // pixels per bounce buffer / per DMA transaction
+#define P4_NBUF      3                       // bounce buffers = transactions in flight
+static spi_device_handle_t s_dev = nullptr;  // LCD_SPI_HZ, pixel and command writes
+static spi_device_handle_t s_rdDev = nullptr;// LCD_READ_HZ, the RAMRD read-back only
+static bool s_slow = false;                  // read-back in progress: commands go through s_rdDev
+static uint16_t *s_bnc[P4_NBUF];
+static uint16_t *s_solidBuf = nullptr;       // one color, pre-swapped, repeated by txSolid()
+static uint16_t s_solidColor = 0;
+static uint32_t s_solidLen = 0;              // pixels of s_solidBuf currently holding s_solidColor
+static spi_transaction_t s_trn[P4_NBUF];
+static uint8_t s_next = 0;                   // next slot (oldest in-flight one when all are busy)
+static uint8_t s_inflight = 0;
+
+static inline void dcCmd()  { gpio_set_level((gpio_num_t)LCD_DC_PIN, 0); }
+static inline void dcData() { gpio_set_level((gpio_num_t)LCD_DC_PIN, 1); }
+
+// Transactions complete in queue order, so reaping one always frees the oldest slot.
+static void reapOne() {
+  spi_transaction_t *r;
+  if (spi_device_get_trans_result(s_dev, &r, portMAX_DELAY) == ESP_OK) s_inflight--;
+}
+static void txWait() { while (s_inflight) reapOne(); }
+static bool txBusy() {
+  spi_transaction_t *r;
+  while (s_inflight && spi_device_get_trans_result(s_dev, &r, 0) == ESP_OK) s_inflight--;
+  return s_inflight != 0;
+}
+static uint8_t slotTake() {
+  if (s_inflight == P4_NBUF) reapOne();
+  return s_next;
+}
+static void slotQueue(uint8_t i, const void *buf, uint32_t px) {
+  spi_transaction_t &t = s_trn[i];
+  memset(&t, 0, sizeof(t));
+  t.length = px * 16;
+  t.tx_buffer = buf;
+  if (spi_device_queue_trans(s_dev, &t, portMAX_DELAY) != ESP_OK) return;
+  s_inflight++;
+  s_next = (uint8_t)((i + 1) % P4_NBUF);
+}
+static void txBuf(const uint16_t *src, uint32_t n) {
+  while (n) {
+    const uint32_t k = n > P4_BOUNCE_PX ? P4_BOUNCE_PX : n;
+    const uint8_t i = slotTake();
+    uint16_t *d = s_bnc[i];
+    for (uint32_t j = 0; j < k; j++) d[j] = __builtin_bswap16(src[j]);
+    slotQueue(i, d, k);
+    src += k; n -= k;
+  }
+}
+static void txSolid(uint16_t c, uint32_t n) {
+  const uint32_t want = n > P4_BOUNCE_PX ? P4_BOUNCE_PX : n;
+  if (c != s_solidColor || want > s_solidLen) {
+    txWait();                                 // queued fills may still be reading the old color
+    const uint16_t v = __builtin_bswap16(c);
+    for (uint32_t j = 0; j < want; j++) s_solidBuf[j] = v;
+    s_solidColor = c;
+    s_solidLen = want;
+  }
+  while (n) {
+    const uint32_t k = n > P4_BOUNCE_PX ? P4_BOUNCE_PX : n;
+    slotQueue(slotTake(), s_solidBuf, k);
+    n -= k;
+  }
+}
+static inline void fmt16() {}
+static inline void fmt8() { txWait(); }
+static inline void spiIdle() { txWait(); }
+
+// Short blocking writes. The bytes are copied into a bounce buffer first: kInit lives in flash,
+// which the SPI DMA cannot read (the driver would otherwise malloc a copy every time).
+static void wrBytes(const uint8_t *d, size_t n) {
+  if (!n) return;
+  spi_transaction_t t = {};
+  t.length = n * 8;
+  if (n <= 4) {
+    t.flags = SPI_TRANS_USE_TXDATA;
+    memcpy(t.tx_data, d, n);
+  } else {
+    uint8_t *b = (uint8_t *)s_bnc[s_next];    // idle: wrBytes only runs after txWait()
+    memcpy(b, d, n);
+    t.tx_buffer = b;
+  }
+  spi_device_polling_transmit(s_slow ? s_rdDev : s_dev, &t);
+}
+static void wrCmd(uint8_t c) {
+  fmt8();
+  dcCmd();
+  wrBytes(&c, 1);
+  dcData();
+}
+static void wrArgs(const uint8_t *d, size_t n) { wrBytes(d, n); }
+
+// Read-back helpers (the read-back section at the end of the file).
+static void rdClock(bool slow) { txWait(); s_slow = slow; }
+static void rdBytes(uint8_t *d, size_t n) {
+  uint8_t *b = (uint8_t *)s_bnc[s_next];
+  while (n) {
+    const size_t k = n > 1024 ? 1024 : n;
+    spi_transaction_t t = {};
+    t.length = k * 8;
+    t.rxlength = k * 8;
+    t.rx_buffer = b;
+    spi_device_polling_transmit(s_rdDev, &t);
+    memcpy(d, b, k);
+    d += k; n -= k;
+  }
+}
+static void csPulse() {
+  gpio_set_level((gpio_num_t)LCD_CS_PIN, 1);
+  delayMicroseconds(2);
+  gpio_set_level((gpio_num_t)LCD_CS_PIN, 0);
+  delayMicroseconds(1);
+}
+
+// GPIO24/25 (DC/RST) come out of reset owned by the USB-Serial-JTAG PHY with its D+ pull-up on.
+// Hand them to the GPIO matrix first. (The console is UART0 on the module's own USB-C, not this.)
+static void releaseUsbJtagPads() {
+  USB_SERIAL_JTAG.conf0.pad_pull_override = 1;
+  USB_SERIAL_JTAG.conf0.dp_pullup = 0;
+  USB_SERIAL_JTAG.conf0.dm_pullup = 0;
+  usb_serial_jtag_ll_phy_enable_pad(false);
+}
+
+// Pins, SPI bus/devices, bounce buffers and the panel's hardware reset; leaves CS asserted.
+static void lcdHwInit() {
+  if (!s_dev) {                              // once: begin() runs twice by design
+    releaseUsbJtagPads();
+    spi_bus_config_t bus = {};
+    bus.mosi_io_num = LCD_MOSI_PIN;
+    bus.miso_io_num = LCD_MISO_PIN;
+    bus.sclk_io_num = LCD_SCK_PIN;
+    bus.quadwp_io_num = -1;
+    bus.quadhd_io_num = -1;
+    bus.max_transfer_sz = P4_BOUNCE_PX * 2;
+    esp_err_t e = spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO);
+    spi_device_interface_config_t dc = {};
+    dc.mode = 0;
+    dc.clock_speed_hz = LCD_SPI_HZ;
+    dc.spics_io_num = -1;                    // CS is ours (held low)
+    dc.queue_size = P4_NBUF;
+    if (e == ESP_OK) e = spi_bus_add_device(SPI2_HOST, &dc, &s_dev);
+    dc.clock_speed_hz = LCD_READ_HZ;
+    dc.queue_size = 1;
+    if (e == ESP_OK) e = spi_bus_add_device(SPI2_HOST, &dc, &s_rdDev);
+    for (int i = 0; i < P4_NBUF; i++)
+      s_bnc[i] = (uint16_t *)spi_bus_dma_memory_alloc(SPI2_HOST, P4_BOUNCE_PX * 2, 0);
+    s_solidBuf = (uint16_t *)spi_bus_dma_memory_alloc(SPI2_HOST, P4_BOUNCE_PX * 2, 0);
+    if (e != ESP_OK || !s_solidBuf || !s_bnc[P4_NBUF - 1]) {
+      Serial.printf("LCD: SPI init failed (%s)\n", esp_err_to_name(e));
+      while (true) delay(1000);
+    }
+    int khz = 0;
+    spi_device_get_actual_freq(s_dev, &khz);
+    s_spiHz = (uint32_t)khz * 1000u;
+  }
+  txWait();
+  s_slow = false;
+  s_solidLen = 0;
+
+  pinMode(LCD_CS_PIN, OUTPUT);  digitalWrite(LCD_CS_PIN, HIGH);
+  pinMode(LCD_DC_PIN, OUTPUT);  digitalWrite(LCD_DC_PIN, HIGH);
+  pinMode(LCD_RST_PIN, OUTPUT); digitalWrite(LCD_RST_PIN, HIGH);
+
+  // --- hardware reset (ClockworkPi timings: 10ms low, 200ms settle) ---
+  delay(10);
+  digitalWrite(LCD_RST_PIN, LOW);  delay(10);
+  digitalWrite(LCD_RST_PIN, HIGH); delay(200);
+
+  digitalWrite(LCD_CS_PIN, LOW);             // asserted from here on, for good
+}
+
+#endif  // BOARD_PICOCALC / BOARD_PICOCALC_P4
 
 // CASET / RASET / RAMWR in RAW PANEL coordinates (inclusive bounds). Leaves DC high and the panel
 // waiting for pixel data; the caller then calls fmt16() and pushes.
@@ -286,9 +543,6 @@ static const uint8_t kInit[] = {
   0xF7,  4, 0xA9,0x51,0x2C,0x82,             // adjust control 3
 };
 
-static uint32_t s_spiHz;                // the LCD SPI clock spi_init() actually set
-uint32_t lcdSpiHz() { return s_spiHz; }
-
 void DisplayGFX::begin() {
   // Called TWICE by design: the boot console brings the panel up as the first thing setup()
   // does, and videoSetup() calls begin() again once the emulator owns the screen. The second
@@ -300,46 +554,7 @@ void DisplayGFX::begin() {
   // The one thing that must not repeat is the DMA claim -- a second claim would leak the first
   // channel -- so that, and only that, is guarded below.
 
-  // --- GPIO: CS/DC/RST are plain outputs (see note 2 at the top); SCK/TX/RX go to the SPI mux ---
-  gpio_init(LCD_CS_PIN);  gpio_set_dir(LCD_CS_PIN,  GPIO_OUT); gpio_put(LCD_CS_PIN,  1);
-  gpio_init(LCD_DC_PIN);  gpio_set_dir(LCD_DC_PIN,  GPIO_OUT); gpio_put(LCD_DC_PIN,  1);
-  gpio_init(LCD_RST_PIN); gpio_set_dir(LCD_RST_PIN, GPIO_OUT); gpio_put(LCD_RST_PIN, 1);
-
-  // clk_peri (the SPI clock) runs from clk_sys. arduino-pico's set_sys_clock_khz() leaves it on the
-  // 48MHz USB PLL, which caps SPI at 24MHz: a full C64 frame then took ~45ms on the wire and the
-  // panel showed one frame in three. From clk_sys (250MHz) LCD_SPI_HZ gets its 62.5MHz. This runs
-  // first thing in setup(), before the SD card's spi0 is set up; Arduino SPI computes its divider
-  // from clock_get_hz(clk_peri) at each transaction anyway.
-  if (clock_get_hz(clk_peri) != clock_get_hz(clk_sys))
-    clock_configure(clk_peri, 0, CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLK_SYS,
-                    clock_get_hz(clk_sys), clock_get_hz(clk_sys));
-  s_spiHz = spi_init(LCD_SPI, LCD_SPI_HZ);
-  spi_set_format(LCD_SPI, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
-  s_fmt16 = false;
-  gpio_set_function(LCD_SCK_PIN,  GPIO_FUNC_SPI);
-  gpio_set_function(LCD_MOSI_PIN, GPIO_FUNC_SPI);
-  gpio_set_function(LCD_MISO_PIN, GPIO_FUNC_SPI);
-
-  // --- DMA channel: pace on the SPI TX DREQ, write the data register without incrementing ---
-  if (s_dma < 0) s_dma = dma_claim_unused_channel(true);   // once only; see begin()'s note
-  s_cfgInc = dma_channel_get_default_config(s_dma);
-#if PICOCALC_LCD_18BIT
-  channel_config_set_transfer_data_size(&s_cfgInc, DMA_SIZE_8);
-#else
-  channel_config_set_transfer_data_size(&s_cfgInc, DMA_SIZE_16);
-#endif
-  channel_config_set_dreq(&s_cfgInc, spi_get_dreq(LCD_SPI, true));
-  channel_config_set_read_increment(&s_cfgInc, true);
-  channel_config_set_write_increment(&s_cfgInc, false);
-  s_cfgSolid = s_cfgInc;
-  channel_config_set_read_increment(&s_cfgSolid, false);
-
-  // --- hardware reset (ClockworkPi timings: 10ms low, 200ms settle) ---
-  gpio_put(LCD_RST_PIN, 1); delay(10);
-  gpio_put(LCD_RST_PIN, 0); delay(10);
-  gpio_put(LCD_RST_PIN, 1); delay(200);
-
-  gpio_put(LCD_CS_PIN, 0);                   // asserted from here on, for good (note 2)
+  lcdHwInit();
 
   for (size_t i = 0; i < sizeof(kInit); ) {
     uint8_t cmd = kInit[i++], argc = kInit[i++];
@@ -513,7 +728,7 @@ void DisplayGFX::pushImageAsync(int32_t x, int32_t y, int32_t w, int32_t h, cons
   fmt16();
   txBuf(data, (uint32_t)w * (uint32_t)h);
 }
-bool DisplayGFX::pushBusy() { return s_dma >= 0 && dma_channel_is_busy(s_dma); }
+bool DisplayGFX::pushBusy() { return txBusy(); }
 void DisplayGFX::pushWait() { txWait(); }
 // Same geometry as pushImage on this board (logical == panel apart from the letterbox offset).
 void DisplayGFX::pushPanelBand(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data) {
@@ -579,11 +794,33 @@ int16_t DisplayGFX::textWidth(const char *s, uint8_t font) {
   return (int16_t)uiTextWidth(s, font);
 }
 
+#if defined(BOARD_PICOCALC_P4)
+// Opaque text is composed here and sent as ONE image. On the P4 every panel write (window +
+// RAMWR + data) is several IDF SPI transactions, so the per-run path below -- fine on the RP's bare
+// PL022 -- cost a few hundred of them per line of text and made the settings file list crawl when
+// it scrolled. 320 x 20 covers a full-width line in every UI font.
+static uint16_t s_textBuf[320 * 20];
+#endif
+
 int16_t DisplayGFX::drawString(const char *s, int32_t x, int32_t y, uint8_t font) {
   if (!s) return 0;
   int32_t left, top;
   uiTextOrigin(s, x, y, _datum, font, left, top);
   const int w = uiTextWidth(s, font);
+#if defined(BOARD_PICOCALC_P4)
+  const int h = uiTextCellH(font);
+  if (_textHasBg && !_rawText && w > 0 && left >= 0 && top >= 0 && left + w <= DISP_LOGICAL_W &&
+      top + h <= _logH && w * h <= (int)(sizeof(s_textBuf) / sizeof(s_textBuf[0]))) {
+    const uint16_t bg = _textBg, fg = _textFg;
+    for (int i = 0; i < w * h; i++) s_textBuf[i] = bg;
+    uiTextDraw(s, left, top, font, [=](int32_t px, int32_t py) {
+      const int32_t cx = px - left, cy = py - top;
+      if ((uint32_t)cx < (uint32_t)w && (uint32_t)cy < (uint32_t)h) s_textBuf[cy * w + cx] = fg;
+    });
+    pushImage(left, top, w, h, s_textBuf);           // copied into the bounce buffers before it returns
+    return (int16_t)w;
+  }
+#endif
   if (_textHasBg && w > 0) fillRect(left, top, w, uiTextCellH(font), _textBg);
   const uint16_t fg = _textFg;
   uiTextDraw(s, left, top, font, [this, fg](int32_t px, int32_t py) { pxRun(px, py, fg); });
@@ -624,11 +861,10 @@ void displaySetVideoFill(int, int, bool) {}
 // ============================== read-back =====================================================
 // The emulator video area as it is on the panel, for the snapshot thumbnails: always the
 // letterboxed 320x240 (rows DISP_OFFSET_Y on), whatever the menu set the logical offset to.
-// RAMRD runs at a read clock far below the write one, so the clock drops for it and comes back.
+// RAMRD runs at LCD_READ_HZ, far below the write clock, so the clock drops for it and comes back.
 // What it answers -- dummy bytes, 2 or 3 bytes per pixel, RGB or BGR -- differs between ILI948x /
 // ST7365 units, so the first read probes it: three known pixels go into the black top bar, are read
 // back and matched against each layout, and the bar is painted black again.
-#define LCD_READ_HZ 5000000
 void printLog(const char *txt);              // interface.cpp
 static int8_t s_rdSkip = -1, s_rdBpp = 0;   // dummy bytes, bytes per pixel (0 = not probed / unknown)
 static bool s_rdBgr = false;
@@ -642,19 +878,16 @@ static void rdBegin(int32_t x0, int32_t y0, int32_t x1, int32_t y1) {
   b[0] = (uint8_t)(y0 >> 8); b[1] = (uint8_t)y0; b[2] = (uint8_t)(y1 >> 8); b[3] = (uint8_t)y1;
   wrArgs(b, 4);
   spiIdle();
-  spi_set_baudrate(LCD_SPI, LCD_READ_HZ);
+  rdClock(true);
   wrCmd(0x2E);                                                  // RAMRD
   spiIdle();
 }
 static void rdEnd() {
   spiIdle();
-  spi_set_baudrate(LCD_SPI, s_spiHz);
+  rdClock(false);
   // A read only ends on a CS rising edge (a NOP does not), and CS is otherwise held low for good
   // (note 2 at the top): without this pulse the panel stays in read mode and ignores every draw.
-  gpio_put(LCD_CS_PIN, 1);
-  busy_wait_us_32(2);
-  gpio_put(LCD_CS_PIN, 0);
-  busy_wait_us_32(1);
+  csPulse();
   wrCmd(0x00);                                                  // NOP
 }
 static bool rdProbe() {
@@ -663,7 +896,7 @@ static bool rdProbe() {
   for (int i = 0; i < 3; i++) panelFillRaw(i, 0, 1, 1, pat[i]);
   uint8_t r[12];
   rdBegin(0, 0, 2, 0);
-  spi_read_blocking(LCD_SPI, 0, r, sizeof(r));
+  rdBytes(r, sizeof(r));
   rdEnd();
   panelFillRaw(0, 0, 3, 1, TFT_BLACK);
   s_rdSkip = 0; s_rdBpp = 0;
@@ -695,11 +928,11 @@ bool DisplayGFX::readVideo(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t 
   const int32_t py = y + DISP_OFFSET_Y;
   rdBegin(x, py, x + w - 1, py + h - 1);
   uint8_t c[96];
-  if (s_rdSkip) spi_read_blocking(LCD_SPI, 0, c, (size_t)s_rdSkip);
+  if (s_rdSkip) rdBytes(c, (size_t)s_rdSkip);
   const uint32_t n = (uint32_t)w * (uint32_t)h, bpp = (uint32_t)s_rdBpp, per = sizeof(c) / 6;
   for (uint32_t i = 0; i < n; ) {
     const uint32_t k = n - i > per ? per : n - i;
-    spi_read_blocking(LCD_SPI, 0, c, k * bpp);
+    rdBytes(c, k * bpp);
     for (uint32_t j = 0; j < k; j++, i++) {
       const uint8_t *q = c + j * bpp;
       uint16_t v;
@@ -718,4 +951,4 @@ bool DisplayGFX::readVideo(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t 
 }
 bool displayReadVideo(int x, int y, int w, int h, uint16_t *buf) { return tft.readVideo(x, y, w, h, buf); }
 
-#endif // BOARD_PICOCALC
+#endif // PICOCALC_MAINBOARD

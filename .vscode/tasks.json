@@ -6,6 +6,7 @@
   //   * "Arduino: Build [& Upload] (JC4827W543)" -> Guition JC4827W543 (ESP32-S3), COM5.
   //   * "Arduino: Build [& Upload] (JC1060P470)" -> Guition JC1060P470 (ESP32-P4), COM6.
   //   * "Arduino: Build [& Upload] (PicoCalc)"   -> ClockworkPi PicoCalc + Pico 2 (RP2350), COM7.
+  //   * "Arduino: Build [& Upload] (PicoCalc P4)" -> PicoCalc + Waveshare ESP32-P4-WIFI6, COM9.
   //   * "desktop: build"                         -> Windows/Linux SDL2 debug build (CMake).
   //
   // Each non-default task passes its board macro (via compiler.cpp.extra_flags) which flips
@@ -165,6 +166,60 @@
         }
       },
       "dependsOn": "Arduino: Build (JC1060P470)",
+      "dependsOrder": "sequence",
+      "group": "build",
+      "problemMatcher": ["$gcc"],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      // ClockworkPi PicoCalc with a Waveshare ESP32-P4-WIFI6 module in the Pico socket. Same isolated
+      // P4 toolchain as the JC1060P470 task above. ChipVariant=postv3 is REQUIRED: the module is
+      // silicon v3.x and a prev3 build boot-loops (CHIP_LP_WDT_RESET). Console/upload on the
+      // module's own Type-C (CH343), COM9.
+      "label": "Arduino: Build (PicoCalc P4)",
+      "type": "shell",
+      "command": "arduino-cli",
+      "args": [
+        "compile",
+        "--fqbn",
+        "esp32:esp32:esp32p4:PSRAM=enabled,FlashSize=16M,ChipVariant=postv3,PartitionScheme=huge_app,DebugLevel=error",
+        "--verbose",
+        "--build-property",
+        "compiler.optimization_flags=-O2",
+        "--build-property",
+        "compiler.cpp.extra_flags=-DBOARD_PICOCALC_P4",
+        "${workspaceFolder}/emu8"
+      ],
+      "options": {
+        "env": {
+          "ARDUINO_DIRECTORIES_DATA": "${userHome}/.emu6502-p4/data",
+          "ARDUINO_DIRECTORIES_USER": "${userHome}/.emu6502-p4/user"
+        }
+      },
+      "group": "build",
+      "problemMatcher": ["$gcc"],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Arduino: Build & Upload (PicoCalc P4)",
+      "type": "shell",
+      "command": "arduino-cli",
+      "args": [
+        "upload",
+        "-p",
+        "COM9",
+        "--fqbn",
+        "esp32:esp32:esp32p4:PSRAM=enabled,FlashSize=16M,ChipVariant=postv3,PartitionScheme=huge_app,DebugLevel=error",
+        "--verbose",
+        "${workspaceFolder}/emu8"
+      ],
+      "options": {
+        "env": {
+          "ARDUINO_DIRECTORIES_DATA": "${userHome}/.emu6502-p4/data",
+          "ARDUINO_DIRECTORIES_USER": "${userHome}/.emu6502-p4/user"
+        }
+      },
+      "dependsOn": "Arduino: Build (PicoCalc P4)",
       "dependsOrder": "sequence",
       "group": "build",
       "problemMatcher": ["$gcc"],

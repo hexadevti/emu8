@@ -15,8 +15,8 @@
   #include <TFT_eSPI.h>
 #elif defined(BOARD_DESKTOP)
   #include "src/desktop/display_sdl.h"  // DisplayGFX: TFT_eSPI-compatible SDL2 backend (desktop)
-#elif defined(BOARD_PICOCALC)
-  #include "src/picocalc/display_picocalc.h"  // DisplayGFX: ST7365P 320x320 over spi1+DMA (PicoCalc)
+#elif defined(PICOCALC_MAINBOARD)
+  #include "src/picocalc/display_picocalc.h"  // DisplayGFX: ST7365P 320x320 over SPI+DMA (PicoCalc mainboard)
 #else
   #include "src/shared/display_gfx.h"   // DisplayGFX: TFT_eSPI-compatible Arduino_GFX backend
 #endif
@@ -254,6 +254,7 @@ extern int logLineCount;
 #define NesSpeedEEPROMaddress 17       // NES: 1 = FAST (uncapped) / 0 = NORMAL (paced ~60fps/1.79MHz)
 #define ZxSpeedEEPROMaddress 21        // ZX Spectrum: 1 = FAST (uncapped) / 0 = NORMAL (paced to 3.5 MHz)
 #define MsxDiskRomEEPROMaddress 22     // MSX: DISK ROM setting, MSX_DISKROM_* (anything else = AUTO)
+#define AtariSpeedEEPROMaddress 23     // Atari (PicoCalc P4 + desktop): 1 = FAST (uncapped) / 0 = NORMAL (paced to 1.19 MHz)
 // The Apple IIe keeps its own copy of the Apple-only settings (DEVICE, SPEED, the disk and HD
 // images); the addresses above without "IIe" are the II+'s. See eprom.cpp.
 #define IIeHdDiskEEPROMaddress 18
@@ -319,6 +320,7 @@ extern String selectedColecoFileName;// Coleco: currently-loaded .col/.rom cartr
 extern bool colecoFast;              // Coleco: true = run uncapped (FAST), false = pace to real 3.58 MHz
 extern float colecoMeasuredMhz;      // Coleco: live measured Z80 speed (speedmeter.h)
 extern String selectedZxFileName;    // ZX Spectrum: currently-loaded snapshot / tape (settings file browser marker)
+extern bool atariFast;               // Atari: true = run uncapped (FAST), false = pace to real 1.19 MHz (PicoCalc P4 + desktop)
 extern bool zxFast;                  // ZX Spectrum: true = run uncapped (FAST), false = pace to real 3.5 MHz
 extern float zxMeasuredMhz;          // ZX Spectrum: live measured Z80 speed (speedmeter.h)
 extern String selectedPcFileName;    // PCXT: A: floppy image (settings file browser marker)

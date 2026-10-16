@@ -183,6 +183,27 @@ static void idleWithoutCart() {
   }
 }
 
+#if defined(BOARD_PICOCALC_P4) || defined(BOARD_DESKTOP)
+// Real-time pacing at the NTSC 2600 clock (1.193182 MHz). The other hosts are slow enough that this
+// core never had a pacer -- it ran flat out and that was about right -- but the 360 MHz P4 and the
+// desktop ran it several times too fast. Same scheme as the C64 core: a running target of the real
+// microseconds the emulated cycles should take (16.16 remainder), re-anchored if it falls 100 ms behind (boot, pause,
+// menu), so a slow stretch is caught up on by the instructions after it. The clock is only checked
+// once ~500 us of emulated time has built up, not on every instruction.
+#define ATARI_US_PER_CYC_Q16 54925u   // 65536 / 1.193182
+static uint32_t paceBaseUs = 0, paceTargetUs = 0, paceAccQ16 = 0, paceCheckUs = 0;
+static inline void pace(uint32_t cyc) {
+  paceAccQ16 += cyc * ATARI_US_PER_CYC_Q16;
+  paceTargetUs += paceAccQ16 >> 16;
+  paceAccQ16 &= 0xFFFF;
+  if (paceTargetUs - paceCheckUs < 500) return;
+  paceCheckUs = paceTargetUs;
+  int32_t lag = (int32_t)((uint32_t)micros() - paceBaseUs - paceTargetUs);
+  if (lag > 100000) { paceBaseUs = (uint32_t)micros(); paceTargetUs = paceCheckUs = 0; paceAccQ16 = 0; }
+  else while (lag < 0) lag = (int32_t)((uint32_t)micros() - paceBaseUs - paceTargetUs);
+}
+#endif
+
 void cpuLoop() {
   if (cartRom) cpuReset();             // else the no-cart idle below runs first and requests the reset
   lastPC = PC;
@@ -220,6 +241,7 @@ void cpuLoop() {
     int instrCycles = cycles[opcode];
     if (instrCycles < 1) instrCycles = 2;
     opflags = flags6502[opcode];
+    bool pageCross = false;
 
     // Addressing modes
     switch (opflags & 0x0F) {
@@ -228,14 +250,16 @@ void cpuLoop() {
       case AD_ABS:
         argument_addr = cpuRead16(PC); PC += 2; break;
       case AD_ABSX:
-        argument_addr = cpuRead16(PC) + (unsigned short)X; PC += 2; break;
+        value16 = cpuRead16(PC); argument_addr = value16 + (unsigned short)X; PC += 2;
+        pageCross = (value16 ^ argument_addr) & 0xFF00; break;
       case AD_IABX:
         argument_addr = cpuRead16(PC) + (unsigned short)X;
         value16 = (argument_addr + 1 & 0xFF00) | ((argument_addr + 1) & 0x00FF);
         argument_addr = (unsigned short)cpuRead(argument_addr) | ((unsigned short)cpuRead(value16) << 8);
         PC += 2; break;
       case AD_ABSY:
-        argument_addr = cpuRead16(PC) + (unsigned short)Y; PC += 2; break;
+        value16 = cpuRead16(PC); argument_addr = value16 + (unsigned short)Y; PC += 2;
+        pageCross = (value16 ^ argument_addr) & 0xFF00; break;
       case AD_IMM:
         argument_addr = PC++; break;
       case AD_IND:
@@ -252,7 +276,8 @@ void cpuLoop() {
         argument_addr = (unsigned short)cpuRead(PC++);
         value16 = (argument_addr & 0xFF00) | ((argument_addr + 1) & 0x00FF);
         argument_addr = (unsigned short)cpuRead(argument_addr) | ((unsigned short)cpuRead(value16) << 8);
-        argument_addr += Y;
+        value16 = argument_addr; argument_addr += Y;
+        pageCross = (value16 ^ argument_addr) & 0xFF00;
         break;
       case AD_REL:
         argument_addr = (unsigned short)cpuRead(PC++);
@@ -275,6 +300,18 @@ void cpuLoop() {
     // sensitive writes (RESP0/1, RESM0/1, RESBL strobes and HMOVE) land at the end-of-instruction
     // beam position (~the real write cycle) instead of the start — otherwise sprites sit several
     // pixels too far left. WSYNC is still drained after the body (it sets wsyncStall in the switch).
+    // Indexed READS (abs,X / abs,Y / (zp),Y) that cross a page take +1 cycle. Stores and
+    // read-modify-writes always pay it, so their table count already includes it. Timed kernels
+    // count on this: H.E.R.O.'s power-bar loop crosses a page and drifted a cycle per line without it.
+    if (pageCross) {
+      switch (opcode) {
+        case 0x9D: case 0x99: case 0x91: case 0x9E:                       // STA abs,X/abs,Y/(zp),Y, STZ abs,X
+        case 0x1E: case 0x3E: case 0x5E: case 0x7E: case 0xDE: case 0xFE: // ASL/ROL/LSR/ROR/DEC/INC abs,X
+          break;
+        default: instrCycles++; break;
+      }
+    }
+    uint16_t branchFrom = PC;   // for the taken-branch page-cross cycle below
     int preCyc = instrCycles;   // base cycles; a taken branch adds +1 in the switch (stepped after)
     tiaStepInline(instrCycles);
     riotTick(instrCycles);
@@ -316,7 +353,7 @@ void cpuLoop() {
       // Conditional branches: a TAKEN branch costs +1 cycle (the 6502 penalty). This matters on
       // the 2600 — many games busy-wait on the RIOT timer with `LDA INTIM; BNE`, and the exact
       // loop length (7 cycles, taken) is what lets the poll read the timer's 0; a 6-cycle loop is
-      // parity-locked and hangs forever (page-cross adds a 2nd cycle, omitted as non-critical).
+      // parity-locked and hangs forever (a page-crossing branch adds a 2nd cycle, after the switch).
       // BCC
       case 0x90: if (!(SR & SR_CARRY)) { PC += argument_addr; instrCycles++; } break;
       // BCS
@@ -507,14 +544,24 @@ void cpuLoop() {
     // A taken conditional branch added +1 cycle in the switch (after the pre-step above) — advance
     // the TIA/RIOT for that extra cycle so timer/beam timing stays exact (the INTIM busy-wait loops
     // depend on it; missing it re-introduces the 6-cycle-loop hang).
-    if (instrCycles != preCyc) { int e = instrCycles - preCyc; tiaStepInline(e); riotTick(e); }
+    if (instrCycles != preCyc) {
+      if ((opflags & 0x0F) == AD_REL && ((branchFrom ^ PC) & 0xFF00)) instrCycles++;   // taken, crossed a page
+      int e = instrCycles - preCyc; tiaStepInline(e); riotTick(e);
+    }
 
     // WSYNC ($02): the body set wsyncStall — drain the rest of this scanline now.
+    int stall = 0;
     if (wsyncStall) {
       wsyncStall = false;
       int extra = tiaTickToLineEnd();
       if (extra) riotTick(extra);
+      stall = extra;
     }
+#if defined(BOARD_PICOCALC_P4) || defined(BOARD_DESKTOP)
+    if (!atariFast) pace((uint32_t)(instrCycles + stall));   // FAST: uncapped; back to NORMAL re-anchors
+#else
+    (void)stall;
+#endif
   }
 }
 

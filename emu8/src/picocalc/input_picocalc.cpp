@@ -48,7 +48,7 @@
 //   Ctrl-Shift-F5            -> snapshots: save / load the machine's state (snapshot.cpp)
 // The keyboard sends Shift-F1..F5 as F6..F10, so these three arrive as Ctrl-F6, Ctrl-F8, Ctrl-F10; the
 // unshifted-code-plus-Shift forms are matched too, in case a keyboard firmware sends those.
-//   Ctrl-Shift-Up            -> reboot into the UF2 Loader menu (loader_picocalc.cpp)
+//   Ctrl-Shift-Up            -> reboot into the UF2 Loader menu (loader_picocalc.cpp); P4: esp32loader
 // Bare keys pass through:
 //   F1, F2 -> HID_KEY_F1, HID_KEY_F2
 //   F3     -> HID_KEY_F12    Atari reset switch; reset on PC-XT / Coleco / ZX (not SMS: next to its buttons)
@@ -58,12 +58,24 @@
 // usbkeyboard.cpp is untouched; the remap happens here at translation time.
 
 #include "../../emu.h"
+#if defined(BOARD_PICOCALC_P4)
+#include "soc/soc.h"
+#include "soc/lp_system_reg.h"
+#include "esp_system.h"
+#endif
 
-#if defined(BOARD_PICOCALC)
+#if defined(PICOCALC_MAINBOARD)
 
 #include <Wire.h>
 #include <string.h>
-#include "EspUsbHost.h"   // the shim in pico_shim/: HID_KEY_* usage codes + KEYBOARD_MODIFIER_*
+#include "pico_shim/EspUsbHost.h"   // HID_KEY_* usage codes + KEYBOARD_MODIFIER_* (header-only, any board)
+
+// The keyboard bus: i2c1 on the RP2040/RP2350 module, the ESP32 default Wire on the P4 module.
+#if defined(BOARD_PICOCALC)
+#define KBD_WIRE Wire1
+#else
+#define KBD_WIRE Wire
+#endif
 
 // ---------------------------------------------------------------------------------------------
 // Poll tuning. Strict split-phase (one event per pump) blocks for exactly 0 us, so it is the
@@ -289,7 +301,14 @@ static void handleEvent(uint8_t state, uint8_t code)
     }
     // Ctrl-Shift-Up -> the UF2 Loader's SD menu, to pick another app (loader_picocalc.cpp). The
     // keyboard sends Shift-Up as Page Up, the same way Shift-F1..F5 arrive as F6..F10.
+#if defined(BOARD_PICOCALC)   // the UF2 Loader is an RP2040/RP2350 thing
     if (code == PCK_PAGE_UP || (code == PCK_UP && g_shiftHeld)) picocalcRebootToLoaderMenu("Ctrl-Shift-Up: rebooting to the UF2 Loader menu");
+#elif defined(BOARD_PICOCALC_P4)
+    // On the P4 the counterpart is esp32loader: its bootloader boots the loader instead of the app
+    // when LP_STORE15 holds its magic across a software reset (esp32loader main/loader_api.h).
+    // Without esp32loader installed this is a plain restart.
+    if (code == PCK_PAGE_UP || (code == PCK_UP && g_shiftHeld)) picocalcRebootToLoaderMenu("Ctrl-Shift-Up: rebooting to esp32loader");
+#endif
 
     // Ctrl-Shift-F1 (arrives as F6) -> the system selection menu, drawn over the paused emulator (splashOpen in
     // src/shared/video.cpp). No reboot to get there: the board only restarts if a different
@@ -357,9 +376,9 @@ static bool g_batPending = false;   // ...a battery-register write instead (pico
 static void selectFifoReg()
 {
   g_batPending = false;
-  Wire1.beginTransmission(KBD_I2C_ADDR);
-  Wire1.write((uint8_t)KBD_REG_FIF);
-  g_selPending = (Wire1.endTransmission() == 0);
+  KBD_WIRE.beginTransmission(KBD_I2C_ADDR);
+  KBD_WIRE.write((uint8_t)KBD_REG_FIF);
+  g_selPending = (KBD_WIRE.endTransmission() == 0);
 }
 
 // Battery. REG_ID_BAT (0x0B) is the STM32's reading of the 18650 gauge: selected like the FIFO
@@ -380,17 +399,17 @@ bool picocalcBatteryCharging() { return g_batCharging; }
 static void selectBatReg()
 {
   g_selPending = false;
-  Wire1.beginTransmission(KBD_I2C_ADDR);
-  Wire1.write((uint8_t)KBD_REG_BAT);
-  g_batPending = (Wire1.endTransmission() == 0);
+  KBD_WIRE.beginTransmission(KBD_I2C_ADDR);
+  KBD_WIRE.write((uint8_t)KBD_REG_BAT);
+  g_batPending = (KBD_WIRE.endTransmission() == 0);
 }
 
 static void readBat()
 {
   g_batPending = false;
-  if (Wire1.requestFrom((uint8_t)KBD_I2C_ADDR, (size_t)2) != 2) return;
-  uint8_t r = (uint8_t)Wire1.read();
-  uint8_t v = (uint8_t)Wire1.read();
+  if (KBD_WIRE.requestFrom((uint8_t)KBD_I2C_ADDR, (size_t)2) != 2) return;
+  uint8_t r = (uint8_t)KBD_WIRE.read();
+  uint8_t v = (uint8_t)KBD_WIRE.read();
   if (r != KBD_REG_BAT) return;                       // not our answer (STM32 lost the selection)
   int pct = v & 0x7F;
   if (pct > 100) return;
@@ -408,9 +427,9 @@ static bool readFifo(uint8_t *state, uint8_t *code)
 {
   if (!g_selPending) return false;
   g_selPending = false;
-  if (Wire1.requestFrom((uint8_t)KBD_I2C_ADDR, (size_t)2) != 2) return false;
-  uint8_t s = (uint8_t)Wire1.read();
-  uint8_t c = (uint8_t)Wire1.read();
+  if (KBD_WIRE.requestFrom((uint8_t)KBD_I2C_ADDR, (size_t)2) != 2) return false;
+  uint8_t s = (uint8_t)KBD_WIRE.read();
+  uint8_t c = (uint8_t)KBD_WIRE.read();
   if (s == 0 && c == 0) return false;                 // FIFO empty
   *state = s; *code = c;
   return true;
@@ -425,8 +444,8 @@ static void scanI2c1()
 {
   int found = 0;
   for (uint8_t a = 0x08; a <= 0x77; a++) {
-    Wire1.beginTransmission(a);
-    if (Wire1.endTransmission() == 0) {
+    KBD_WIRE.beginTransmission(a);
+    if (KBD_WIRE.endTransmission() == 0) {
       sprintf(buf, "input: i2c1 device found at 0x%02X", (unsigned)a);
       printLog(buf);
       found++;
@@ -441,10 +460,14 @@ static void scanI2c1()
 static void wireBegin()
 {
   if (g_kbdReady) return;
+#if defined(BOARD_PICOCALC)
   Wire1.setSDA(KBD_I2C_SDA_PIN);
   Wire1.setSCL(KBD_I2C_SCL_PIN);
   Wire1.begin();
   Wire1.setClock(KBD_I2C_HZ);
+#else
+  Wire.begin(KBD_I2C_SDA_PIN, KBD_I2C_SCL_PIN, KBD_I2C_HZ);
+#endif
   g_kbdReady = true;
 }
 
@@ -454,8 +477,8 @@ static void wireBegin()
 static bool mainboardPresent()
 {
   wireBegin();
-  Wire1.beginTransmission(KBD_I2C_ADDR);
-  return Wire1.endTransmission() == 0;
+  KBD_WIRE.beginTransmission(KBD_I2C_ADDR);
+  return KBD_WIRE.endTransmission() == 0;
 }
 
 // The Pico is powered from its OWN USB port, so flipping the PicoCalc's power switch does not
@@ -527,23 +550,23 @@ void picocalcInputSetup()
 
 static bool bklWrite(uint8_t reg, uint8_t level)
 {
-  Wire1.beginTransmission(KBD_I2C_ADDR);
-  Wire1.write((uint8_t)(reg | KBD_REG_WRITE));
-  Wire1.write(level);
-  return Wire1.endTransmission() == 0;
+  KBD_WIRE.beginTransmission(KBD_I2C_ADDR);
+  KBD_WIRE.write((uint8_t)(reg | KBD_REG_WRITE));
+  KBD_WIRE.write(level);
+  return KBD_WIRE.endTransmission() == 0;
 }
 
 // Select `reg` and read one byte back. Returns -1 if the STM32 did not answer.
 static int bklRead(uint8_t reg)
 {
-  Wire1.beginTransmission(KBD_I2C_ADDR);
-  Wire1.write(reg);
+  KBD_WIRE.beginTransmission(KBD_I2C_ADDR);
+  KBD_WIRE.write(reg);
   // false == REPEATED START. Ending with a STOP lets the STM32 drop the selection, and it then
   // answers the following read with the last byte it received -- which is why a read of 0x0A came
   // back as literally 10 and a read of 0x05 as 5. Those were echoes, not brightness levels.
-  if (Wire1.endTransmission(false) != 0) return -1;
-  if (Wire1.requestFrom((uint8_t)KBD_I2C_ADDR, (uint8_t)1) != 1) return -1;
-  return Wire1.read();
+  if (KBD_WIRE.endTransmission(false) != 0) return -1;
+  if (KBD_WIRE.requestFrom((uint8_t)KBD_I2C_ADDR, (uint8_t)1) != 1) return -1;
+  return KBD_WIRE.read();
 }
 
 void picocalcBacklightOn()
@@ -675,4 +698,4 @@ bool touchRead(int16_t *sx, int16_t *sy) { (void)sx; (void)sy; return false; }
 void oskPoll() {}
 void oskIgnoreCurrentTouch() {}
 
-#endif // BOARD_PICOCALC
+#endif // PICOCALC_MAINBOARD

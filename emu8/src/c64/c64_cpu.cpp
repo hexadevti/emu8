@@ -441,7 +441,7 @@ C64_HOT void cpuLoop() {
 
     if (!Fast1MhzSpeed)
     {
-#if defined(BOARD_PICOCALC) || defined(BOARD_DESKTOP)
+#if defined(BOARD_PICOCALC) || defined(BOARD_PICOCALC_P4) || defined(BOARD_DESKTOP)
       // Pace against real time at the PAL clock, the way the Apple II core does (src/apple2/cpu.cpp).
       // The ESP branch below charges each emulated cycle 300 host cycles, which is ~1 MHz only on a
       // 240 MHz ESP32: on the 200 MHz RP2040 it capped the 6510 at 0.67 MHz, and since each
@@ -1221,7 +1221,7 @@ C64_HOT void cpuLoop() {
     perfCyc += instrCycles;
     while (rasterCycleAcc >= 63) {
       rasterCycleAcc -= 63;
-#if defined(BOARD_PICOCALC) || defined(BOARD_DESKTOP)
+#if defined(BOARD_PICOCALC) || defined(BOARD_PICOCALC_P4) || defined(BOARD_DESKTOP)
       // Cycles the VIC steals from the 6510 on this line (40 on a badline, 2 per sprite). The
       // CPU is halted for them, but the raster, the CIA timers and real time all move on, so a
       // frame holds ~19000 CPU cycles, not 19656 -- less host work, and timer-driven music keeps

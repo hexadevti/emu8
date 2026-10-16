@@ -1,4 +1,7 @@
 #include "../../emu.h"
+#if defined(SD_IO_LDO_CHAN)
+#include "esp_ldo_regulator.h"
+#endif
 
 // HSPI bus for the SD card. On the JC4827W543 the XPT2046 touch controller shares this same
 // bus (same SCK/MISO/MOSI, its own CS), so it is exposed (extern in emu.h) instead of static.
@@ -114,13 +117,28 @@ void FSSetup()
         return;
       }
 #else
+#if defined(SD_IO_LDO_CHAN)
+      // PicoCalc + ESP32-P4: the SD pins sit in an IO domain fed by an internal LDO (board.h),
+      // which is off at boot. Without it GPIO46-48 stay dead and every mount attempt fails.
+      {
+        static esp_ldo_channel_handle_t ldo = nullptr;
+        if (!ldo) {
+          esp_ldo_channel_config_t c = {};
+          c.chan_id = SD_IO_LDO_CHAN;
+          c.voltage_mv = 3300;
+          if (esp_ldo_acquire_channel(&c, &ldo) != ESP_OK) printLog("SD: IO LDO enable failed");
+        }
+      }
+#endif
       hspi.begin(SD_SCK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
 #if !BOARD_TOUCH_VIA_TFT
+      if (TOUCH_CS_PIN >= 0) {   // boards without a touch controller define it -1
       // Deselect the XPT2046 touch (it shares the SD MISO line) BEFORE mounting. On a cold boot
       // its CS floats and can drive MISO, corrupting the SD init — which is why the card mounted
       // only after a reset (the pin retained HIGH). Pull it high up front.
-      pinMode(TOUCH_CS_PIN, OUTPUT);
-      digitalWrite(TOUCH_CS_PIN, HIGH);
+        pinMode(TOUCH_CS_PIN, OUTPUT);
+        digitalWrite(TOUCH_CS_PIN, HIGH);
+      }
 #endif
       // Run the SD bus at SD_SPI_HZ (20MHz) instead of the begin() default of 4MHz: directory
       // reads (esp. nested opendir) were the bottleneck after the per-entry fopen was removed.

@@ -131,7 +131,7 @@ static void buildCoverage(int lo, int hi) {
   }
 }
 
-// Composite one visible pixel from the cached coverage. Colours are read live (per-dot). `line` is
+// Composite one visible pixel from the cached coverage, with the colours of its span. `line` is
 // the framebuffer row base (hoisted out of the per-pixel loop). flushSpan bulk-fills the all-common
 // background / playfield-only runs and only calls this for pixels that actually carry an object.
 static inline __attribute__((always_inline)) void compositePixel(uint8_t *line, int px) {
@@ -236,13 +236,18 @@ int tiaTickToLineEnd() {                 // WSYNC: finish this line, advance to 
 }
 
 void tiaWrite(uint8_t reg, uint8_t val) {
-  // A coverage-changing write (anything but the live-read colour $06-$09 / audio $15-$1A regs):
-  // first render the span the beam has already crossed using the OLD coverage, THEN apply the change —
-  // so mid-line RESP/HMOVE repositioning only affects pixels drawn after it. The next flushSpan rebuilds
-  // its slice from the new registers (each span is built fresh, so there's no dirty flag to set).
-  bool cov = !((reg >= 0x06 && reg <= 0x09) || (reg >= 0x15 && reg <= 0x1A) ||
-               (reg >= 0x20 && reg <= 0x24) || reg == 0x2B || reg == 0x2C);  // colour/audio/HM-motion
-  if (cov) { int px = colorClock - 68; if (px < 0) px = 0; else if (px > 160) px = 160; flushSpan(px); }
+  // A write that changes what is drawn (anything but the audio $15-$1A / HM-motion regs): first
+  // render the span the beam has already crossed using the OLD registers, THEN apply the change —
+  // so mid-line RESP/HMOVE repositioning and colour changes only affect pixels drawn after it. The
+  // colours count too: rendering is deferred, so a COLUxx write that skipped the flush recoloured
+  // the pending span (H.E.R.O.'s yellow power bar painted over its "POWER" label).
+  bool cov = !((reg >= 0x15 && reg <= 0x1A) ||
+               (reg >= 0x20 && reg <= 0x24) || reg == 0x2B || reg == 0x2C);  // audio/HM-motion
+  // Graphics/enable/reflect latches take effect one colour clock after the write (Stella's delay
+  // table), so the pixel under the beam still uses the old value: H.E.R.O. rewrites GRP0 at px 31
+  // while its first copy is drawing the last pixel of the "O" in "POWER".
+  int late = (reg >= 0x1B && reg <= 0x1F) || reg == 0x0B || reg == 0x0C;   // GRPx, ENAxx, REFPx
+  if (cov) { int px = colorClock - 68 + late; if (px < 0) px = 0; else if (px > 160) px = 160; flushSpan(px); }
 
   switch (reg) {
     case 0x00: {                         // VSYNC
