@@ -19,6 +19,10 @@ namespace msx {
   uint8_t* framebuffer = nullptr;   // 256x192 indexed (sharedBigBuf on device)
   bool     biosIsCbios = false;
   volatile bool frameReady = false;   // set by core 1 when a frame is rendered, cleared by core 0 after display
+  bool     isMsx2      = false;     // MSX2 BIOS loaded (BOARD_HAS_MSX2 builds only)
+  const uint8_t* subRom = nullptr;  // MSX2 SUB-ROM (slot 3-0)
+  uint8_t* mapRam      = nullptr;   // MSX2 mapper RAM (slot 3-2)
+  int      mapSegs     = 0;
 }
 
 #endif  // BOARD_HAS_MSX_CORE

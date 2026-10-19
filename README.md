@@ -53,19 +53,19 @@ shows the same picture, pixel for pixel, including the battery gauge.*
 
 ## Supported boards
 
-emu8 builds for **four boards** from the same source tree — the target is selected at *compile time*
-by a single macro (`-DBOARD_JC4827W543` / `-DBOARD_JC1060P470` / `-DBOARD_PICOCALC`), defined per
-build task. The hardware abstraction lives in [`board.h`](emu8/board.h) as capability macros (display
+emu8 builds for **five boards** from the same source tree — the target is selected at *compile time*
+by a single macro (`-DBOARD_JC4827W543` / `-DBOARD_JC1060P470` / `-DBOARD_PICOCALC` /
+`-DBOARD_PICOCALC_P4`), defined per build task. The hardware abstraction lives in [`board.h`](emu8/board.h) as capability macros (display
 backend, audio path, input path, touch bus) that the shared code switches on.
 
-| | **ESP32 CYD** (default) | **Guition JC4827W543** | **Guition JC1060P470** | **ClockworkPi PicoCalc** |
-| --- | --- | --- | --- | --- |
-| MCU | ESP32-WROOM-32 (no PSRAM) | ESP32-S3 (OPI PSRAM) | ESP32-P4 (32MB PSRAM) | Raspberry Pi Pico 2 (RP2350, 520KB SRAM) or Pico (RP2040, 264KB) |
-| Display | ILI9341 320×240 SPI, via TFT_eSPI | NV3041A 480×272 QSPI, via Arduino_GFX | JD9165 1024×600 **MIPI-DSI**, via esp_lcd | ST7365P (ILI9488-compatible) 320×320 SPI, own driver |
-| Input | PS/2 keyboard + analog joystick/paddles | **USB SNES gamepad + USB keyboard** (USB-HID host) | USB-HID host + touch | Built-in **QWERTY keyboard** (STM32 over I2C) |
-| On-screen keyboard | XPT2046 touch (display bus) | XPT2046 touch (dedicated SPI bus) | **GT911** capacitive (I2C) | — (no touch panel) |
-| Audio | Internal DAC (GPIO26) → on-board amp | I2S → NS4168 Class-D amp | I2S → **ES8311 codec** → NS4150B amp | **PWM** stereo speakers (GPIO26/27) |
-| Storage | microSD (VSPI) | microSD (shared HSPI w/ touch) | microSD (**SD_MMC** / SDIO) | microSD (SPI) |
+| | **ESP32 CYD** (default) | **Guition JC4827W543** | **Guition JC1060P470** | **ClockworkPi PicoCalc** | **ClockworkPi PicoCalc (ESP32-P4)** |
+| --- | --- | --- | --- | --- | --- |
+| MCU | ESP32-WROOM-32 (no PSRAM) | ESP32-S3 (OPI PSRAM) | ESP32-P4 (32MB PSRAM) | Raspberry Pi Pico 2 (RP2350, 520KB SRAM) or Pico (RP2040, 264KB) | **Waveshare ESP32-P4-WIFI6** module in the Pico socket (ESP32-P4, 32MB PSRAM) |
+| Display | ILI9341 320×240 SPI, via TFT_eSPI | NV3041A 480×272 QSPI, via Arduino_GFX | JD9165 1024×600 **MIPI-DSI**, via esp_lcd | ST7365P (ILI9488-compatible) 320×320 SPI, own driver | Same ST7365P 320×320 panel and driver, SPI at 80 MHz |
+| Input | PS/2 keyboard + analog joystick/paddles | **USB SNES gamepad + USB keyboard** (USB-HID host) | USB-HID host + touch | Built-in **QWERTY keyboard** (STM32 over I2C) | Built-in **QWERTY keyboard** (STM32 over I2C) |
+| On-screen keyboard | XPT2046 touch (display bus) | XPT2046 touch (dedicated SPI bus) | **GT911** capacitive (I2C) | — (no touch panel) | — (no touch panel) |
+| Audio | Internal DAC (GPIO26) → on-board amp | I2S → NS4168 Class-D amp | I2S → **ES8311 codec** → NS4150B amp | **PWM** stereo speakers (GPIO26/27) | **I2S PDM** (DAC line mode, 44.1 kHz) → PicoCalc stereo speakers |
+| Storage | microSD (VSPI) | microSD (shared HSPI w/ touch) | microSD (**SD_MMC** / SDIO) | microSD (SPI) | microSD (SPI, the PicoCalc slot) |
 
 The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_ESP32-2432S024)
 (2.4″, ILI9341); the 2.8″ ESP32-2432S028 shares the same driver and pin map.
@@ -83,6 +83,15 @@ The "CYD" target is the [ESP32-2432S024](https://github.com/jpduhen/CYD_2.4inch_
 > (original Pico). The board has no memory-mapped PSRAM, so ROM and cartridge images are kept in spare
 > on-board flash. On the RP2040 the PC-XT core is not available (not enough heap for DOS); the
 > RP2350 runs it from a paged guest address space.
+
+> **ClockworkPi PicoCalc (ESP32-P4)** — the same PicoCalc mainboard with a Waveshare ESP32-P4-WIFI6
+> module in the Pico socket instead of a Pico. The panel, keyboard and SD code are the PicoCalc's
+> (`PICOCALC_MAINBOARD`); everything else takes the ESP32 / PSRAM paths, so no ROM-in-flash and no
+> heap limits. Build task **Arduino: Build (PicoCalc P4)**: Arduino-ESP32 **core 3.x** on the same
+> isolated `~/.emu6502-p4` toolchain as the JC1060P470, with `ChipVariant=postv3` (required: v3.x
+> silicon boot-loops on a `prev3` build). Console and upload are on the module's own USB-C (COM9);
+> [`tools/deploy-p4-wifi.py`](tools/deploy-p4-wifi.py) uploads a build over Wi-Fi through the
+> esp32loader. The module's Wi-Fi 6 radio (ESP32-C6) is not used by emu8 itself.
 
 ---
 
@@ -161,8 +170,10 @@ to some components).
 - **Live speed readout**: the settings title shows the measured emulated CPU speed (MHz) and the panel fps.
 - **Battery gauge (PicoCalc)**: the charge in percent and a charging indicator, read from the keyboard
   MCU's fuel gauge every 10 s, in the title bar of the settings, snapshot and system-menu pages.
-- **SCREEN: SMOOTH (PicoCalc)**: every core can scale its picture up to fill the 320×320 panel with
-  bilinear blending (**SCREEN: ORIG** keeps the 1:1 picture). It costs more SPI time per frame.
+- **SCREEN: ORIG / ENLARGE / STRETCH**: **ORIG** keeps the native picture; **ENLARGE** scales it up
+  as far as it goes keeping its shape; **STRETCH** covers the whole screen, aspect ignored. On the
+  PicoCalc both scaled modes use bilinear blending (STRETCH reaches into the 320×320 panel's top and
+  bottom bars) and cost more SPI time per frame.
 - **Sound is muted while any menu is open** (settings window, system menu), on every system.
 - **Only changed screen areas are sent to the panel** (dirty bands on MSX, Coleco, SMS, ZX and Apple II;
   changed rows only on the C64), and the SMS uses **frame pacing with adaptive frame-skip** so game speed
@@ -186,6 +197,20 @@ to some components).
 - Loads `.prg` programs, `.d64` disk images and `.crt` cartridges (cartridge cold-reset + VIC raster
   IRQ work; bank-switched / EasyFlash cartridge types are still incomplete).
 - Optional boot-autoload of the last image.
+- **Remappable keyboard** — every host key (PicoCalc, USB, PC) maps to a C64 key, optionally forcing
+  SHIFT on or off. The built-in default is positional for letters/digits and types the PC keycap's
+  symbol for punctuation (`Shift-2` = `@`, `[` `]` `\` = `[` `]` `£`, `` ` `` = `←`); `Esc` = RUN/STOP,
+  `Tab`/`Ctrl` = CTRL, `Alt` = C=, `Home`/`End` = HOME/CLR, `Ins` = INST, `PgUp` = RESTORE, `F1`–`F8` =
+  F1–F8. To change a key, open the system menu → **CONFIG → KEYBOARD**: pick the key (or choose
+  "press a key to find it"), then the C64 key and its SHIFT ("show only changed keys" lists just your changes).
+  On the PicoCalc, KEYBOARD shows both keyboards as pictures: move over the PicoCalc's keys with the
+  arrows (or type a key to jump to it, Shift-F1 included; pressing Shift, or Enter on a Shift key,
+  switches to the Shift layer: F6–F9, Brk, Home, End, PgUp/PgDn, `!@#`…). The C64 picture lights the key
+  it presses, and SHIFT too when the C64's SHIFT is held; Enter or Tab moves to that picture to pick the
+  C64 key (or DEFAULT / NONE; Tab goes back), then Enter picks its SHIFT. Changes apply at once and are saved to
+  `/c64/keymap.txt`. You can also edit that file by hand — start from
+  [`docs/c64-keymap.txt`](docs/c64-keymap.txt) (the default, with the syntax); it is read when the C64 boots.
+  On the C64 the menu's CONFIG card also holds ROMS and HELP.
 
 ### NES
 
@@ -194,6 +219,12 @@ to some components).
   scanline IRQ). PRG is streamed from SD; large ROMs that exceed the DRAM budget are skipped with an
   on-screen note.
 - Analog stick / USB gamepad → controller 1.
+- **Remappable keyboard** — every host key (PicoCalc, USB, PC) can press any NES button. The default:
+  arrows = D-pad, `X` / `Z` = A / B, `Enter` / `Tab` = Start / Select, and `F2` / `F3` / `F4` / `F5` =
+  Start / Select / A / B. To change a key, open the system menu → **CONFIG → KEYBOARD**; on the PicoCalc
+  it shows its keyboard over an NES controller: pick the key, then the button on the controller (or
+  DEFAULT / NONE). Other boards show it as a list. Changes apply at once and are saved to
+  `/nes/keymap.txt`; to edit it by hand start from [`docs/nes-keymap.txt`](docs/nes-keymap.txt).
 
 ### Atari 2600
 
@@ -292,7 +323,7 @@ USB keyboard mapping (works on every platform):
 
 | Keys | Action |
 | --- | --- |
-| Letters / digits / symbols | Type into the active system (Apple keycode, C64 keyboard matrix, …) |
+| Letters / digits / symbols | Type into the active system (Apple keycode, C64 keyboard matrix — remappable, see [Commodore 64](#commodore-64), …) |
 | Arrow keys | Cursor / d-pad |
 | `F10` | Open / close the options menu (arrows navigate, `Enter` activates) |
 | `F11` | Apple **Reset** (CPU reset) |
@@ -475,8 +506,8 @@ on the device). Full setup, toolchain and status notes live in
    so downloads are copied there as is. The settings menu's ROMS page can point any of them at another file, or at none.
 3. Copy your images to the card root, mixing systems freely:
    - Apple: `.dsk` / `.do` / `.po` / `.hdv` / `.2mg`
-   - C64: `.prg` / `.d64` / `.crt`
-   - NES: `.nes`
+   - C64: `.prg` / `.d64` / `.crt` (optional keyboard map: `/c64/keymap.txt`, from [`docs/c64-keymap.txt`](docs/c64-keymap.txt))
+   - NES: `.nes` (optional keyboard map: `/nes/keymap.txt`, from [`docs/nes-keymap.txt`](docs/nes-keymap.txt))
    - Atari 2600: `.a26` / `.bin`
    - MSX1: `.rom` / `.mx1` / `.dsk` (plus `/roms/hotbit12.rom`, and `/roms/hb3600_disk.rom` for disks)
    - Sega Master System: `.sms` / `.bin`
@@ -611,7 +642,7 @@ emulated system. The top-level sketch wires them together:
 | Path | Purpose |
 | --- | --- |
 | [`emu8.ino`](emu8/emu8.ino) | `setup()` / `loop()` — per-platform init and the main dispatch |
-| [`board.h`](emu8/board.h) | Board selection (CYD, JC4827W543, PicoCalc), capability macros, pin map |
+| [`board.h`](emu8/board.h) | Board selection (CYD, JC4827W543, JC1060P470, PicoCalc, PicoCalc ESP32-P4), capability macros, pin map |
 | [`emu.h`](emu8/emu.h) · [`proto.h`](emu8/proto.h) · [`globals.cpp`](emu8/globals.cpp) | Shared state (`extern`), prototypes, definitions |
 | [`rom.h`](emu8/rom.h) | Embedded Apple II/IIe ROMs |
 | [`User_Setup.h`](emu8/User_Setup.h) | TFT_eSPI configuration (CYD) |
@@ -626,7 +657,7 @@ emulated system. The top-level sketch wires them together:
 | [`src/sms/`](emu8/src/sms/) | Sega Master System — 315-5124 VDP (Mode 4), SN76489 PSG, Sega mapper, cart loader |
 | [`src/coleco/`](emu8/src/coleco/) | ColecoVision — machine, audio |
 | [`src/pcxt/`](emu8/src/pcxt/) | PC-XT — fabgl i8086 machine, CGA, PC speaker, disk mount (in development) |
-| [`src/picocalc/`](emu8/src/picocalc/) | ClockworkPi PicoCalc (RP2040) port — display, keyboard input, audio, UF2 loader, ROM-in-flash, Pico SDK shims |
+| [`src/picocalc/`](emu8/src/picocalc/) | ClockworkPi PicoCalc port (RP2040 / RP2350, and the ESP32-P4 module's PDM audio) — display, keyboard input, audio, UF2 loader, ROM-in-flash, Pico SDK shims |
 | [`src/desktop/`](emu8/src/desktop/) | SDL2 desktop debug build — Arduino/FreeRTOS shims, SDL display/audio/input backends (see its [README](emu8/src/desktop/README.md)) |
 | [`CMakeLists.txt`](CMakeLists.txt) | CMake build for the SDL2 desktop debug build |
 | [`third_party/imgui/`](third_party/imgui/) | Dear ImGui (desktop debug UI) |

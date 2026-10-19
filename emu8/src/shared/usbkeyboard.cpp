@@ -10,8 +10,8 @@
 //                       the open-/solid-apple paddle buttons (Pb0/Pb1).
 //   * C64             : press/release the CIA1 keyboard matrix via c64KeyMatrix(row,col,down),
 //                       with PC Shift/Ctrl/Alt mapped to the C64 SHIFT/CTRL/Commodore lines.
-//   * NES             : map the d-pad + Z/X/Enter/Tab, or F4/F5 (A/B) and F2/F3
-//                       (Start/Select), onto controller 1 (nesSetController()).
+//   * NES             : each key presses the controller-1 button neskeymap.cpp says (default:
+//                       arrows, X/Z = A/B, Enter/Tab = Start/Select, F2-F5), nesSetController().
 //   * Atari 2600      : map the d-pad + Space/Enter/Tab onto the stick + Fire/Reset/Select.
 //
 // Settings menu (every platform): F12 opens/closes it; while it is open the arrow keys navigate
@@ -31,24 +31,14 @@
 #else
 #include "EspUsbHost.h"   // S3: external fork — HID_KEY_* / KEYBOARD_MODIFIER_* + HID_KEYCODE_TO_ASCII
 #endif
+#include "c64keymap.h"
+#include "c64joymap.h"
+#include "neskeymap.h"
 
 // --- small helpers -------------------------------------------------------------------------
 static bool kbContains(const uint8_t *arr, uint8_t kc)
 {
   for (int i = 0; i < 6; i++) if (arr[i] == kc) return true;
-  return false;
-}
-
-// Does this report carry a key that TYPES -- i.e. anything but the four arrows? Used to tell a
-// SHIFT that is modifying a keystroke from one held on its own (the PicoCalc's fire button).
-static bool kbHasTypingKey(const uint8_t *arr)
-{
-  for (int i = 0; i < 6; i++) {
-    if (!arr[i]) continue;
-    if (arr[i] == HID_KEY_ARROW_UP || arr[i] == HID_KEY_ARROW_DOWN ||
-        arr[i] == HID_KEY_ARROW_LEFT || arr[i] == HID_KEY_ARROW_RIGHT) continue;
-    return true;
-  }
   return false;
 }
 
@@ -64,6 +54,12 @@ static char kbToAscii(uint8_t kc, bool shift)
 // Only key-down matters: write an Apple keycode into keymem (bit7 = key available).
 static void appleKeyDown(uint8_t kc, bool shift, bool ctrl)
 {
+  // ARROWS = JOY: the arrows are the stick and nothing else. Their keycodes are ^H/^U/^K/^J, which
+  // games read as COMMANDS -- Lode Runner's table is ESC ^R ^A ^S ^J ^K ^H ^U ^X ^Y, so Up (^K)
+  // flipped it to keyboard control (no more climbing), Down (^J) back, and Left/Right changed the
+  // game speed. KBD and BOTH deliver them.
+  if (appleArrows == APPLE_ARROWS_JOY && (kc == HID_KEY_ARROW_LEFT || kc == HID_KEY_ARROW_RIGHT ||
+                   kc == HID_KEY_ARROW_UP   || kc == HID_KEY_ARROW_DOWN)) return;
   uint8_t code;
   switch (kc) {
     case HID_KEY_ARROW_LEFT:   code = 0x88; break;   // back / left
@@ -96,10 +92,9 @@ static void appleKeyDown(uint8_t kc, bool shift, bool ctrl)
 // The Apple II has no digital stick: games read the PADDLE TIMERS at $C064/$C065, which
 // processJoystick() ramps toward timerpdl0/timerpdl1 after a $C070 trigger. So a held arrow is a
 // full deflection and neutral is centre -- the same three values usbgamepad.cpp writes.
-// NOTHING is taken away from the keyboard when JOYSTICK is on. The arrows drive the paddles and
-// still deliver 0x88/0x95/0x8B/0x8A to keymem, so a game that steers with the paddles and one that
-// reads the arrow keys both work without leaving the menu to flip the mode -- and Space fires and
-// still reaches keymem as 0xA0, for the same reason.
+// The ARROWS option picks what the arrows drive: JOY = only the paddles (see appleKeyDown: their
+// ^H/^U/^K/^J codes are game commands in Lode Runner and others), KBD = only the keycodes, BOTH =
+// both at once. With the paddles on, Space fires and still reaches keymem as 0xA0.
 //
 // Space used to be the exception, on the theory that typing a space into a running game was worse
 // than useless. Karateka disproves it: pick its KEYBOARD control mode and Space is a control key,
@@ -108,7 +103,7 @@ static void appleKeyDown(uint8_t kc, bool shift, bool ctrl)
 // is the milder failure, and it is the one the arrows already accept.
 
 // The two paddle buttons. Alt / right-Alt are open-apple / solid-apple on a PC keyboard, but
-// the PicoCalc has one Alt and no right-Alt, so F4 and F5 are the buttons there. They are
+// the PicoCalc has one Alt and no right-Alt, so F5 (button 0) and F4 (button 1) are the buttons there. They are
 // continuous state (held, not tapped), which is why they are read from keys[] below rather
 // than in the key-down loop, and they work whether or not JOYSTICK mode is on -- open-apple
 // and solid-apple are ordinary Apple II keys, not just game buttons.
@@ -127,108 +122,43 @@ static void appleApplyJoystick(const uint8_t *keys)
 }
 
 // ============================ C64 keyboard matrix ========================================
-// Map a HID keycode to a CIA1 matrix position in this codebase's (col,row) convention
-// (the same one the touch keyboard feeds to c64KeyMatrix(row, col, down)). col < 0 = unmapped.
-struct C64Pos { int8_t col, row; };
-static C64Pos c64FKey(uint8_t kc, bool *shifted);
+// Which C64 key a host key presses comes from c64keymap.cpp: a built-in default, overridden per key
+// by /c64/keymap.txt on the SD card. A rule names a matrix key and what it does to SHIFT (F2 =
+// SHIFT+F1, CRSR LEFT = SHIFT+CRSR RIGHT, Shift-2 '@' = the C64's unshifted @ key).
+//
+// The rule is resolved once, on key-down, with the SHIFT state of that moment, and remembered with
+// the key: the key-up then releases exactly what the key-down pressed even if SHIFT changed in
+// between. The matrix lines are then rebuilt from the held keys + modifiers on every report and
+// only the CHANGES are written, so two host keys on the same C64 key (Esc and Pause = RUN/STOP)
+// don't release each other, and keys the on-screen keyboard holds are left alone.
+struct C64Held { uint8_t kc, code; };
+static C64Held  c64Held[6];
+static uint64_t c64Down = 0;   // matrix keys this keyboard holds; bit = col*8 + row
 
-static C64Pos c64Map(uint8_t kc)
+static void c64KeyDown(uint8_t kc, bool shift)
 {
-  bool fShift;
-  const C64Pos f = c64FKey(kc, &fShift);
-  if (f.col >= 0) return f;
-  switch (kc) {
-    // letters
-    case HID_KEY_A: return {1,2}; case HID_KEY_B: return {3,4}; case HID_KEY_C: return {2,4};
-    case HID_KEY_D: return {2,2}; case HID_KEY_E: return {1,6}; case HID_KEY_F: return {2,5};
-    case HID_KEY_G: return {3,2}; case HID_KEY_H: return {3,5}; case HID_KEY_I: return {4,1};
-    case HID_KEY_J: return {4,2}; case HID_KEY_K: return {4,5}; case HID_KEY_L: return {5,2};
-    case HID_KEY_M: return {4,4}; case HID_KEY_N: return {4,7}; case HID_KEY_O: return {4,6};
-    case HID_KEY_P: return {5,1}; case HID_KEY_Q: return {7,6}; case HID_KEY_R: return {2,1};
-    case HID_KEY_S: return {1,5}; case HID_KEY_T: return {2,6}; case HID_KEY_U: return {3,6};
-    case HID_KEY_V: return {3,7}; case HID_KEY_W: return {1,1}; case HID_KEY_X: return {2,7};
-    case HID_KEY_Y: return {3,1}; case HID_KEY_Z: return {1,4};
-    // digits
-    case HID_KEY_1: return {7,0}; case HID_KEY_2: return {7,3}; case HID_KEY_3: return {1,0};
-    case HID_KEY_4: return {1,3}; case HID_KEY_5: return {2,0}; case HID_KEY_6: return {2,3};
-    case HID_KEY_7: return {3,0}; case HID_KEY_8: return {3,3}; case HID_KEY_9: return {4,0};
-    case HID_KEY_0: return {4,3};
-    // controls / punctuation
-    case HID_KEY_ENTER:
-    case HID_KEY_KEYPAD_ENTER: return {0,1};   // RETURN
-    case HID_KEY_BACKSPACE:
-    case HID_KEY_DELETE:       return {0,0};   // INST/DEL
-    case HID_KEY_SPACE:        return {7,4};
-    case HID_KEY_MINUS:        return {5,3};   // -
-    case HID_KEY_EQUAL:        return {6,5};   // =
-    case HID_KEY_SEMICOLON:    return {6,2};   // ;
-    case HID_KEY_APOSTROPHE:   return {5,5};   // : (nearest C64 key)
-    case HID_KEY_GRAVE:        return {7,1};   // C64 left-arrow
-    case HID_KEY_COMMA:        return {5,7};   // ,
-    case HID_KEY_PERIOD:       return {5,4};   // .
-    case HID_KEY_SLASH:        return {6,7};   // /
-    case HID_KEY_BRACKET_LEFT: return {5,6};   // @
-    case HID_KEY_BRACKET_RIGHT:return {6,1};   // *
-    case HID_KEY_BACKSLASH:    return {5,0};   // +
-    case HID_KEY_ESCAPE:       return {7,7};   // RUN/STOP
-    // cursor keys (LEFT/UP add SHIFT, applied in c64ApplyModifiers)
-    case HID_KEY_ARROW_RIGHT:
-    case HID_KEY_ARROW_LEFT:   return {0,2};
-    case HID_KEY_ARROW_DOWN:
-    case HID_KEY_ARROW_UP:     return {0,7};
-  }
-  return {-1, -1};
-}
-
-// Function keys, number for number: the key labelled Fn types the C64's Fn. The C64 has four keys
-// (F1/F3/F5/F7 in column 0, rows 4/5/6/3); F2/F4/F6/F8 are those with SHIFT, so `shifted` says
-// whether the C64 SHIFT line goes on (even) or must stay off (odd) -- the PicoCalc's Shift-F2 is the
-// C64's F7, with the physical SHIFT still down. The PicoCalc's bare F3 arrives as F12 and
-// Shift-F1..F3 as F6..F8 (input_picocalc.cpp); its Shift-F4/F5 (F9/F10) have no C64 key.
-static C64Pos c64FKey(uint8_t kc, bool *shifted)
-{
-  int n;
-  switch (kc) {
-    case HID_KEY_F1: n = 1; break;
-    case HID_KEY_F2: n = 2; break;
-#if UI_PICOCALC
-    case HID_KEY_F12: n = 3; break;
-#else
-    case HID_KEY_F3: n = 3; break;
-#endif
-    case HID_KEY_F4: n = 4; break;
-    case HID_KEY_F5: n = 5; break;
-    case HID_KEY_F6: n = 6; break;
-    case HID_KEY_F7: n = 7; break;
-    case HID_KEY_F8: n = 8; break;
-    default: *shifted = false; return {-1, -1};
-  }
-  static const int8_t row[4] = {4, 5, 6, 3};   // F1/2, F3/4, F5/6, F7/8
-  *shifted = !(n & 1);
-  return {0, row[(n - 1) / 2]};
-}
-
-static void c64KeyDown(uint8_t kc)
-{
-  C64Pos p = c64Map(kc);
-  if (p.col >= 0) c64KeyMatrix(p.row, p.col, true);
+  const uint8_t code = c64KeymapLookup(kc, shift);
+  if (code == C64K_RESTORE) { c64Restore(); return; }   // a pulse on the NMI line, not a matrix key
+  if (!c64kIsMatrix(code)) return;
+  for (auto &h : c64Held) if (!h.kc) { h.kc = kc; h.code = code; return; }
 }
 static void c64KeyUp(uint8_t kc)
 {
-  C64Pos p = c64Map(kc);
-  if (p.col >= 0) c64KeyMatrix(p.row, p.col, false);
+  for (auto &h : c64Held) if (h.kc == kc) h.kc = 0;
 }
 
-// On the PicoCalc, either SHIFT key is fire as well: the cursor cluster sits at the bottom right and
-// the space bar is a long reach from it, while the two shifts flank that same bottom row. The keyboard
-// reports both shifts as one modifier bit (input_picocalc.cpp), so the plain `shift` flag covers left
-// and right. Space still fires. Other boards have a full keyboard within reach of the arrows and
-// keep SHIFT for typing only.
-#if UI_PICOCALC
-#define C64_SHIFT_IS_FIRE 1
-#else
-#define C64_SHIFT_IS_FIRE 0
-#endif
+// Which keys drive the joystick comes from c64joymap.cpp: by default the arrows + Space, and on the
+// PicoCalc either SHIFT too (the cursor cluster sits at the bottom right and the space bar is a long
+// reach from it, while the two shifts flank that same bottom row). The keyboard reports both shifts
+// as one modifier bit (input_picocalc.cpp), so SHIFT is one host key, C64K_HID_SHIFT.
+
+// A key in the report that is not on the joystick: a keystroke, not steering.
+static bool c64HasTypingKey(const uint8_t *keys)
+{
+  for (int i = 0; i < 6; i++)
+    if (keys[i] && !c64jIsAction(c64JoymapLookup(keys[i]))) return true;
+  return false;
+}
 
 // JOYSTICK mode takes NOTHING away from the C64 keyboard: the arrows, Space and (on the PicoCalc)
 // SHIFT drive the stick AND still reach the matrix, the double duty the Apple II paddles already
@@ -238,73 +168,85 @@ static void c64KeyUp(uint8_t kc)
 // shifted character: no quotes for LOAD"$",8 and no upper case, with the same menu round trip as
 // the only way out. It now does both jobs too (see c64ApplyModifiers).
 
-// Refresh the modifier matrix lines from the live report each call. Cursor LEFT/UP are SHIFT+CRSR
-// on the C64, so a held LEFT or UP also asserts SHIFT.
+// Rebuild this keyboard's matrix keys from the held keys + modifiers and write the changes.
 static void c64ApplyModifiers(bool shift, bool ctrl, bool alt, const uint8_t *keys)
 {
   bool wantShift = shift;
-  // The PicoCalc's SHIFT keys fire AND type. Both at once needs one distinction, because the two
-  // jobs never happen in the same report: SHIFT pressed ALONE is a shot, SHIFT pressed WITH a
-  // character key is a keystroke. So the C64's SHIFT line is asserted only when the report also
-  // carries a typing key -- firing then shifts nothing, and the arrows don't count, so holding
-  // fire while steering stays clean.
+  // SHIFT on the joystick (the PicoCalc's default: fire) does that AND types. Both at once needs
+  // one distinction, because the two jobs never happen in the same report: SHIFT pressed ALONE is a
+  // shot, SHIFT pressed WITH a character key is a keystroke. So the C64's SHIFT line is asserted
+  // only when the report also carries a typing key -- firing then shifts nothing, and the keys on
+  // the joystick don't count, so holding fire while steering stays clean.
   //
   // This is exact rather than a guess, because of how the keyboard reports shift
   // (hidModifiers, input_picocalc.cpp): the bit is set from the CHARACTER (a vs A, which is also
   // the only thing that gets caps lock right) as well as from the physical key, so a shifted
   // character is never in flight without its own key in the same report.
   //
-  // Dropped first, so the cursor-derived SHIFT below still gets applied.
-  if (C64_SHIFT_IS_FIRE && joystick && !kbHasTypingKey(keys)) wantShift = false;
-  // Cursor LEFT/UP are SHIFT+CRSR on the C64, so a held LEFT or UP also asserts SHIFT. The arrows
-  // are cursor keys in every mode now, so this applies whether or not the stick is reading them.
-  wantShift = wantShift || kbContains(keys, HID_KEY_ARROW_LEFT) || kbContains(keys, HID_KEY_ARROW_UP);
-  // A held function key decides SHIFT outright: on for F2/F4/F6/F8, off for F1/F3/F5/F7 (c64FKey).
-  for (int i = 0; i < 6; i++) {
-    bool fShift;
-    if (keys[i] && c64FKey(keys[i], &fShift).col >= 0) wantShift = fShift;
+  // Dropped first, so the SHIFT a held key's rule asks for (CRSR LEFT/UP, F2...) still gets applied.
+  if (shift && joystick && c64jIsAction(c64JoymapLookup(C64K_HID_SHIFT)) && !c64HasTypingKey(keys)) wantShift = false;
+
+  uint64_t want = 0;
+  auto hold = [&](uint8_t code) {
+    if (!c64kIsMatrix(code)) return;
+    want |= 1ULL << c64kIndex(code);
+    if (c64kShift(code) == C64K_SHIFT_ON)  wantShift = true;    // the key's rule decides SHIFT
+    if (c64kShift(code) == C64K_SHIFT_OFF) wantShift = false;
+  };
+  if (ctrl) hold(c64KeymapLookup(C64K_HID_CTRL, false));   // CTRL by default
+  if (alt)  hold(c64KeymapLookup(C64K_HID_ALT, false));    // Commodore by default
+  for (auto &h : c64Held) {
+    if (!h.kc) continue;
+    if (!kbContains(keys, h.kc)) { h.kc = 0; continue; }   // its key-up was lost (menu open): drop it
+    hold(h.code);
   }
-  c64KeyMatrix(7, 1, wantShift);  // left SHIFT  (col1,row7)
-  c64KeyMatrix(2, 7, ctrl);       // CTRL        (col7,row2)
-  c64KeyMatrix(5, 7, alt);        // Commodore   (col7,row5)
+  if (wantShift) want |= 1ULL << C64K_LSHIFT_INDEX;
+
+  const uint64_t changed = want ^ c64Down;
+  for (int i = 0; i < 64; i++)
+    if ((changed >> i) & 1) c64KeyMatrix(i & 7, i >> 3, (want >> i) & 1);   // (row, col)
+  c64Down = want;
 }
 
-// C64 keyboard-as-joystick. With the JOYSTICK option ON, the arrow keys + Space (+ either SHIFT on
-// the PicoCalc) drive the C64 joystick, routed to port 1/2 per joyPort. This runs alongside the
-// keyboard matrix rather than replacing it, so the same arrows still move the BASIC cursor.
-// CIA bits are active-low: bit0=up, 1=down, 2=left, 3=right, 4=fire (0xff = idle).
-static void c64ApplyJoystick(const uint8_t *keys, bool shift)
+// Release every matrix key this keyboard holds.
+static void c64ReleaseAll()
 {
-  uint8_t m = 0xff;
-  if (kbContains(keys, HID_KEY_ARROW_UP))    m &= ~0x01;
-  if (kbContains(keys, HID_KEY_ARROW_DOWN))  m &= ~0x02;
-  if (kbContains(keys, HID_KEY_ARROW_LEFT))  m &= ~0x04;
-  if (kbContains(keys, HID_KEY_ARROW_RIGHT)) m &= ~0x08;
-  if (kbContains(keys, HID_KEY_SPACE))       m &= ~0x10;   // fire
-  if (C64_SHIFT_IS_FIRE && shift)            m &= ~0x10;   // PicoCalc: either SHIFT is fire too
-  c64SetJoystick(m);
+  for (auto &h : c64Held) h.kc = 0;
+  for (int i = 0; i < 64; i++)
+    if ((c64Down >> i) & 1) c64KeyMatrix(i & 7, i >> 3, false);
+  c64Down = 0;
+}
+// C64 keyboard-as-joystick. With the JOYSTICK option ON, the keys on the joystick map (c64joymap.cpp:
+// the arrows + Space by default, + either SHIFT on the PicoCalc) drive the C64 joystick, routed to
+// port 1/2 per joyPort. This runs alongside the keyboard matrix rather than replacing it, so the
+// same arrows still move the BASIC cursor.
+// CIA bits are active-low: bit0=up, 1=down, 2=left, 3=right, 4=fire (0xff = idle); FIRE2 / FIRE3
+// go to the paddle lines (SID POTX / POTY).
+static void c64ApplyJoystick(const uint8_t *keys, bool shift, bool ctrl, bool alt)
+{
+  uint8_t pull = 0;
+  auto press = [&](uint8_t hid) { const uint8_t c = c64JoymapLookup(hid); if (c64jIsAction(c)) pull |= c; };
+  for (int i = 0; i < 6; i++) if (keys[i]) press(keys[i]);
+  if (shift) press(C64K_HID_SHIFT);
+  if (ctrl)  press(C64K_HID_CTRL);
+  if (alt)   press(C64K_HID_ALT);
+  c64SetJoystick((uint8_t)~(pull & C64J_LINES));
+  c64SetJoyButtons((pull & C64J_FIRE2 ? 1 : 0) | (pull & C64J_FIRE3 ? 2 : 0));
 }
 
 // ============================ NES controller 1 ===========================================
 // Active-high bits: bit0=A bit1=B bit2=Select bit3=Start bit4=Up bit5=Down bit6=Left bit7=Right.
+// Rebuilt from the held keys + CTRL / ALT on every report (neskeymap.cpp: a built-in default,
+// overridden per key by /nes/keymap.txt), so two keys on the same button don't release each other.
 static uint8_t nesKbBits = 0;
-static uint8_t nesBit(uint8_t kc)
+static void nesApplyKeyboard(bool ctrl, bool alt, const uint8_t *keys)
 {
-  switch (kc) {
-    case HID_KEY_ARROW_UP:    return 0x10;
-    case HID_KEY_ARROW_DOWN:  return 0x20;
-    case HID_KEY_ARROW_LEFT:  return 0x40;
-    case HID_KEY_ARROW_RIGHT: return 0x80;
-    case HID_KEY_X:
-    case HID_KEY_F4:          return 0x01;   // A
-    case HID_KEY_Z:
-    case HID_KEY_F5:          return 0x02;   // B
-    case HID_KEY_TAB:
-    case HID_KEY_F3:          return 0x04;   // Select
-    case HID_KEY_ENTER:
-    case HID_KEY_F2:          return 0x08;   // Start
-  }
-  return 0;
+  uint8_t bits = 0;
+  auto press = [&](uint8_t hid) { const uint8_t c = nesKeymapLookup(hid); if (nesKIsButton(c)) bits |= 1 << c; };
+  if (ctrl) press(C64K_HID_CTRL);
+  if (alt)  press(C64K_HID_ALT);
+  for (int i = 0; i < 6; i++) if (keys[i]) press(keys[i]);
+  if (bits != nesKbBits) { nesKbBits = bits; nesSetController(bits); }
 }
 
 // ============================ Atari 2600 ================================================
@@ -537,6 +479,18 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
   // render loop never draws). Its one key, Ctrl-F6 back to the system menu, is taken upstream.
   if (currentPlatform == PLATFORM_SDMANAGER) return;
 
+  // The C64 / NES KEYBOARD page's "press a key to find it" (optionsUiKeyCapture) takes CTRL / ALT too;
+  // they only show up as modifier bits, so catch the ones newly down.
+  static uint8_t prevModifier = 0;
+  const uint8_t newMods = modifier & ~prevModifier;
+  prevModifier = modifier;
+  if (OptionsWindow && newMods) {
+    if (newMods & (KEYBOARD_MODIFIER_LEFTCTRL | KEYBOARD_MODIFIER_RIGHTCTRL)) optionsUiKeyCapture(C64K_HID_CTRL, false);
+    else if (newMods & (KEYBOARD_MODIFIER_LEFTALT | KEYBOARD_MODIFIER_RIGHTALT |
+                        KEYBOARD_MODIFIER_LEFTGUI | KEYBOARD_MODIFIER_RIGHTGUI)) optionsUiKeyCapture(C64K_HID_ALT, false);
+    if (newMods & (KEYBOARD_MODIFIER_LEFTSHIFT | KEYBOARD_MODIFIER_RIGHTSHIFT)) optionsUiKeyCapture(C64K_HID_SHIFT, true);
+  }
+
   // --- new key-down events ---
   for (int i = 0; i < 6; i++) {
     uint8_t kc = keys[i];
@@ -552,6 +506,7 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
     if (kc == HID_KEY_F5 && ctrl && shift) { snapshotWindowToggle(); continue; }
 
     if (OptionsWindow) {
+      if (optionsUiKeyCapture(kc, shift)) continue;   // C64 / NES KEYBOARD page: finding a key
       switch (kc) {
         case HID_KEY_ARROW_LEFT:   optionsUiKeyArrow(-1,  0); break;
         case HID_KEY_ARROW_RIGHT:  optionsUiKeyArrow(+1,  0); break;
@@ -599,8 +554,7 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
     switch (currentPlatform) {
       case PLATFORM_APPLE2: if (!appleIsButtonKey(kc)) appleKeyDown(kc, shift, ctrl);
                             break;   // arrows/Space = paddles AND keys; F4/F5 = buttons only
-      case PLATFORM_C64:   c64KeyDown(kc); break;   // every key types; the stick reads the arrows too
-      case PLATFORM_NES:   nesKbBits |= nesBit(kc); nesSetController(nesKbBits); break;
+      case PLATFORM_C64:   c64KeyDown(kc, shift); break;   // every key types; the stick reads the arrows too
       case PLATFORM_ATARI: if (atariKey(kc, true)) atariApply(); break;
       // Arrows and Space are keyboard keys on a real MSX (the BIOS reads them as STICK(0)/STRIG(0)),
       // so they always type; with JOY on they also drive port 1 (msxApplyJoystick).
@@ -618,7 +572,6 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
     if (!kc || kbContains(keys, kc)) continue;
     switch (currentPlatform) {
       case PLATFORM_C64:   c64KeyUp(kc); break;
-      case PLATFORM_NES:   nesKbBits &= ~nesBit(kc); nesSetController(nesKbBits); break;
       case PLATFORM_ATARI: if (atariKey(kc, false)) atariApply(); break;
       case PLATFORM_MSX:   msxKeyUp(kc); break;
       case PLATFORM_PCXT:  pcxtKeyUp(kc); break;   // USB key -> XT break scancode
@@ -629,8 +582,10 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
   // --- continuous modifier state ---
   if (currentPlatform == PLATFORM_C64) {
     c64ApplyModifiers(shift, ctrl, alt, keys);
-    if (joystick) c64ApplyJoystick(keys, shift);   // arrows + Space (+ SHIFT on PicoCalc) -> joystick
-    else          c64SetJoystick(0xff);     // typing mode: keep the joystick released
+    if (joystick) c64ApplyJoystick(keys, shift, ctrl, alt);   // the joystick map's keys -> joystick
+    else        { c64SetJoystick(0xff); c64SetJoyButtons(0); }   // typing mode: keep the joystick released
+  } else if (currentPlatform == PLATFORM_NES) {
+    nesApplyKeyboard(ctrl, alt, keys);      // held keys -> controller 1 buttons (neskeymap.cpp)
   } else if (currentPlatform == PLATFORM_MSX) {
     msxApplyModifiers(shift, ctrl, alt);
     if (joystick) msxApplyJoystick(keys);   // arrows + Space -> joystick
@@ -653,11 +608,11 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
     }
     prevMod = modifier;
   } else if (currentPlatform == PLATFORM_APPLE2) {
-    // open-apple / solid-apple: Alt and right-Alt on a PC keyboard, F4 and F5 on the PicoCalc.
-    Pb0 = (modifier & KEYBOARD_MODIFIER_LEFTALT)  != 0 || kbContains(keys, HID_KEY_F4);
-    Pb1 = (modifier & KEYBOARD_MODIFIER_RIGHTALT) != 0 || kbContains(keys, HID_KEY_F5);
-    if (joystick) appleApplyJoystick(keys);               // arrows -> paddles, Space -> button 0
-    else { timerpdl0 = JOY_MID; timerpdl1 = JOY_MID; }    // typing mode: paddles centred
+    // open-apple / solid-apple: Alt and right-Alt on a PC keyboard, F5 and F4 on the PicoCalc.
+    Pb0 = (modifier & KEYBOARD_MODIFIER_LEFTALT)  != 0 || kbContains(keys, HID_KEY_F5);
+    Pb1 = (modifier & KEYBOARD_MODIFIER_RIGHTALT) != 0 || kbContains(keys, HID_KEY_F4);
+    if (appleArrows != APPLE_ARROWS_KBD) appleApplyJoystick(keys);   // arrows -> paddles, Space -> button 0
+    else { timerpdl0 = JOY_MID; timerpdl1 = JOY_MID; }               // KBD: paddles centred
   }
 }
 
@@ -665,8 +620,9 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
 void usbKeyboardReset()
 {
   if (currentPlatform == PLATFORM_C64) {
-    c64KeyMatrix(7, 1, false); c64KeyMatrix(2, 7, false); c64KeyMatrix(5, 7, false);
+    c64ReleaseAll();
     c64SetJoystick(0xff);   // release the keyboard joystick
+    c64SetJoyButtons(0);
   }
   nesKbBits = 0;
   if (currentPlatform == PLATFORM_NES) nesSetController(0);

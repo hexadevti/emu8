@@ -52,7 +52,7 @@
 // Bare keys pass through:
 //   F1, F2 -> HID_KEY_F1, HID_KEY_F2
 //   F3     -> HID_KEY_F12    Atari reset switch; reset on PC-XT / Coleco / ZX (not SMS: next to its buttons)
-//   F4, F5 -> HID_KEY_F4, HID_KEY_F5   Apple II paddle buttons 0 and 1; MSX matrix keys;
+//   F4, F5 -> HID_KEY_F4, HID_KEY_F5   Apple II paddle buttons 1 and 0; MSX matrix keys;
 //                                      SMS buttons 1 (start) and 2
 // F6..F10 (= Shift-F1..F5) are translated too, for the machines that use them.
 // usbkeyboard.cpp is untouched; the remap happens here at translation time.

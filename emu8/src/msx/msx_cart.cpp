@@ -11,6 +11,8 @@
 //   SCC     - "Konami with SCC":    8K banks, regs at $5000/$7000/$9000/$B000 (SCC sound stubbed)
 //   ASCII8  - 8K banks, regs at $6000/$6800/$7000/$7800
 //   ASCII16 - 16K banks, regs at $6000/$7000
+//   SLR     - Irem's Super Lode Runner: one 16K bank at $8000 only, picked by a write to $0000 in
+//             ANY slot (the cart snoops the bus; normally that is the BIOS ROM) -- cartWriteZero()
 //
 // The ROM image stays fully resident (PSRAM on device); banking just repoints the per-8K window
 // indices, like the NES mapper windows. Detection is the classic fMSX/blueMSX write-address
@@ -23,7 +25,7 @@
 
 namespace msx {
 
-enum { MAP_PLAIN = 0, MAP_KONAMI, MAP_SCC, MAP_ASCII8, MAP_ASCII16 };
+enum { MAP_PLAIN = 0, MAP_KONAMI, MAP_SCC, MAP_ASCII8, MAP_ASCII16, MAP_SLR };
 
 struct Cart {
   const uint8_t* data = nullptr;
@@ -42,6 +44,7 @@ uint8_t cartRead(int slot, uint16_t a) {
   Cart& c = g_cart[slot];
   if (!c.data || a < 0x4000 || a >= 0xC000) return 0xFF;
   if (c.mapper == MAP_SCC && c.sccEnabled && a >= 0x9800 && a < 0xA000) return 0xFF;  // SCC area (M3.5)
+  if (c.mapper == MAP_SLR && a < 0x8000) return 0xFF;           // nothing at $4000-$7FFF
   int w = (a - 0x4000) >> 13;                                   // 0..3
   uint32_t off = (uint32_t)c.bank8k[w] * 0x2000 + (a & 0x1FFF);
   return (off < (uint32_t)c.size) ? c.data[off] : 0xFF;
@@ -55,6 +58,7 @@ const uint8_t* cartPage(int slot, int chunk) {
   Cart& c = g_cart[slot];
   if (!c.data) return nullptr;
   if (c.mapper == MAP_SCC && c.sccEnabled && chunk == 4) return nullptr;
+  if (c.mapper == MAP_SLR && chunk < 4) return nullptr;
   uint32_t off = (uint32_t)c.bank8k[chunk - 2] * 0x2000;
   return (off + 0x2000 <= (uint32_t)c.size) ? c.data + off : nullptr;
 }
@@ -89,9 +93,33 @@ void cartWrite(int slot, uint16_t a, uint8_t v) {
   }
 }
 
+// Super Lode Runner: a write to $0000 (whatever slot page 0 shows) selects the 16K bank at $8000.
+void cartWriteZero(uint8_t v) {
+  for (int slot = 1; slot <= 2; slot++) {
+    Cart& c = g_cart[slot];
+    if (c.mapper != MAP_SLR || !c.data) continue;
+    const int b = (2 * v) % c.nBanks8k;
+    c.bank8k[2] = (uint16_t)b; c.bank8k[3] = (uint16_t)(b + 1);
+  }
+}
+
+// Super Lode Runner: >32K, every 16K bank opens with the same "AB" header pointing into $8000-$BFFF
+// (the bank at $8000 can be any of them at reset), and the code writes the bank to $0000.
+static bool isSuperLodeRunner(const uint8_t* d, int size) {
+  if (size <= 0x8000 || (size & 0x3FFF) || d[0] != 'A' || d[1] != 'B') return false;
+  const int init = d[2] | d[3] << 8, text = d[8] | d[9] << 8;
+  if (!((init >= 0x8000 && init < 0xC000) || (!init && text >= 0x8000 && text < 0xC000))) return false;
+  for (int o = 0x4000; o < size; o += 0x4000)
+    if (memcmp(d, d + o, 16)) return false;
+  for (int i = 0; i + 2 < size; i++)
+    if (d[i] == 0x32 && !d[i + 1] && !d[i + 2]) return true;   // LD ($0000),A
+  return false;
+}
+
 // fMSX/blueMSX-style write-address heuristic.
 static int detectMapper(const uint8_t* d, int size) {
   if (size <= 0x8000) return MAP_PLAIN;                         // 8/16/32K linear
+  if (isSuperLodeRunner(d, size)) return MAP_SLR;
   int konami = 0, scc = 0, ascii8 = 0, ascii16 = 0, a8only = 0;
   for (int i = 0; i + 2 < size; i++) {
     if (d[i] != 0x32) continue;                                 // LD (nn),A
@@ -144,6 +172,7 @@ void msxCartLoadImage(int slot, const uint8_t* data, int len) {
   // sensible initial banks per mapper (cart init code overrides via writes)
   for (int i = 0; i < 4; i++) c.bank8k[i] = (uint16_t)i;
   if (c.mapper == msx::MAP_KONAMI) c.bank8k[0] = 0;             // $4000 window fixed to bank 0
+  if (c.mapper == msx::MAP_SLR) { c.bank8k[2] = 0; c.bank8k[3] = 1; }   // bank 0 at $8000
 }
 void msxCartEject(int slot) {
   if (slot < 1 || slot > 2) return;

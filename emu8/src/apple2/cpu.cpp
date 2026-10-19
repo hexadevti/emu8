@@ -375,7 +375,7 @@ IRAM_ATTR void cpuLoop() {
     // Only advance paddle timers when a paddle read is in progress (PTRIG/C070).
     // Avoids a function call + branch tests on every instruction.
     if (CgReset0 || CgReset1 || CgReset2 || CgReset3)
-      processJoystick(1);
+      processJoystick(opCycles);   // the 558 times in CPU cycles, not instructions
 
     opflags = activeFlags[opcode];
     

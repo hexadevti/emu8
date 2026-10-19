@@ -1,6 +1,6 @@
 #include "../../emu.h"
 #include "nes.h"
-#include "../shared/dirty_bands.h"     // PicoCalc SCREEN: SMOOTH (dband::writeSmoothBand256)
+#include "../shared/dirty_bands.h"     // PicoCalc SCREEN: ENLARGE / STRETCH (dband::writeSmoothBand256)
 
 // NES core C-linkage glue, called by the platform dispatch:
 //   setup() -> nesSetup(),  loop() -> nesLoop(),  renderLoop() -> nesRenderFrame(),
@@ -39,6 +39,9 @@ void nesSetup() {
 
   nesScratch = (uint16_t *)malloc(NES_W * 8 * sizeof(uint16_t));
 
+#if BOARD_INPUT_USB
+  nesKeymapLoad();                                 // host key -> NES button overrides (/nes/keymap.txt)
+#endif
   nes::ppuReset();
   nes::nesBuildGrayPalette();   // for the VIDEO=MONO option
   nes::nesLoadFirstRom();   // scan SD root + load the first .nes (PRG/CHR malloc here)
@@ -68,7 +71,7 @@ static void nesPushFrame(const uint16_t *pal) {
   // S3 fast path (default, unless fill-screen scaling is on): convert each 8-line band and push it
   // STRAIGHT to the panel, bypassing the PSRAM canvas write and the full 480x272 QSPI flush. This is
   // the lever that recovers the fps lost to core-0 PSRAM/MSPI contention with the core-1 interpreter.
-  extern bool screenFill;
+  extern uint8_t screenFill;
   if (!screenFill) {
     static bool bordersDrawn = false;
     if (!bordersDrawn) { tft.fillPanelBlack(); bordersDrawn = true; }   // static black frame, once
@@ -112,14 +115,31 @@ static void nesPushFrame(const uint16_t *pal) {
   lastPal = pal; lastPushMs = nowMs;
 
 #if UI_PICOCALC
-  // SCREEN: SMOOTH (Settings): 256x240 scaled 5:4 bilinear on both axes to 320x300 on the RAW 320x320 panel
-  // (rows 10..309), so it reaches into the letterbox bars. Held off while the boot hint owns rows
-  // 280..319. Each 8-line band becomes exactly 10 output rows, so the band digests carry over;
-  // a mode change repaints everything, including the bars/borders the other mode left behind.
-  extern bool screenFill;
-  static bool lastFill = false;
-  const bool fill = screenFill && !bootHintShowing();
-  if (fill != lastFill) { forceAll = true; lastFill = fill; if (!fill) tft.fillPanelBlack(); }
+  // SCREEN (Settings) on the RAW 320x320 panel, so it reaches into the letterbox bars. ENLARGE:
+  // 256x240 scaled 5:4 bilinear on both axes to 320x300 (rows 10..309); each 8-line band becomes
+  // exactly 10 output rows, so the band digests carry over. STRETCH: 5:4 across, 4:3 down to all
+  // 320 rows (band y owns rows stretchRow(y)..stretchRow(y + 8)). Both are held off (ORIG) while the
+  // boot hint owns rows 280..319. A mode change repaints everything, including the bars/borders the
+  // other mode left behind.
+  extern uint8_t screenFill;
+  static uint8_t lastFill = SCREEN_ORIG;
+  const uint8_t fill = bootHintShowing() ? (uint8_t)SCREEN_ORIG : screenFill;
+  if (fill != lastFill) { forceAll = true; lastFill = fill; if (fill != SCREEN_ENLARGE) tft.fillPanelBlack(); }
+  if (fill == SCREEN_STRETCH) {
+    for (int y = 0; y < NES_H; y += 8) {
+      const uint8_t *band = nes::framebuffer + (size_t)y * NES_W;
+      uint32_t dig = bandDigest(band, (8 * NES_W) / 4);
+      if (!forceAll && dig == bandDig[y >> 3]) { nes::fbReadLine = y + 8; continue; }
+      bandDig[y >> 3] = dig;
+      const int r0 = dband::stretchRow(y, NES_H, PANEL_NATIVE_H), r1 = dband::stretchRow(y + 8, NES_H, PANEL_NATIVE_H);
+      tft.setPanelAddrWindow(0, r0, 320, r1 - r0);
+      tft.startWrite();
+      dband::writeStretchLines256(nes::framebuffer, y, 8, NES_H, PANEL_NATIVE_H, pal, 0x3F, false);
+      nes::fbReadLine = y + 8;      // band fully read (only the SPI drain is left)
+      tft.endWrite();
+    }
+    return;
+  }
   if (fill) {
     static const int F_TOP = (PANEL_NATIVE_H - NES_H * 5 / 4) / 2;   // 10
     if (forceAll) {

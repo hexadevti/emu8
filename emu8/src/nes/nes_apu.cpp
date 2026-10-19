@@ -5,7 +5,9 @@
 
 // NES APU (2A03 audio) -> ESP32 internal DAC (GPIO26) via I2S DMA, mirroring the C64 SID path.
 //   * 2 pulse (square, 4 duties, sweep, envelope, length), triangle (linear+length counter),
-//     noise (LFSR, envelope, length). DMC (sample channel) is NOT emulated.
+//     noise (LFSR, envelope, length), and the DMC (1-bit delta sample playback read straight from
+//     PRG through the CPU bank windows -- the voices/drums of Kung Fu, SMB3, Contra...). The DMC IRQ
+//     is not raised (next to no game relies on it); $4015 still reports bytes remaining.
 //   * The frame sequencer (envelope/linear at 240Hz, length/sweep at 120Hz) is clocked from
 //     EMULATED time: the PPU bumps apuQuarterTicks four times per frame and the audio task
 //     consumes those ticks. Driving it from the audio sample count instead (what this used to do)
@@ -68,9 +70,22 @@ struct Noise {
   uint32_t phase, step;      // 16.16 fixed-point LFSR-clock accumulator
 };
 
+// DMC: a 7-bit output level nudged +-2 per sample bit, the bytes fetched from $C000-$FFFF as the
+// cartridge maps it. Clocked here from the audio sample rate, like the other channels.
+struct Dmc {
+  bool     loop;
+  uint8_t  level;            // 0..127, also set directly by $4011
+  uint16_t startAddr, startLen;          // $4012 / $4013 decoded
+  uint16_t addr, bytesLeft;
+  uint8_t  shift, bitsLeft;
+  bool     silence;
+  uint32_t phase, step;      // 16.16 output-bit accumulator
+};
+
 static Pulse    pulse[2];
 static Triangle tri;
 static Noise    noise;
+static Dmc      dmc;
 static uint8_t  frameMode;            // $4017 bit7 (4/5-step) — only 4-step behaviour modelled
 static bool     frameIRQInhibit;
 static uint32_t apuQuarterSeen;       // quarter-frame ticks already applied (chases apuQuarterTicks)
@@ -87,6 +102,9 @@ static uint32_t triStep(uint16_t P) {                    // freq = clock / (32*(
   if (P < 2) return 0;
   return (uint32_t)(((uint64_t)1789773ull << 32) / ((uint64_t)32 * (P + 1) * APU_FS));
 }
+// DMC output-bit periods in CPU cycles (NTSC), indexed by $4010 bits 0-3.
+static const uint16_t dmcRateTbl[16] = {
+  428,380,340,320,286,254,226,214,190,160,142,128,106,84,72,54 };
 static uint32_t noiseStep(uint16_t per) {                // LFSR clocks at clock/per; 16.16 acc
   if (per == 0) return 0;
   return (uint32_t)(((uint64_t)1789773ull << 16) / ((uint64_t)per * APU_FS));
@@ -160,6 +178,7 @@ static const uint16_t noiseRecip[21] = {
 #define APU_W_PULSE  752
 #define APU_W_TRI    851
 #define APU_W_NOISE  494
+#define APU_W_DMC    335            // 0.00335 per DMC level step (0..127)
 #define APU_MIX_MAX  (30 * APU_W_PULSE + 15 * APU_W_TRI + 15 * APU_W_NOISE)   // 42735
 // Normalise that to a 0..30000 range (leaves head-room for the DC blocker's overshoot).
 #define APU_NORM     ((30000 << 16) / APU_MIX_MAX)
@@ -167,6 +186,32 @@ static const uint16_t noiseRecip[21] = {
 // voice at ~36% of full scale and pushes a dense four-voice mix just into the clamp. Raising this
 // further squares off loud passages -- turn up VOLUME in the options window instead.
 #define APU_GAIN     3
+
+// Next DMC sample byte, read through the CPU's PRG windows (the address wraps $FFFF -> $8000).
+// Runs on the audio task: a bank switch racing it costs at most one wrong byte of a sample.
+static inline uint8_t dmcFetch() {
+  const uint8_t *bank = prgMap[(dmc.addr >> 13) & 3];
+  uint8_t b = bank ? bank[dmc.addr & 0x1FFF] : 0;
+  dmc.addr = (dmc.addr == 0xFFFF) ? 0x8000 : (uint16_t)(dmc.addr + 1);
+  if (--dmc.bytesLeft == 0 && dmc.loop) { dmc.addr = dmc.startAddr; dmc.bytesLeft = dmc.startLen; }
+  return b;
+}
+NES_HOT static inline void dmcClockBits() {
+  dmc.phase += dmc.step;
+  while (dmc.phase >= 0x10000) {
+    dmc.phase -= 0x10000;
+    if (!dmc.silence) {
+      if (dmc.shift & 1) { if (dmc.level <= 125) dmc.level += 2; }
+      else               { if (dmc.level >= 2)   dmc.level -= 2; }
+    }
+    dmc.shift >>= 1;
+    if (--dmc.bitsLeft == 0) {                   // output cycle over: load the next byte, if any
+      dmc.bitsLeft = 8;
+      if (dmc.bytesLeft) { dmc.shift = dmcFetch(); dmc.silence = false; }
+      else dmc.silence = true;
+    }
+  }
+}
 
 // ---- one 16-bit signed output sample ----
 NES_HOT static int16_t genSample16() {
@@ -210,7 +255,11 @@ NES_HOT static int16_t genSample16() {
     else                 nmix = vol * nHigh / nClk;                // unreachable in practice
   }
 
-  int32_t acc = pmix * APU_W_PULSE + tmix * APU_W_TRI + nmix * APU_W_NOISE;   // 0..APU_MIX_MAX
+  dmcClockBits();
+
+  // The DMC is left out of APU_MIX_MAX on purpose: its level mostly sits still (often parked at a
+  // mid value), which the DC blocker removes, and normalising for it would halve every other voice.
+  int32_t acc = pmix * APU_W_PULSE + tmix * APU_W_TRI + nmix * APU_W_NOISE + dmc.level * APU_W_DMC;
   int32_t in  = (acc * (int32_t)APU_NORM) >> 16;                              // 0..~30000
 
   // One-pole DC blocker, y = x - x[-1] + 0.999*y[-1] (~3.5Hz at 22050Hz). The NES mix is unipolar,
@@ -255,11 +304,19 @@ NES_HOT void apuWrite(uint8_t reg, uint8_t val) {
     case 0x0C: noise.lengthHalt = val & 0x20; noise.constVol = val & 0x10; noise.volParam = val & 0x0F; break;
     case 0x0E: noise.mode = val & 0x80; noise.period = noisePeriodTbl[val & 0x0F]; noise.step = noiseStep(noise.period); break;
     case 0x0F: if (noise.enabled) noise.lengthCounter = lengthTable[val >> 3]; noise.envStart = true; break;
+    case 0x10: dmc.loop = val & 0x40;
+               dmc.step = (uint32_t)(((uint64_t)1789773ull << 16) / ((uint64_t)dmcRateTbl[val & 0x0F] * APU_FS));
+               break;
+    case 0x11: dmc.level = val & 0x7F; break;
+    case 0x12: dmc.startAddr = (uint16_t)(0xC000 + (uint16_t)val * 64); break;
+    case 0x13: dmc.startLen  = (uint16_t)((uint16_t)val * 16 + 1); break;
     case 0x15:
       pulse[0].enabled = val & 1; if (!(val & 1)) pulse[0].lengthCounter = 0;
       pulse[1].enabled = val & 2; if (!(val & 2)) pulse[1].lengthCounter = 0;
       tri.enabled      = val & 4; if (!(val & 4)) tri.lengthCounter = 0;
       noise.enabled    = val & 8; if (!(val & 8)) noise.lengthCounter = 0;
+      if (!(val & 0x10)) dmc.bytesLeft = 0;                                  // stop the sample
+      else if (!dmc.bytesLeft) { dmc.addr = dmc.startAddr; dmc.bytesLeft = dmc.startLen; }  // (re)start
       break;
     case 0x17: frameMode = val & 0x80; frameIRQInhibit = val & 0x40; halfTick = false;
                apuQuarterSeen = apuQuarterTicks;
@@ -314,6 +371,7 @@ uint8_t apuReadStatus() {
   if (pulse[1].lengthCounter) s |= 2;
   if (tri.lengthCounter)      s |= 4;
   if (noise.lengthCounter)    s |= 8;
+  if (dmc.bytesLeft)          s |= 0x10;
   return s;
 }
 
@@ -346,7 +404,10 @@ static void apuSetup() {
   memset(&pulse, 0, sizeof(pulse));
   memset(&tri,   0, sizeof(tri));
   memset(&noise, 0, sizeof(noise));
+  memset(&dmc,   0, sizeof(dmc));
   noise.lfsr = 1;                                        // must be non-zero
+  dmc.bitsLeft = 8; dmc.silence = true;
+  dmc.step = (uint32_t)(((uint64_t)1789773ull << 16) / ((uint64_t)dmcRateTbl[0] * APU_FS));
   halfTick = false;
   apuQuarterSeen = apuQuarterTicks;
   hpPrevIn = hpPrevOut = 0;
@@ -371,7 +432,7 @@ static void apuSetup() {
   i2s_set_dac_mode(I2S_DAC_CHANNEL_LEFT_EN);            // left = DAC2 = GPIO26 (CYD speaker)
   i2s_zero_dma_buffer(I2S_NUM_0);
   xTaskCreatePinnedToCore(apuTask, "apuTask", 4096, NULL, 2, NULL, 0);   // core 0
-  printLog("APU: pulse x2 + triangle + noise on (I2S DAC GPIO26)");
+  printLog("APU: pulse x2 + triangle + noise + DMC on (I2S DAC GPIO26)");
 #else
   // ESP32-S3: external I2S amp (no internal DAC).
   ampBegin(APU_FS);
@@ -382,7 +443,7 @@ static void apuSetup() {
 #else
   xTaskCreatePinnedToCore(apuTask, "apuTask", 4096, NULL, 2, NULL, 0);   // core 0
 #endif
-  printLog("APU: pulse x2 + triangle + noise on (I2S amp)");
+  printLog("APU: pulse x2 + triangle + noise + DMC on (I2S amp)");
 #endif
 }
 

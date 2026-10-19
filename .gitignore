@@ -58,3 +58,6 @@ roms/
 
 .claude/
 .picocalc-p4-build/
+.jc1060-build/
+.s3-build/
+emu8/build/

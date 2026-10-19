@@ -31,11 +31,16 @@ static const RomSlotInfo kSlots[ROMSEL_COUNT] = {
   { PLATFORM_C64,     -1,  "BASIC",       "/roms/basic-901226-01.bin",      0x2000,  0x2000 },
   { PLATFORM_C64,     -1,  "KERNAL",      "/roms/kernal-901227-03.bin",     0x2000,  0x2000 },
   { PLATFORM_C64,     -1,  "CHARGEN",     "/roms/chargen-901225-01.bin",    0x1000,  0x1000 },
+#if BOARD_HAS_MSX2
+  { PLATFORM_MSX,     -1,  "BIOS",        "/roms/hotbit12.rom",             0x4000,  0xC000 },   // MSX2: + SUB-ROM
+#else
   { PLATFORM_MSX,     -1,  "BIOS",        "/roms/hotbit12.rom",             0x4000,  0x8000 },
+#endif
   { PLATFORM_MSX,     -1,  "DISK ROM",    "/roms/hb3600_disk.rom",           0x4000,  0x4000 },
   { PLATFORM_COLECO,  -1,  "BIOS",        "/roms/coleco.rom",               0x2000,  0x2000 },
   { PLATFORM_ZX,      -1,  "48K ROM",     "/roms/48.rom",                   0x4000,  0x4000 },
   { PLATFORM_PCXT,    -1,  "BIOS",        "/roms/pcxt_bios.bin",            1,       0x10000 },
+  { PLATFORM_MSX,      1,  "MSX2 BIOS",   "/roms/cbios_main_msx2.rom",      0x8000,  0xC000 },   // C-BIOS (free, no BASIC) + cbios_sub.rom next to it
 };
 
 const RomSlotInfo &romSlotInfo(int slot) { return kSlots[slot]; }
@@ -123,8 +128,13 @@ bool romSlotVisible(int slot)
   if (s.platform == PLATFORM_APPLE2 && s.a2Model >= 0) {
     if (s.a2Model != (AppleIIe ? 1 : 0)) return false;   // only the system ROM this machine reads
   }
+  if (s.platform == PLATFORM_MSX && slot == ROMSEL_MSX_BIOS && Msx2Selected) return false;
+  if (s.platform == PLATFORM_MSX && s.a2Model > 0 && !Msx2Selected) return false;
   return true;
 }
+
+// Storage record of ROM slot `slot`: the first 13 in order, the ones added later after the base folders.
+static int slotRec(int slot) { return slot < ROMSEL_LEGACY_SLOTS ? slot : slot + 3; }
 
 // Record `rec` as a path in `out`, or nullptr when it is empty / not a plausible path (fresh or
 // never-written storage reads as 0x00 or 0xFF).
@@ -155,9 +165,9 @@ const char *romOverride(int slot)
 {
   static char path[ROMSEL_SLOT_LEN];
   if (slot < 0 || slot >= ROMSEL_COUNT) return nullptr;
-  const int a = slot * ROMSEL_SLOT_LEN;
+  const int a = slotRec(slot) * ROMSEL_SLOT_LEN;
   if (romSelRead(a) == 1 && romSelRead(a + 1) == (uint8_t)ROMSEL_NONE[0]) return "";
-  return recRead(slot, path);
+  return recRead(slotRec(slot), path);
 }
 
 // --- base folders (general settings, opened with Ctrl-F1 from the system menu) ---
@@ -217,7 +227,7 @@ const char *romPath(int slot)
 bool romSetOverride(int slot, const char *path)
 {
   if (slot < 0 || slot >= ROMSEL_COUNT) return false;
-  if (!recWrite(slot, path)) return false;
+  if (!recWrite(slotRec(slot), path)) return false;
   sprintf(buf, "ROMSEL: %s %s -> %s", kSlots[slot].label, romDefaultPath(slot), !(path && *path) ? "(default)" : strcmp(path, ROMSEL_NONE) == 0 ? "(none)" : path);
   printLog(buf);
   return true;

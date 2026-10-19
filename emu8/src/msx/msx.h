@@ -74,10 +74,41 @@ void    psgSnapshot(SnapIO &io);                 // save state: registers + tone
 uint8_t cartRead(int slot, uint16_t a);          // slot 1 or 2
 const uint8_t* cartPage(int slot, int chunk);   // 8 KB of ROM at chunk (a >> 13) 2..5, or nullptr -> cartRead
 void    cartWrite(int slot, uint16_t a, uint8_t v);
+void    cartWriteZero(uint8_t v);                // a write to $0000 in any slot (Super Lode Runner banking)
 bool    cartPresent(int slot);
 int     cartMapper(int slot);                    // detected mapper (MAP_* in msx_cart.cpp), -1 = bad slot
 const uint8_t* cartImage(int slot, int* len);   // the loaded image (nullptr / 0 when empty), for save states
 void    cartSnapshot(SnapIO &io, int slot);      // save state: bank registers + SCC enable
+
+// ---- MSX2 (BOARD_HAS_MSX2 builds; msx_v9938.cpp, msx_rtc.cpp, msx_machine.cpp) ----------------
+// Chosen at boot from the BIOS (isMsx2). Slot map: 0 = main BIOS (+ an optional 16K at $8000),
+// 1 = cartridge, 2 = disk ROM, 3 expanded: 3-0 SUB-ROM at $0000, 3-2 memory-mapper RAM.
+static const int V99_VRAM_SIZE = 0x20000;        // 128 KB
+static const int FB2_W = 512, FB2_H = 212;       // framebuffer stride / max height in MSX2 mode
+enum { V99_LINE_WIDE = 1, V99_LINE_G7 = 2 };     // v99LineFlags: 512 px wide / bytes are GRB332
+extern bool     isMsx2;
+extern const uint8_t* subRom;   // 16 KB SUB-ROM (slot 3-0)
+extern uint8_t* mapRam;         // mapper RAM (slot 3-2), mapSegs x 16 KB
+extern int      mapSegs;        // power of two
+extern uint8_t  v99LineFlags[FB2_H];
+extern int      v99FrameH;      // lines in the finished frame (192 / 212)
+extern uint16_t v99DispPal[16]; // RGB565 palette of the finished frame
+extern uint16_t V99_PAL332[256];// GRB332 (SCREEN 8) -> RGB565
+void    v99Reset();
+void    v99WriteData(uint8_t v);
+uint8_t v99ReadData();
+void    v99WriteCtrl(uint8_t v);
+uint8_t v99ReadStatus();
+void    v99WritePalette(uint8_t v);
+void    v99WriteIndirect(uint8_t v);
+int     v99FrameStart(bool render); // returns the lines per frame (262 NTSC / 313 PAL)
+void    v99Line(int line, uint32_t lineStartCycle);   // render / interrupts at the start of a line
+bool    v99IrqActive();
+void    rtcReset();
+void    rtcWriteAddr(uint8_t v);
+void    rtcWriteData(uint8_t v);
+uint8_t rtcReadData();
+uint32_t frameMicros();         // wall-clock length of the current frame (60 / 50 Hz)
 
 } // namespace msx
 

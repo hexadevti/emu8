@@ -21,7 +21,7 @@
 
 extern DisplayGFX tft;
 extern void desktopPumpInput();   // input_sdl.cpp: drains SDL events (keyboard/gamepad/mouse/quit)
-extern bool screenFill;           // Settings: SCREEN FILL (zoom video to fill window) vs ORIG (globals.cpp)
+extern uint8_t screenFill;         // Settings SCREEN: ORIG / ENLARGE / STRETCH (board.h, globals.cpp)
 extern bool OptionsWindow;        // settings menu open -> always show ORIG so the menu isn't zoomed
 extern bool DebugWindow;
 
@@ -261,7 +261,7 @@ void DisplayGFX::writeColor(uint16_t color, uint32_t len) {
   }
 }
 
-// SCREEN: SMOOTH, the device's smoothKick() (display_picocalc.cpp) on the framebuffer row just done.
+// SCREEN: ENLARGE / STRETCH, the device's smoothKick() (display_picocalc.cpp) on the framebuffer row just done.
 static inline uint16_t avg565(uint16_t a, uint16_t b) {
   return (uint16_t)((((a ^ b) & 0xF7DE) >> 1) + (a & b));
 }
@@ -405,7 +405,7 @@ bool DisplayGFX::readVideo(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t 
 }
 bool desktopUiModeActive() { return tft.uiMode() || OptionsWindow; }
 // Cores report their active video content rect each frame (the rest of 320x240 is black border);
-// The S3/P4 panel presentation (ui_imgui.cpp) zooms this rect in SCREEN FILL, like display_gfx.cpp.
+// The S3/P4 panel presentation (ui_imgui.cpp) zooms this rect in SCREEN: ENLARGE / STRETCH, like display_gfx.cpp.
 static bool g_vidStretch = false;
 void displaySetVideoRect(int topLogical, int hLogical) {
   g_vidTop = topLogical + g_offY; g_vidH = (hLogical > 0) ? hLogical : g_logH;

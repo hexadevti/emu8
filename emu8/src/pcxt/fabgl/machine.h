@@ -159,6 +159,7 @@ private:
   void speakerEnableDisable();
 
   void autoDetectDriveGeometry(int drive);
+  bool detectImageGeometry(int drive, int * heads, int * sectors);
 
 
   bool             m_reset = false;

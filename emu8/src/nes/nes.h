@@ -143,7 +143,8 @@ extern char *loadWarn;                     // startup ROM-skip warning text (mal
 void    ppuReset();
 void    ppuStep(int cpuCycles);      // advance the PPU by cpuCycles*3 dots
 extern int dotAcc;                   // PPU dot accumulator (exposed so cpuLoop inlines ppuStep)
-void    endScanline();               // advance one scanline (called when dotAcc crosses 341)
+extern int dotNext;                  // dot of the next PPU event (256 = draw line, 341 = next line)
+void    endScanline();               // run that event (called when dotAcc crosses dotNext)
 uint8_t ppuRegRead(uint16_t reg);    // reg = address & 7 ($2000-$2007)
 void    ppuRegWrite(uint16_t reg, uint8_t val);
 void    oamDmaWrite(uint8_t page);   // $4014: copy 256 bytes from CPU page into OAM

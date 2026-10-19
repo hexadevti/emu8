@@ -21,6 +21,7 @@ void bootProgressEnd();                 // hand the panel to the render loop
 void bootHintTick();
 void bootHintDismiss();
 bool bootHintShowing();   // the hint owns panel rows 280..319 right now (full-panel video must stay clear)
+uint8_t screenFillNow();  // screenFill, but STRETCH reads as ENLARGE while the hint is up (video.cpp)
 #if defined(PICOCALC_MAINBOARD)
 bool picocalcWaitForMainboard();   // block until the PicoCalc's own power rail is up
 bool picocalcWaitAnyKey(uint32_t timeoutMs);   // hold the screen until a key is pressed
@@ -96,7 +97,7 @@ void keyboardSetup();
 void keyboard_bit();
 
 // joystick.cpp
-void processJoystick(float speedAdjust);
+void processJoystick(int cycles);
 void joystickSetup();
 void applyPlatformInput();   // push joyX/joyY/Pb0-3 to the active core (shared: analog + USB)
 
@@ -108,6 +109,9 @@ void usbGamepadSetup();
 // keys/last are the 6-key rollover arrays of the current and previous boot report.
 void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *last);
 void usbKeyboardReset();   // release held keys on device disconnect
+void c64KeymapLoad();      // c64keymap.cpp: read the C64 key overrides from the SD card
+void nesKeymapLoad();      // neskeymap.cpp: read the NES key overrides from the SD card
+void c64JoymapLoad();      // c64joymap.cpp: read the C64 joystick key overrides from the SD card
 #endif
 
 // touchkeyboard.cpp
@@ -309,6 +313,8 @@ void c64Loop();
 bool c64RenderLoadWarning();   // renderLoop hook: "ROMs not found" screen, yields to SETTINGS
 void c64RenderFrame();
 void c64KeyMatrix(uint8_t row, uint8_t col, bool down);   // touch keyboard -> CIA1 matrix
+void c64Restore();                                        // RESTORE key -> one NMI
+void c64SetJoyButtons(uint8_t held);                      // joystick buttons 2 / 3 (bit0 / bit1) -> SID POTX / POTY
 void c64SetJoystick(uint8_t mask);                        // analog stick + fire -> CIA1 (port 1/2)
 void c64Autostart();                  // boot-autoload the saved image (.crt now; .prg/.d64 at READY)
 extern volatile bool c64AutoloadPending;   // a .prg/.d64 autoload waiting for the BASIC READY prompt
@@ -499,6 +505,7 @@ void optionsUiKeyLetter(char c);           // file list: jump to the next name s
 bool optionsUiSnapKey(char c);             // snapshot page: S save / L load / D delete (false: not open)
 void optionsUiKeyUnmount();               // Del/Backspace: file list -> unmount the highlighted loaded entry
 bool optionsUiKeyEscape();                // false = nothing was open, caller closes the window
+bool optionsUiKeyCapture(uint8_t hid, bool shift);   // C64 KEYBOARD page: "press a key to find it" (true = taken)
 
 // --- Globals defined inside a platform .cpp (declared here for cross-file access).
 //     The matching definition's first declaration here also gives the const arrays

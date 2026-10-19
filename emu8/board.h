@@ -444,11 +444,15 @@
 
 #endif
 
-// Fill-screen video toggle (SCREEN: FILL / ORIG) in Settings. The S3 panel (480x272), the P4 DSI
-// panel (1024x600) and the desktop window can scale the 320x240 video to fill (on the big P4 panel
-// fill is effectively mandatory — centered 320x240 would be tiny); the CYD is already 320x240.
-// On the PicoCalc (320x320) the toggle reads SCREEN: SMOOTH / ORIG: every core scales up to fill the
-// screen with bilinear blending (dband::smooth5 and friends), at the cost of more SPI time per frame.
+// Screen mode (SCREEN: ORIG / ENLARGE / STRETCH) in Settings, stored in screenFill. ORIG is the
+// native picture; ENLARGE scales it up as far as it goes keeping its shape (the S3 480x272 panel,
+// the P4 DSI 1024x600 panel and the desktop window keep 4:3; on the PicoCalc 320x320 every core
+// scales up with bilinear blending -- dband::smooth5 and friends); STRETCH covers the whole screen,
+// aspect ignored. The CYD is already 320x240, so it has no toggle.
+#define SCREEN_ORIG    0
+#define SCREEN_ENLARGE 1
+#define SCREEN_STRETCH 2
+#define SCREEN_MODES   3
 #if defined(BOARD_DESKTOP) || defined(PICOCALC_MAINBOARD)
   #define BOARD_HAS_SCREENFILL 1
 #else
@@ -508,6 +512,16 @@
 // keeping the BIOS and cartridge images in flash instead -- see BOARD_ROM_IN_FLASH below.
 #define BOARD_HAS_MSX_CORE 1
 #define BOARD_HAS_SMS_CORE 1
+
+// MSX2 (V9938 VDP + 128K VRAM, memory mapper, expanded slot 3 with the SUB-ROM, RP5C01 clock): the
+// MSX core switches to it at boot when the BIOS on the ROMS page is an MSX2 one (version byte 0x2D
+// >= 1). Only the PicoCalc ESP32-P4 (and the desktop build, for testing): the 256K mapper + 128K VRAM
+// + 512x212 framebuffer want PSRAM-class memory.
+#if defined(BOARD_PICOCALC_P4) || defined(BOARD_DESKTOP)
+#define BOARD_HAS_MSX2 1
+#else
+#define BOARD_HAS_MSX2 0
+#endif
 
 // The ColecoVision is assembled from the other two Z80 machines' parts -- the MSX TMS9918A VDP and
 // the SMS SN76489 PSG -- so it exists wherever both of them do. Its own state is 1K RAM + 16K VRAM

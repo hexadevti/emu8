@@ -49,6 +49,7 @@ extern uint8_t *cartROML;        // $8000-$9FFF ROM (8K)
 extern uint8_t *cartROMH;        // $A000-$BFFF (16K) or $E000-$FFFF (Ultimax) ROM (8K)
 extern bool cartActive, cartExrom, cartGame;
 extern volatile bool c64ResetReq;   // request a CPU reset (e.g. after mounting a cart)
+extern volatile bool c64RestoreReq; // the RESTORE key was pressed: one NMI
 
 // ---- VIC-II state (shared by memory + vic + render) ----
 extern uint8_t vicreg[0x40];

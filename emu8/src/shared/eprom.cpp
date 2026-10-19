@@ -166,12 +166,17 @@ void epromSetup() {
   c64Autoload = (EEPROM.readChar(C64AutoloadEEPROMaddress) == 1);
   joyPort = EEPROM.readChar(JoyPortEEPROMaddress);
   if (joyPort != 1 && joyPort != 2) joyPort = 1;
-  // ==1 test (not readBool) so an uninitialised 0xFF on older devices reads as OFF, not ON.
-  screenFill = (EEPROM.readChar(ScreenFillEEPROMaddress) == 1);
+  // Range-checked so an uninitialised 0xFF on older devices reads as ORIG (old ON = 1 = ENLARGE).
+  { char s = EEPROM.readChar(ScreenFillEEPROMaddress); screenFill = (s >= 0 && s < SCREEN_MODES) ? (uint8_t)s : SCREEN_ORIG; }
   { char s = EEPROM.readChar(NesDisplaySkipEEPROMaddress); nesDisplaySkip = (s >= 1 && s <= 3) ? (uint8_t)s : 3; }  // default 3; fresh EEPROM (0xFF) -> 3
   msxFast = (EEPROM.readChar(MsxSpeedEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> NORMAL
   msxDiskRom = (uint8_t)EEPROM.readChar(MsxDiskRomEEPROMaddress);
   if (msxDiskRom != MSX_DISKROM_ON && msxDiskRom != MSX_DISKROM_OFF) msxDiskRom = MSX_DISKROM_AUTO;   // fresh EEPROM (0xFF) too
+  // Apple ARROWS. An EEPROM from before this option has 0xFF here: take it from the JOYSTICK bit.
+  appleArrows = (uint8_t)EEPROM.readChar(AppleArrowsEEPROMaddress);
+  if (appleArrows >= APPLE_ARROWS_MODES) appleArrows = joystick ? APPLE_ARROWS_JOY : APPLE_ARROWS_KBD;
+  if (currentPlatform == PLATFORM_APPLE2) joystick = (appleArrows != APPLE_ARROWS_KBD);
+  Msx2Selected = BOARD_HAS_MSX2 && EEPROM.readChar(MsxModelEEPROMaddress) == 1;   // erased (0xFF) = MSX1
   nesFast = (EEPROM.readChar(NesSpeedEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> NORMAL
   smsFast = (EEPROM.readChar(SmsSpeedEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> NORMAL
   colecoFast = (EEPROM.readChar(ColecoSpeedEEPROMaddress) == 1);   // ==1 so fresh EEPROM (0xFF) -> NORMAL
@@ -251,6 +256,8 @@ void epromSetup() {
   if (const char *c = getenv("EMU_C64")) { selectedC64FileName = c; c64Autoload = true; }
   // EMU_ZX=/x.tap (or .tzx/.sna/.z80) loads it on the ZX Spectrum at boot (tapes type LOAD "").
   if (const char *z = getenv("EMU_ZX")) selectedZxFileName = z;
+  // EMU_MSX2=1 boots the MSX as MSX2 (the boot menu's MSX2 button), 0 as MSX1.
+  if (const char *m = getenv("EMU_MSX2")) Msx2Selected = BOARD_HAS_MSX2 && atoi(m) != 0;
   // EMU_CART=/x.nes (or .a26 / .rom / .sms / .col) loads it on the current cartridge system at boot.
   if (const char *c = getenv("EMU_CART")) {
     switch (currentPlatform) {
@@ -319,7 +326,7 @@ void saveEEPROM() {
     // SD Manager is a one-boot mode, not a system (emu.h): keep the emulator it was entered from.
     if (currentPlatform != PLATFORM_SDMANAGER)
       EEPROM.writeChar(PlatformEEPROMaddress, currentPlatform);
-    EEPROM.writeChar(ScreenFillEEPROMaddress, screenFill ? 1 : 0);
+    EEPROM.writeChar(ScreenFillEEPROMaddress, (char)screenFill);
     EEPROM.writeChar(NesDisplaySkipEEPROMaddress, (char)nesDisplaySkip);
     EEPROM.writeChar(MsxSpeedEEPROMaddress, msxFast ? 1 : 0);
     EEPROM.writeChar(MsxDiskRomEEPROMaddress, msxDiskRom);
@@ -327,6 +334,8 @@ void saveEEPROM() {
     EEPROM.writeChar(SmsSpeedEEPROMaddress, smsFast ? 1 : 0);
     EEPROM.writeChar(ColecoSpeedEEPROMaddress, colecoFast ? 1 : 0);
     EEPROM.writeChar(ZxSpeedEEPROMaddress, zxFast ? 1 : 0);
+    EEPROM.writeChar(AppleArrowsEEPROMaddress, (char)appleArrows);
+    EEPROM.writeChar(MsxModelEEPROMaddress, Msx2Selected ? 1 : 0);
 #if defined(BOARD_PICOCALC_P4) || defined(BOARD_DESKTOP)
     EEPROM.writeChar(AtariSpeedEEPROMaddress, atariFast ? 1 : 0);
 #endif

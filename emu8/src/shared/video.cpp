@@ -3,7 +3,7 @@
 #include "bootlogo.h"
 #if UI_PICOCALC
 #include "dirty_bands.h"
-// Apple II SCREEN: SMOOTH: the 8:7 line repeat sends some source lines twice; one copy is blended
+// Apple II SCREEN: ENLARGE / STRETCH: the 8:7 (5:3) line repeat sends some source lines twice; one copy is blended
 // with the neighbouring line (tft.setRowBlend: 1 = with the row above, 2 = with the row below). The
 // neighbour is always in the same 8-line band, so a band redraws the same no matter which bands
 // around it are skipped as unchanged: line 0 of a band blends its second copy with line 1, any
@@ -207,7 +207,7 @@ static void hintText(const char **keys, const char **joy)
                 : "Ctrl-F1 options   Ctrl-F6 systems";
 #endif
   switch (currentPlatform) {
-    case PLATFORM_APPLE2: *joy = "Arrows joystick   Space/F4 btn0   F5 btn1";   break;
+    case PLATFORM_APPLE2: *joy = "Arrows joystick   Space/F5 btn0   F4 btn1";   break;
     case PLATFORM_C64:   *joy = "Arrows joystick   Space fire";                break;
     case PLATFORM_NES:   *joy = "Arrows dpad   X=A  Z=B  Tab select  Enter start"; break;
     case PLATFORM_ATARI: *joy = "Arrows stick   Space fire   F4 select   F3 reset"; break;
@@ -253,6 +253,11 @@ void bootHintTick() {}
 void bootHintDismiss() {}
 bool bootHintShowing() { return false; }
 #endif
+
+uint8_t screenFillNow()
+{
+  return (screenFill == SCREEN_STRETCH && bootHintShowing()) ? (uint8_t)SCREEN_ENLARGE : screenFill;
+}
 
 void videoSetup()
 {
@@ -337,7 +342,7 @@ uint16_t last_x = 0;
 #define SPLASH_BTN_H   40
 #define SPLASH_ROW_GAP 4
 #define SPLASH_COLS    6
-struct SplashSystem { const char *label; uint8_t platform; int8_t iie; const char *why; };
+struct SplashSystem { const char *label; uint8_t platform; int8_t iie; const char *why; };   // iie: model (Apple IIe / MSX2), -1 = any
 #define SPLASH_SETUP 0xFF   // "platform" of the SETUP button: opens the general settings (optionsui.cpp)
 static const SplashSystem splashSystems[] = {
   { "II+",   PLATFORM_APPLE2,   0, "SOON"   },
@@ -345,12 +350,12 @@ static const SplashSystem splashSystems[] = {
   { "C64",   PLATFORM_C64,     -1, "SOON"   },
   { "NES",   PLATFORM_NES,     -1, "SOON"   },
   { "ATARI", PLATFORM_ATARI,   -1, "SOON"   },
-  { "MSX",   PLATFORM_MSX,     -1, "SOON"   },
+  { "MSX",   PLATFORM_MSX,      0, "SOON"   },
   { "SMS",   PLATFORM_SMS,     -1, "SOON"   },
   { "PCXT",  PLATFORM_PCXT,    -1, "SOON"   },
   { "COLECO", PLATFORM_COLECO, -1, "SOON"   },
   { "ZX48",  PLATFORM_ZX,      -1, "SOON"   },
-  { "SD MGR", PLATFORM_SDMANAGER, -1, "N/A"  },   // not an emulator: the SD card file manager
+  { "MSX2",  PLATFORM_MSX,      1, "SOON"   },   // the MSX2 BIOS slot (SD Manager moved to SETUP)
   { "SETUP", SPLASH_SETUP,          -1, ""     },   // not a system: the general settings (Ctrl-F1)
 };
 #define SPLASH_N     ((int)(sizeof(splashSystems) / sizeof(splashSystems[0])))
@@ -386,7 +391,8 @@ static bool splashEnabled(int i)
   // 30K of system ROM is ~119K of heap, which some boards have and the RP2040 does not. memoryAlloc()
   // is what finds out, by trying, so the first IIe boot on a board that cannot hold one comes up as
   // a II+ and sets this; from then on the button is greyed "NO RAM" instead of lying.
-  if (splashSystems[i].iie > 0 && apple2IIeUnavailable) return false;
+  if (splashSystems[i].iie > 0 && splashSystems[i].platform == PLATFORM_APPLE2 && apple2IIeUnavailable) return false;
+  if (splashSystems[i].iie > 0 && splashSystems[i].platform == PLATFORM_MSX && !BOARD_HAS_MSX2) return false;
   switch (splashSystems[i].platform) {
     case SPLASH_SETUP:      return true;
 #if defined(BOARD_DESKTOP)
@@ -408,13 +414,17 @@ static bool splashEnabled(int i)
   }
 }
 
-// Which button the running system is. The Apple entries match on AppleIIe as well, so a II+
-// session highlights II+ and a IIe session highlights IIe.
+// The model flag an entry's `iie` field is matched against: AppleIIe for the Apple, Msx2Selected
+// for the MSX.
+static bool splashModel(uint8_t platform) { return platform == PLATFORM_MSX ? Msx2Selected : AppleIIe; }
+
+// Which button the running system is. The Apple and MSX entries match on the model as well, so a
+// II+ session highlights II+ and a IIe session highlights IIe (MSX / MSX2 the same way).
 static int splashCurrentIndex()
 {
   for (int i = 0; i < SPLASH_N; i++)
     if (splashSystems[i].platform == currentPlatform &&
-        (splashSystems[i].iie < 0 || (splashSystems[i].iie != 0) == (bool)AppleIIe))
+        (splashSystems[i].iie < 0 || (splashSystems[i].iie != 0) == splashModel(currentPlatform)))
       return i;
   return 0;
 }
@@ -497,9 +507,12 @@ static void splashSelect(int idx)
   // changed, since setup() must re-init the new core / rebuild the Apple memory map).
   int     prevIdx  = splashCurrentIndex();
   uint8_t prevPlat = currentPlatform;
-  bool    prevIIe  = AppleIIe;
+  bool    prevIIe  = AppleIIe, prevMsx2 = Msx2Selected;
   currentPlatform = splashSystems[idx].platform;   // drives the highlight in splashDrawBtn below
-  if (splashSystems[idx].iie >= 0) AppleIIe = (splashSystems[idx].iie != 0);
+  if (splashSystems[idx].iie >= 0) {
+    if (currentPlatform == PLATFORM_MSX) Msx2Selected = (splashSystems[idx].iie != 0);
+    else AppleIIe = (splashSystems[idx].iie != 0);
+  }
   splashCursor = -1;                   // ...so stop overriding it with the keyboard cursor
   if (prevIdx != idx) splashDrawBtn(prevIdx, splashEnabled(prevIdx));
   splashDrawBtn(idx, splashEnabled(idx));
@@ -518,7 +531,7 @@ static void splashSelect(int idx)
     ESP.restart();
   }
 
-  if (prevPlat == currentPlatform && prevIIe == (bool)AppleIIe) { splashFinish(); return; }
+  if (prevPlat == currentPlatform && prevIIe == (bool)AppleIIe && prevMsx2 == Msx2Selected) { splashFinish(); return; }
   // Switching systems needs a reboot to re-init. ESP.restart() (an on-chip reset from firmware)
   // reboots this board cleanly - unlike the host-side RTS reset which wedges it. currentPlatform
   // and AppleIIe are already the new ones; persist them so setup() builds the saved system.
@@ -1087,15 +1100,23 @@ void renderLoop(void *pvParameters)
     screen_width = 280;
     screen_height = oskRasterHeight();
 #if UI_PICOCALC
-    // SCREEN: SMOOTH (Settings): 280x192 scaled ~8:7 on both axes to 320x220 (rows 10..229) of the 320x240
-    // logical screen. Vertically that is the existing coef192 line repeat; horizontally the display
-    // doubles every 7th pixel (setHScale78 below); setSmooth blends both repeats. A mode change wipes the screen once, so the
-    // bigger picture's edges do not linger around the smaller one.
-    extern bool screenFill;
-    static bool appleLastFill = false;
-    const bool appleFill = screenFill && !oskActive();
-    if (appleFill != appleLastFill) { appleLastFill = appleFill; clearScr = true; }
-    if (appleFill) { screen_height = 219; margin_y = (240 - 219) / 2; }
+    // SCREEN (Settings): ENLARGE = 280x192 scaled ~8:7 on both axes to 320x220 (rows 10..229) of the
+    // 320x240 logical screen. Vertically that is the existing coef192 line repeat; horizontally the
+    // display doubles every 7th pixel (setHScale78 below); setSmooth blends both repeats. STRETCH =
+    // the same 7:8 across, 5:3 down to the whole raw 320x320 panel: the display is switched to
+    // full-panel addressing for the frame (and back after endWrite), except under a menu or a wipe,
+    // which keep the 320x240 window. A mode change wipes the screen once (and leaving STRETCH
+    // blackens the bars), so the bigger picture's edges do not linger around the smaller one.
+    static uint8_t appleLastMode = SCREEN_ORIG;
+    const uint8_t appleMode = oskActive() ? (uint8_t)SCREEN_ORIG : screenFillNow();
+    if (appleMode != appleLastMode) {
+      if (appleLastMode == SCREEN_STRETCH) tft.fillPanelBlack();
+      appleLastMode = appleMode; clearScr = true;
+    }
+    const bool appleFill = (appleMode != SCREEN_ORIG);
+    const bool appleStretch = (appleMode == SCREEN_STRETCH) && !OptionsWindow && !DebugWindow && !clearScr;
+    if (appleStretch)   { screen_height = PANEL_NATIVE_H; margin_y = 0; }
+    else if (appleFill) { screen_height = 219; margin_y = (240 - 219) / 2; }
 #endif
     displaySetVideoRect(margin_y, (int)screen_height);   // Apple raster (192 lines at margin_y); fill-screen scales just that
     last_y = margin_y;
@@ -1109,9 +1130,11 @@ void renderLoop(void *pvParameters)
     int rasterH = (int)screen_height; // matches the line count produced by coef192
 #if UI_PICOCALC
     // ...only while margin_y is 0 or the scale is 1:1: the line repeat below measures from margin_y,
-    // so with FILL (219/192 = 73/64, exact in float) it emits floor(coef192*202)-10 = 220 lines.
-    // Size the window by that same expression or the extra line would wrap to the top.
+    // so with ENLARGE (219/192 = 73/64, exact in float) it emits floor(coef192*202)-10 = 220 lines.
+    // Size the window by that same expression or the extra line would wrap to the top. (STRETCH:
+    // margin_y 0, floor(320/192*192) = 320 in float.)
     if (appleFill) rasterH = (int)floor(coef192 * (float)(margin_y + 192)) - margin_y;
+    if (appleStretch) tft.setFullPanel(true);   // logical = the raw 320x320 panel until endWrite
 #endif
 
     // clearScr is tested FIRST: the wipe below writes exactly 320*240 pixels, so the window has
@@ -1150,14 +1173,14 @@ void renderLoop(void *pvParameters)
     if (!OptionsWindow && wide80) displaySetVideoFill(0, 320, true);
     else                          displaySetVideoFill(margin_x, (int)screen_width, true);
 #if UI_PICOCALC
-    // FILL: every 280-wide branch widens 7:8 to the full 320. (The 80-col text branch above is
+    // ENLARGE / STRETCH: every 280-wide branch widens 7:8 to the full 320. (The 80-col text branch above is
     // already 320 wide; the clear and the menu keep their unscaled 320x240 window.)
     if (appleFill && !OptionsWindow && !DebugWindow && !clearScr) {
       if (!wide80) {
         tft.setAddrWindow(0, margin_y, 320, rasterH);
         tft.setHScale78(true);
       }
-      tft.setSmooth(true);         // SCREEN: SMOOTH -- see APPLE_ROW_BLEND
+      tft.setSmooth(true);         // SCREEN: ENLARGE / STRETCH -- see APPLE_ROW_BLEND
     }
 #endif
     tft.startWrite();
@@ -1252,14 +1275,14 @@ void renderLoop(void *pvParameters)
     {
 #if UI_PICOCALC
       // Dirty bands (see appleBandHash). Anything that changes how bytes become pixels -- mode
-      // switches, colour, FILL, the II+ flash phase -- forces a full frame, and so does a periodic
+      // switches, colour, SCREEN mode, the II+ flash phase -- forces a full frame, and so does a periodic
       // refresh (every 60th pass, ~1s) so nothing drawn over the raster by other code can stick.
       static uint32_t bandSig[24];
       static uint32_t modeSig = 0;
       static uint8_t  refresh = 0;
       uint32_t ms = 2166136261u;
       const uint32_t modeBits[] = { vGfx, vFull, vLores, vDhr,
-                                    v40, AppleIIe, videoColor, appleFill,
+                                    v40, AppleIIe, videoColor, appleMode,
                                     (uint32_t)(!AppleIIe && inversed), (uint32_t)rasterH,
                                     (uint32_t)margin_y };
       for (uint32_t v : modeBits) ms = (ms ^ v) * 16777619u;
@@ -1673,6 +1696,7 @@ void renderLoop(void *pvParameters)
     unsigned long endTime2 = millis();
     tft.endWrite();
 #if UI_PICOCALC
+    if (appleStretch) tft.setFullPanel(false);
     dband::frameDone("Apple", appleBands);   // counts the frame (fpsFrameShown) and logs every 5s
 #else
     fpsFrameShown();
@@ -1687,10 +1711,12 @@ void renderLoop(void *pvParameters)
     // Redrawn only when it changes. The frame rate here is ~18fps and this is a 12x12 square
     // that is usually not changing, so an unconditional write would be an SPI transaction and a
     // pxFlush() per frame for nothing.
+    // In STRETCH the raster owns the bar too: no light then, and it is redrawn on leaving.
     {
       static int8_t ledOn = -1;                       // -1 = never drawn
       int8_t want = DriveMotorON_OFF ? 1 : 0;
-      if (want != ledOn) {
+      if (appleStretch) ledOn = -1;
+      else if (want != ledOn) {
         ledOn = want;
         tft.fillPanelRect(PANEL_NATIVE_W - 20, PANEL_NATIVE_H - 20, 12, 12,
                           want ? tft.color565(255, 40, 40) : TFT_BLACK);

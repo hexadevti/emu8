@@ -1,6 +1,6 @@
 #include "../../emu.h"
 #include "atari.h"
-#include "../shared/dirty_bands.h"     // PicoCalc SCREEN: SMOOTH blends (dband::blendQ)
+#include "../shared/dirty_bands.h"     // PicoCalc SCREEN: ENLARGE / STRETCH blends (dband::blendQ)
 
 // Atari 2600 core C-linkage glue, called by the platform dispatch:
 //   setup() -> atariSetup(),  loop() -> atariLoop(),  renderLoop() -> atariRenderFrame(),
@@ -73,18 +73,26 @@ void atariRenderFrame() {
   int oy = (240 - h) / 2;
   const uint16_t *pal = videoColor ? atari::atariPalette : atari::atariPaletteGray;
 #if UI_PICOCALC
-  // SCREEN: SMOOTH (Settings): stretch the field vertically to all 240 lines (bilinear), so
+  // SCREEN (Settings): ENLARGE stretches the field vertically to all 240 lines (bilinear), so
   // the picture is 4:3 like on a TV instead of a 320x192 strip with 24px bars. ~25% more SPI time.
-  extern bool screenFill;
-  if (screenFill) {
+  // STRETCH goes on down to all 320 rows of the raw panel (full-panel addressing for the frame).
+  // Leaving STRETCH blackens the bars it drew into.
+  extern uint8_t screenFill;
+  static uint8_t lastFill = SCREEN_ORIG;
+  const uint8_t fill = screenFillNow();
+  if (lastFill == SCREEN_STRETCH && fill != SCREEN_STRETCH) tft.fillPanelBlack();
+  lastFill = fill;
+  if (fill) {
+    const int outH = (fill == SCREEN_STRETCH) ? PANEL_NATIVE_H : 240;
+    if (fill == SCREEN_STRETCH) tft.setFullPanel(true);
     tft.setSwapBytes(true);
-    for (int y = 0; y < 240; ) {
+    for (int y = 0; y < outH; ) {
       int n = 0;
-      while (y + n < 240 && n < 8) {
-        // SCREEN: SMOOTH -- bilinear in quarter steps: output row oy samples field line
-        // (oy + 0.5) * h / 240 - 0.5, and the 2x doubling is 3/4 own pixel + 1/4 that side's neighbour.
+      while (y + n < outH && n < 8) {
+        // Bilinear in quarter steps: output row oy samples field line (oy + 0.5) * h / outH - 0.5,
+        // and the 2x doubling is 3/4 own pixel + 1/4 that side's neighbour.
         const int oy = y + n;
-        int s4 = ((2 * oy + 1) * h * 2 - 480) / 240;   // source line in quarters
+        int s4 = ((2 * oy + 1) * h * 2 - 2 * outH) / outH;   // source line in quarters
         if (s4 < 0) s4 = 0;
         const int sa = s4 >> 2, q = s4 & 3, sb = sa + 1 < h ? sa + 1 : h - 1;
         const uint8_t *ra = fb + sa * A_W, *rb = fb + sb * A_W;
@@ -105,6 +113,7 @@ void atariRenderFrame() {
       y += n;
     }
     tft.setSwapBytes(false);
+    if (fill == SCREEN_STRETCH) tft.setFullPanel(false);
     if (atari::frontBuf) { __sync_synchronize(); atari::frontState = 0; }
     fpsFrameShown();
     return;

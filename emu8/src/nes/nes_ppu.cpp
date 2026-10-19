@@ -29,6 +29,12 @@ static uint8_t  readBuffer = 0; // $2007 read buffer
 // ---- frame timing ----
 static int scanline = 0;        // 0..261 (0..239 visible, 241 vblank, 261 pre-render)
 int dotAcc = 0;                 // accumulated PPU dots (global so cpuLoop can inline ppuStep)
+int dotNext = 256;              // next PPU event: 256 = draw the line, 341 = next line
+// Sprite-0 hit due on the current line: the dot at which it happens, or -1. The line is drawn at
+// dot 256, but the real flag rises at the pixel where sprite 0 meets the background, and games
+// time their raster splits from that moment (Rad Racer's road, status bars) -- so the hit is
+// predicted when the line starts and raised by the $2002 read that comes after that dot.
+static int spr0Dot = -1;
 static int qfAcc = 0;           // accumulates toward the 4 APU quarter-frame ticks per frame
 
 #if defined(BOARD_DESKTOP)
@@ -49,6 +55,12 @@ void dbgPpuSnapshot(uint8_t *o_ctrl, uint8_t *o_mask, uint8_t *o_status,
 // ---- per-scanline scratch ----
 static bool bgOpaque[256];      // background pixel non-transparent (for sprite priority/spr0)
 static bool spriteDrawn[256];   // a sprite already owns this pixel (lower OAM index wins)
+// Mid-line split (see bgSplit): how much of the current line's background is already drawn, and
+// the v whose tile 0 lines up with the rest of it.
+static int bgDone = 0;
+static uint16_t bgV = 0;
+static void bgSplit();
+static void bgSplitDone();
 
 static inline bool renderingEnabled() { return (mask & 0x18) != 0; }
 
@@ -139,7 +151,7 @@ NES_HOT void ppuRegWrite(uint16_t reg, uint8_t val) {
       break;
     case 6:  // PPUADDR
       if (!w) { t = (t & 0x80FF) | ((uint16_t)(val & 0x3F) << 8); w = true; }
-      else    { t = (t & 0xFF00) | val; v = t; w = false; }
+      else    { bgSplit(); t = (t & 0xFF00) | val; v = t; w = false; bgSplitDone(); }
       break;
     case 7:  // PPUDATA
       ppuDataWrite(val);
@@ -151,6 +163,8 @@ NES_HOT void ppuRegWrite(uint16_t reg, uint8_t val) {
 NES_HOT uint8_t ppuRegRead(uint16_t reg) {
   switch (reg) {
     case 2: {                       // PPUSTATUS
+      // The read lands on the instruction's last cycle, ~3 CPU cycles (9 dots) past dotAcc.
+      if (spr0Dot >= 0 && dotAcc + 9 >= spr0Dot) { status |= 0x40; spr0Dot = -1; }
       uint8_t r = status & 0xE0;    // low bits = open bus (ignored)
       status &= ~0x80;              // reading clears vblank
       w = false;                    // and the $2005/$2006 write toggle
@@ -262,7 +276,10 @@ NES_HOT static void renderSprites(int line, uint8_t *fb) {
     int sy = oam[i * 4 + 0];
     int row = line - sy - 1;                            // OAM Y = top-1; visible sy+1..sy+h
     if (row < 0 || row >= h) continue;
-    if (++count > 8) { status |= 0x20; break; }         // sprite overflow (approximate)
+    // Sprite overflow (approximate). The 9th+ sprite is still DRAWN: games that exceed 8 per line
+    // rotate OAM so each one shows every other frame, and we display every other frame, so a fixed
+    // half of them would never appear (Kung Fu's player vanishing when grabbed).
+    if (++count > 8) status |= 0x20;
     uint8_t tile = oam[i * 4 + 1];
     uint8_t attr = oam[i * 4 + 2];
     int sx = oam[i * 4 + 3];
@@ -301,6 +318,76 @@ NES_HOT static void renderSprites(int line, uint8_t *fb) {
   }
 }
 
+// ---- mid-line splits ----
+// The line is drawn at dot 256, but a $2006 write before that lands mid-line on the real PPU: the
+// pixels already shifted out keep the old v and the rest continue from the new one. Rad Racer's
+// horizon is built on exactly this (each road row is entered late in a line, so most of that line
+// still shows the previous row), so such a write first draws the background up to where it takes
+// effect. Only the lines that do it pay for the slower per-pixel path below.
+
+// Background pixels [from, to) of the current line, with tile i (pixels 8i - x .. +7) taken from
+// vStart advanced i tiles.
+NES_HOT static void renderBgRange(uint8_t *fb, uint16_t vStart, int from, int to) {
+  if (!(mask & 0x08) || from >= to) return;
+  uint16_t vv = vStart;
+  int fineY = (vStart >> 12) & 7;
+  uint16_t bgTable = (ctrl & 0x10) ? 0x1000 : 0x0000;
+  bool leftMask = !(mask & 0x02);
+  for (int tile = 0; tile < 33; tile++) {
+    int px = tile * 8 - (int)x;
+    if (px >= to) break;
+    if (px + 8 > from) {
+      uint8_t tileIndex = vram[mirrorAddr(0x2000 | (vv & 0x0FFF))];
+      uint16_t atAddr = 0x23C0 | (vv & 0x0C00) | ((vv >> 4) & 0x38) | ((vv >> 2) & 0x07);
+      uint8_t at = vram[mirrorAddr(atAddr)];
+      const uint8_t *pal = &paletteRam[((at >> (((vv >> 4) & 4) | (vv & 2))) & 3) << 2];
+      uint16_t patAddr = bgTable + (uint16_t)tileIndex * 16 + fineY;
+      const uint8_t *c = chrMap[(patAddr >> 10) & 7];
+      uint8_t lo = c ? c[patAddr & 0x3FF] : 0, hi = c ? c[(patAddr + 8) & 0x3FF] : 0;
+      for (int b = 0; b < 8; b++) {
+        int sx = px + b;
+        if (sx < from || sx >= to) continue;
+        if (sx < 8 && leftMask) continue;
+        int pix = ((lo >> (7 - b)) & 1) | (((hi >> (7 - b)) & 1) << 1);
+        if (pix) { fb[sx] = pal[pix]; bgOpaque[sx] = true; }
+      }
+    }
+    if ((vv & 0x001F) == 31) { vv &= ~0x001F; vv ^= 0x0400; } else vv++;
+  }
+}
+
+// Called just before a $2006 write replaces v. Tiles are fetched 8 dots at a time two tiles
+// ahead, so the new v shows from the tile boundary three groups after the write's, with its
+// coarse X already stepped once by the increment that ends the write's group.
+static int bgSplitTile = -1;
+static void bgSplit() {
+  bgSplitTile = -1;
+  if (scanline >= 240 || !fbRendering || dotNext != 256 || !renderingEnabled()) return;
+  int d = dotAcc + 9;                            // the store lands on the instruction's last cycle
+  int tile = d >= 256 ? 33 : (d > 0 ? (d - 1) >> 3 : 0) + 3;
+  int to = tile * 8 - (int)x;
+  if (to > 256) to = 256;
+  uint8_t *fb = framebuffer + scanline * 256;
+  if (bgDone == 0) {                             // first split of the line: start it off
+    memset(fb, paletteRam[0] & 0x3F, 256);
+    memset(bgOpaque, 0, sizeof(bgOpaque));
+    bgV = v;
+  }
+  if (to > bgDone) { renderBgRange(fb, bgV, bgDone, to); bgDone = to; }
+  if (bgDone == 0) bgDone = 1;                   // (a split at pixel 0 still counts as started)
+  bgSplitTile = tile;
+}
+// ... and just after: rebase bgV so tile bgSplitTile is the new v's coarse X + 1.
+static void bgSplitDone() {
+  if (bgSplitTile < 0) return;
+  uint16_t vv = v;
+  for (int i = 0; i < bgSplitTile - 1; i++) {    // step coarse X back (tile - 1) times
+    if ((vv & 0x001F) == 0) { vv |= 0x001F; vv ^= 0x0400; } else vv--;
+  }
+  bgV = vv;
+  bgSplitTile = -1;
+}
+
 // ---- skipped frames ----
 // While the render task owns the framebuffer the PPU must not draw into it -- that overlap is
 // exactly the random flickering lines, since a line caught between its backdrop memset and its
@@ -330,6 +417,8 @@ NES_HOT static bool bgPixelOpaque(int screenX) {
   return (((c[patAddr & 0x3FF] | c[(patAddr + 8) & 0x3FF]) >> bit) & 1) != 0;
 }
 
+NES_HOT static int spr0HitX(int line);
+
 NES_HOT static void skipScanline(int line) {
   if (!(mask & 0x10)) return;                         // sprites off: no flags to maintain
   int h = (ctrl & 0x20) ? 16 : 8;
@@ -341,9 +430,16 @@ NES_HOT static void skipScanline(int line) {
     if (i == 0) spr0 = true;                          // sprite 0 is always evaluated first
     if (++count > 8) { status |= 0x20; break; }       // sprite overflow (approximate, as above)
   }
-  if (!spr0 || (status & 0x40) || !(mask & 0x08)) return;
+  if (spr0 && !(status & 0x40) && spr0HitX(line) >= 0) status |= 0x40;
+}
 
-  int row = line - oam[0] - 1;                        // sprite 0 is here and has not hit yet
+// Where on `line` sprite 0 meets an opaque background pixel, for the current v / fine x / CHR
+// banks: the screen x of the first such pixel, or -1 for no hit on this line.
+NES_HOT static int spr0HitX(int line) {
+  if ((mask & 0x18) != 0x18) return -1;               // the hit needs both layers on
+  int h = (ctrl & 0x20) ? 16 : 8;
+  int row = line - oam[0] - 1;
+  if (row < 0 || row >= h) return -1;                 // sprite 0 is not on this line
   uint8_t tile = oam[1], attr = oam[2];
   int sx = oam[3];
   int r = (attr & 0x80) ? (h - 1 - row) : row;        // vertical flip
@@ -356,7 +452,7 @@ NES_HOT static void skipScanline(int line) {
     patAddr = table + (uint16_t)t8 * 16 + r;
   }
   const uint8_t *c = chrMap[(patAddr >> 10) & 7];
-  if (!c) return;
+  if (!c) return -1;
   uint8_t lo = c[patAddr & 0x3FF], hi = c[(patAddr + 8) & 0x3FF];
   for (int b = 0; b < 8; b++) {
     int col = (attr & 0x40) ? b : 7 - b;              // horizontal flip
@@ -364,12 +460,19 @@ NES_HOT static void skipScanline(int line) {
     int screenX = sx + b;
     if (screenX < 0 || screenX >= 255) continue;      // x=255 never triggers the hit
     if (screenX < 8 && !(mask & 0x04)) continue;
-    if (bgPixelOpaque(screenX)) { status |= 0x40; return; }
+    if (bgPixelOpaque(screenX)) return screenX;
   }
+  return -1;
 }
 
 NES_HOT static void renderScanline(int line) {
   uint8_t *fb = framebuffer + line * 256;
+  if (bgDone) {                               // split mid-line: draw what is left of it
+    renderBgRange(fb, bgV, bgDone, 256);
+    bgDone = 0;
+    if (mask & 0x10) renderSprites(line, fb);
+    return;
+  }
   uint8_t backdrop = paletteRam[0] & 0x3F;
   memset(fb, backdrop, 256);                  // word-at-a-time fills (vs per-byte loops)
   memset(bgOpaque, 0, sizeof(bgOpaque));
@@ -377,9 +480,14 @@ NES_HOT static void renderScanline(int line) {
   if (mask & 0x10) renderSprites(line, fb);
 }
 
-// Finish the scanline that just consumed its 341 dots, then advance to the next.
-NES_HOT void endScanline() {
+// Dot 256 of a line: the end of its visible part. The line is drawn here rather than at dot 341
+// so that what the game writes during HBlank (dots 256-340: $2005/$2006 splits timed off a
+// sprite-0 hit or a cycle-counted loop, MMC3 IRQ handlers) lands on the NEXT line, as on the real
+// PPU. Drawing at the end of the line put those writes on the line that had just finished, which
+// is what bent the road in Rad Racer and the split playfields of Kung Fu / Excitebike.
+NES_HOT static void lineVisibleEnd() {
   if (scanline < 240) {                          // visible line
+    if (spr0Dot >= 0) { status |= 0x40; spr0Dot = -1; }
     if (fbRendering) {
       // Overlap guard (see nes.h): core 0 may still be reading this picture out, a couple of
       // hundred lines ahead of us. Never write a line it has not taken yet. The bound is there so
@@ -391,16 +499,22 @@ NES_HOT void endScanline() {
       renderScanline(scanline);
     }
     else             skipScanline(scanline);     // core 0 owns the framebuffer this frame
+    bgDone = 0;
+    // The real PPU increments Y at dot 256, copies t's horizontal bits at 257 and (with sprites
+    // from $1000) clocks the MMC3 counter at ~260 -- all here.
     if (renderingEnabled()) { mapperClockScanline(); incrementY(); reloadHorizontal(); }
     // Line 239 is the last one that touches the framebuffer, so the picture is finished HERE, not
     // at the frame boundary. Publishing now hands it to the render task a whole VBlank (~1.4ms)
     // early, and -- more to the point -- before the game's NMI handler gets the CPU, which is the
     // longest stretch of the frame. See the handover note in nes.h.
     if (scanline == 239 && fbRendering) { fbRendering = false; fbFrames++; }
-  } else if (scanline == 261) {                  // pre-render line
+  } else if (scanline == 261) {                  // pre-render line (vertical copy at dots 280-304)
     if (renderingEnabled()) v = t;               // full vertical+horizontal reload
   }
+}
 
+// Dot 341: the line has consumed all its dots; advance to the next.
+NES_HOT static void lineEnd() {
   // APU frame-sequencer clock: 4 ticks per 262-line frame, i.e. ~240Hz when the emulation is at
   // full speed and proportionally slower when it is not, which is what the envelopes want.
   qfAcc += 4;
@@ -422,17 +536,29 @@ NES_HOT void endScanline() {
   } else if (scanline == 261) {                  // start of pre-render: clear flags
     status &= ~0xE0;
   }
+
+  spr0Dot = -1;                                  // predict this line's sprite-0 hit (see spr0Dot)
+  if (scanline < 240 && !(status & 0x40)) {
+    int hx = spr0HitX(scanline);
+    if (hx >= 0) spr0Dot = hx + 2;               // the flag rises ~2 dots after the pixel
+  }
+}
+
+// One PPU event: dot 256 (draw the line) or dot 341 (next line), whichever dotNext points at.
+NES_HOT void endScanline() {
+  if (dotNext == 256) { lineVisibleEnd(); dotNext = 341; }
+  else                { dotAcc -= 341; lineEnd(); dotNext = 256; }
 }
 
 void ppuStep(int cpuCycles) {
   dotAcc += cpuCycles * 3;
-  while (dotAcc >= 341) { dotAcc -= 341; endScanline(); }
+  while (dotAcc >= dotNext) endScanline();
 }
 
 void ppuReset() {
   ctrl = mask = status = oamAddr = 0;
   v = t = 0; x = 0; w = false; readBuffer = 0;
-  scanline = 0; dotAcc = 0; qfAcc = 0;
+  scanline = 0; dotAcc = 0; dotNext = 256; spr0Dot = -1; bgDone = 0; qfAcc = 0;
   // Stop drawing; the render task is the only thing that ever issues a grant (nes.h), so we must
   // NOT hand one out here -- it could land while core 0 is midway through an SPI push. If the
   // reset lands between a grant and its publish the task's 120ms timeout re-grants, which costs
@@ -462,6 +588,8 @@ void ppuSnapshot(SnapIO &io) {
     return;
   }
   scanline = line; dotAcc = dots; qfAcc = qf;
+  dotNext = dots >= 256 ? 341 : 256;              // a line past dot 256 has already been drawn
+  spr0Dot = -1;
   v &= 0x7FFF; t &= 0x7FFF; x &= 7;
   for (int i = 0; i < 0x20; i++) paletteRam[i] &= 0x3F;   // renderBg relies on masked entries
 }

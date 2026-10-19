@@ -39,10 +39,20 @@ static File     prgFile;                       // persistent .nes handle for str
 static uint32_t prgDataOffset  = 0;            // file offset of PRG data (16 [+512 trainer])
 static uint32_t cartHeapBytes  = 0;            // heap the loaded cart owns (so the guard can plan)
 
+// PicoCalc (BOARD_ROM_IN_FLASH): the PRG -- and the CHR-ROM too when the heap cannot hold it -- is
+// copied into the spare-flash cartridge window (src/picocalc/romflash_picocalc.cpp) and read in place
+// through XIP, like the SMS/MSX carts. That replaces streaming outright: games such as Super C and TMNT
+// touch 11-12 of their 16 PRG banks every frame, so any cache the heap can spare beside a 128K CHR
+// misses hundreds of times a second, and each miss is an 8K SD read (the game crawls). These flags
+// mark the pointers that are flash, never to be freed.
+static bool     prgInFlash     = false;
+static bool     chrInFlash     = false;
+
 // Free any previously-loaded cartridge buffers (so re-loading doesn't leak).
 static void freeCart() {
-  if (prgRom)   { free(prgRom);   prgRom = nullptr; }
-  if (chrData)  { free(chrData);  chrData = nullptr; }
+  if (prgRom)   { if (!prgInFlash) free(prgRom);  prgRom = nullptr; }
+  if (chrData)  { if (!chrInFlash) free(chrData); chrData = nullptr; }
+  prgInFlash = chrInFlash = false;
   if (prgRam)   { free(prgRam);   prgRam = nullptr; }
   if (prgCache)    { free(prgCache);    prgCache = nullptr; }
   if (prgSlotBank) { free(prgSlotBank); prgSlotBank = nullptr; }
@@ -130,6 +140,21 @@ static void loadWarnAdd(const char *path, const char *reason) {
   strncat(loadWarn, line, 255 - cur);
 }
 
+#if BOARD_ROM_IN_FLASH
+// Copy PRG (+ `chrLen` bytes of CHR-ROM, which follow it in the file) into the flash cartridge window
+// and point prgRom (/ chrData) at it. The CPU is parked (settings open, or not started yet at boot)
+// and the old cart's pointers only ever reach into this same window, so it can be rewritten in
+// place; only changed sectors are written, so rebooting into the same game writes nothing.
+static bool prgLoadFlash(File &f, uint32_t dataOffset, uint32_t prgSize, uint32_t chrLen) {
+  f.seek(dataOffset);
+  const uint8_t *img = romFlashLoad(ROMFLASH_CART, f, prgSize + chrLen);
+  if (!img) return false;
+  prgRom = (uint8_t *)img; prgInFlash = true;
+  if (chrLen) { chrData = (uint8_t *)img + prgSize; chrInFlash = true; }
+  return true;
+}
+#endif
+
 bool nesLoadROM(const char *path) {
   File f = FSTYPE.open(path, FILE_READ);
   if (!f) { sprintf(buf, "NES: cannot open %s", path); printLog(buf); return false; }
@@ -174,8 +199,21 @@ bool nesLoadROM(const char *path) {
   uint32_t fullNeed   = prgSize + chrAlloc + 8192;
   uint32_t streamNeed = 4u * 8192 + chrAlloc + 8192;   // 32K PRG cache + CHR + PRG-RAM
   uint32_t avail = ESP.getFreeHeap() + cartHeapBytes;
-  bool useStream;
-  if      (fullNeed   + NES_HEAP_MARGIN <= avail) useStream = false;
+  bool resident = fullNeed + NES_HEAP_MARGIN <= avail;
+  bool useFlash = false, chrToFlash = false;
+#if BOARD_ROM_IN_FLASH
+  // Whole PRG in RAM still comes first (fastest opcode fetch, and what every game that fitted ran
+  // on so far); flash takes the place of streaming. CHR-ROM joins the PRG in flash (right behind it,
+  // as in the file) only when the heap cannot hold it, since every rendered pixel reads CHR.
+  if (!resident) {
+    chrToFlash = chrBanks && chrAlloc + 8192 + NES_HEAP_MARGIN > avail;
+    useFlash   = prgSize + (chrToFlash ? chrAlloc : 0) <= romFlashCapacity(ROMFLASH_CART);
+    if (!useFlash) chrToFlash = false;
+  }
+#endif
+  bool useStream = false;
+  if      (resident) useStream = false;
+  else if (useFlash) ;                                          // PRG costs no heap
   else if (streamNeed + NES_HEAP_MARGIN <= avail) useStream = true;
   else {
     f.close();
@@ -192,11 +230,22 @@ bool nesLoadROM(const char *path) {
   mapperNum  = (uint8_t)mapper;
   prgRomSize = prgSize;                          // full size — bank-count math (both modes)
 
-  // CHR — always fully resident in RAM.
-  chrData = (uint8_t *)::nesAllocFast(chrAlloc);   // internal DRAM (PSRAM fallback): read every pixel
+#if BOARD_ROM_IN_FLASH
+  if (useFlash && !prgLoadFlash(f, dataOffset, prgSize, chrToFlash ? chrAlloc : 0)) {
+    if (chrToFlash || streamNeed + NES_HEAP_MARGIN > ESP.getFreeHeap()) {
+      f.close(); printLog("NES: flash load failed"); freeCart(); return false;
+    }
+    useStream = true;                           // the heap can still stream it
+  }
+#endif
+
+  // CHR — fully resident in RAM (or, PicoCalc only, in flash with the PRG: see above).
+  if (!chrInFlash) chrData = (uint8_t *)::nesAllocFast(chrAlloc);   // internal DRAM (PSRAM fallback): read every pixel
   if (!chrData) { f.close(); printLog("NES: CHR malloc failed"); freeCart(); return false; }
   chrSize = chrAlloc;
-  if (chrBanks == 0) {                          // CHR-RAM
+  if (chrInFlash) {
+    chrIsRam = false;
+  } else if (chrBanks == 0) {                   // CHR-RAM
     memset(chrData, 0, chrAlloc);
     chrIsRam = true;
   } else {
@@ -208,11 +257,15 @@ bool nesLoadROM(const char *path) {
   // PRG — resident as one contiguous block when one exists (small ROMs); otherwise streamed from
   // SD through the multi-slot LRU cache. (The fragmented heap has no 128K+ block, and not even
   // enough 8K pieces, so 128K games can't be fully resident — they stream.)
-  if (!useStream) {
+  if (!useStream && !prgInFlash) {
     prgRom = (uint8_t *)::nesAllocFast(prgSize);   // internal DRAM (PSRAM fallback): opcode fetch hot path
     if (prgRom) {
       f.seek(dataOffset);
       if (f.read(prgRom, prgSize) != (int)prgSize) { f.close(); printLog("NES: PRG read short"); freeCart(); return false; }
+#if BOARD_ROM_IN_FLASH
+    } else if (prgSize <= romFlashCapacity(ROMFLASH_CART) && prgLoadFlash(f, dataOffset, prgSize, 0)) {
+      printLog("NES: PRG has no contiguous block -> flash");
+#endif
     } else {
       sprintf(buf, "NES: PRG %uK has no contiguous block -> streaming", (unsigned)(prgSize / 1024));
       printLog(buf);
@@ -248,12 +301,13 @@ bool nesLoadROM(const char *path) {
 
   mapperInit();                                 // set up the initial bank windows (streaming loads them)
   ::selectedNesFileName = path;                 // mark this ROM as the loaded one (settings browser)
-  cartHeapBytes = (useStream ? (uint32_t)prgSlots * 8192 : prgSize) + chrAlloc + 8192;  // next guard
+  cartHeapBytes = (prgInFlash ? 0 : useStream ? (uint32_t)prgSlots * 8192 : prgSize) +
+                  (chrInFlash ? 0 : chrAlloc) + 8192;  // next guard
 
   f.close();
-  sprintf(buf, "NES: loaded %s, mapper %d, PRG %uK%s CHR %s%uK, %s mirror", path, mapper,
-          (unsigned)(prgSize / 1024), useStream ? " (streamed)" : "",
-          chrIsRam ? "RAM " : "", (unsigned)(chrAlloc / 1024),
+  sprintf(buf, "NES: loaded %s, mapper %d, PRG %uK%s CHR %s%uK%s, %s mirror", path, mapper,
+          (unsigned)(prgSize / 1024), prgInFlash ? " (flash)" : useStream ? " (streamed)" : "",
+          chrIsRam ? "RAM " : "", (unsigned)(chrAlloc / 1024), chrInFlash ? " (flash)" : "",
           mirrorMode == MIRROR_VERTICAL ? "vert" : "horiz");
   printLog(buf);
   return true;

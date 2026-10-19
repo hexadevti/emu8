@@ -166,7 +166,7 @@ extern char keymem;
 // their own, read in place (romsel.cpp) -- the EEPROM stops at the Apple IIe HD name.
 #define EEPROM_SIZE 1792
 #else
-#define EEPROM_SIZE 2816   // ... + the ColecoVision cartridge name (1280) + the ZX Spectrum file name (1408) + the Apple IIe's own disk/HD names (1536, 1664) + the picked system ROMs (1792, ROMSEL_COUNT x ROMSEL_SLOT_LEN) + the ROM / apps / snapshot base folders (2624, 2688, 2752)
+#define EEPROM_SIZE 2880   // ... + the ColecoVision cartridge name (1280) + the ZX Spectrum file name (1408) + the Apple IIe's own disk/HD names (1536, 1664) + the picked system ROMs (1792, 13 x ROMSEL_SLOT_LEN) + the ROM / apps / snapshot base folders (2624, 2688, 2752) + the MSX2 BIOS pick (2816)
 #endif
 extern int fnSelected;
 extern int joystickCycles0;
@@ -192,7 +192,7 @@ extern bool sound;
 extern bool dacSound;
 extern bool upscale;
 extern bool smoothUpscale;
-extern bool screenFill;   // JC4827W543: scale the emulator video to fill the panel (keep 4:3 aspect)
+extern uint8_t screenFill;   // SCREEN_ORIG / SCREEN_ENLARGE (keep aspect) / SCREEN_STRETCH (whole screen), board.h
 extern uint8_t nesDisplaySkip;  // JC4827W543 NES: draw 1 of every N emulated frames (1=every frame; 2-3 trade picture smoothness for game speed)
 extern bool nesFast;            // NES: false = NORMAL (paced ~60fps/1.79MHz), true = FAST (uncapped)
 // The Apple II guest's OWN clock, in microseconds, published by the pacer in src/apple2/cpu.cpp
@@ -211,6 +211,14 @@ extern bool initializedHdDisk;
 extern bool HdDisk;
 extern bool Fast1MhzSpeed;
 extern bool joystick;
+// Apple II ARROWS option (replaces its JOYSTICK on/off): what the arrow keys drive.
+//   JOY  = paddles only (their ^H/^U/^K/^J keycodes are game commands in e.g. Lode Runner)
+//   KBD  = keycodes only, paddles centred
+//   BOTH = paddles and keycodes, for a game that reads the stick and also wants the arrows
+// `joystick` follows it (on unless KBD) so the gamepad / analog / PS/2 paths keep working.
+enum { APPLE_ARROWS_JOY = 0, APPLE_ARROWS_KBD = 1, APPLE_ARROWS_BOTH = 2, APPLE_ARROWS_MODES = 3 };
+extern uint8_t appleArrows;
+extern bool Msx2Selected;                 // MSX: boot the MSX2 BIOS slot (boot menu "MSX2"), else the MSX1 one
 extern bool mouse;
 extern bool diskAttached;
 extern bool hdAttached;
@@ -254,6 +262,8 @@ extern int logLineCount;
 #define NesSpeedEEPROMaddress 17       // NES: 1 = FAST (uncapped) / 0 = NORMAL (paced ~60fps/1.79MHz)
 #define ZxSpeedEEPROMaddress 21        // ZX Spectrum: 1 = FAST (uncapped) / 0 = NORMAL (paced to 3.5 MHz)
 #define MsxDiskRomEEPROMaddress 22     // MSX: DISK ROM setting, MSX_DISKROM_* (anything else = AUTO)
+#define MsxModelEEPROMaddress 25       // MSX: 1 = MSX2 (boot menu "MSX2", BOARD_HAS_MSX2 only) / anything else = MSX1
+#define AppleArrowsEEPROMaddress 24    // Apple II: ARROWS = APPLE_ARROWS_* (anything else = from the JOYSTICK bit)
 #define AtariSpeedEEPROMaddress 23     // Atari (PicoCalc P4 + desktop): 1 = FAST (uncapped) / 0 = NORMAL (paced to 1.19 MHz)
 // The Apple IIe keeps its own copy of the Apple-only settings (DEVICE, SPEED, the disk and HD
 // images); the addresses above without "IIe" are the II+'s. See eprom.cpp.
@@ -283,18 +293,21 @@ enum RomSlot : uint8_t {
   ROMSEL_A2_IIPLUS, ROMSEL_A2_IIE, ROMSEL_A2_DISKII, ROMSEL_A2_MOUSE, ROMSEL_A2_HD,
   ROMSEL_C64_BASIC, ROMSEL_C64_KERNAL, ROMSEL_C64_CHARGEN,
   ROMSEL_MSX_BIOS, ROMSEL_MSX_DISK, ROMSEL_COLECO_BIOS, ROMSEL_ZX_ROM, ROMSEL_PCXT_BIOS,
-  ROMSEL_COUNT                            // 13 x 64 = 832 bytes: 1792..2623
+  ROMSEL_MSX2_BIOS,                       // added later: stored after the base folders (romsel.cpp)
+  ROMSEL_COUNT
 };
+#define ROMSEL_LEGACY_SLOTS 13            // the first 13 slots: 1792..2623, then the base folders
 // Three more records of the same shape right after the ROM slots (general settings, splash Ctrl-F1):
 // the folder the default ROM names live in, the folder every file browser starts in, and the folder
 // the save states go to (one subfolder per system).
-#define ROMSEL_BASE_ROMS  ROMSEL_COUNT          // 2624..2687, empty = "/roms"
-#define ROMSEL_BASE_APPS  (ROMSEL_COUNT + 1)    // 2688..2751, empty = "/"
-#define ROMSEL_BASE_SNAP  (ROMSEL_COUNT + 2)    // 2752..2815, empty = "/emu8-snapshot" (snapshot.cpp)
+// Record numbers, not slots: the slots added after them (ROMSEL_MSX2_BIOS...) follow at record 16.
+#define ROMSEL_BASE_ROMS  ROMSEL_LEGACY_SLOTS          // 2624..2687, empty = "/roms"
+#define ROMSEL_BASE_APPS  (ROMSEL_LEGACY_SLOTS + 1)    // 2688..2751, empty = "/"
+#define ROMSEL_BASE_SNAP  (ROMSEL_LEGACY_SLOTS + 2)    // 2752..2815, empty = "/emu8-snapshot" (snapshot.cpp)
 #define ROMSEL_RECORDS    (ROMSEL_COUNT + 3)
 struct RomSlotInfo {
   uint8_t platform;                       // Platform the ROM belongs to
-  int8_t  a2Model;                        // Apple II only: 0 = II+, 1 = IIe, -1 = both
+  int8_t  a2Model;                        // Apple II: 0 = II+, 1 = IIe; MSX: 0 = MSX1, 1 = MSX2; -1 = both
   const char *label;                      // shown on the ROMS page
   const char *defPath;                    // loaded when the user has picked nothing
   uint32_t minSize, maxSize;              // accepted file sizes, checked when picking

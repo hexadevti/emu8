@@ -1,0 +1,55 @@
+# emu8 - NES keyboard map
+#
+# Copy this file to the SD card as /nes/keymap.txt (or /neskeymap.txt) and edit it to remap keys.
+# It is read when the NES boots. Every line below is the BUILT-IN DEFAULT, so this file as shipped
+# changes nothing; only lines that differ from the default count (up to 64 of them). Deleting a
+# line does not unmap the key, it just leaves the default; use "= NONE" to make a key do nothing.
+# Errors are reported in the log ("NES keymap line N: ...") and the line is skipped.
+#
+# The NES menu edits it too: CONFIG > KEYBOARD (on the PicoCalc a picture of its keyboard over an
+# NES controller; elsewhere a list). A change there is live at once and rewrites
+# /nes/keymap.txt with only the changed keys.
+#
+# Applies to every keyboard that reaches the NES through the HID path: the PicoCalc's built-in
+# keyboard, a USB keyboard (JC4827W543 / JC1060P470), and the PC keyboard in the desktop build.
+# A gamepad is not affected.
+#
+# FORMAT
+#   <host key> = <NES button>      # comment
+#
+#   Any number of keys may press the same button. The NES has no SHIFT: a key is the same button
+#   with or without it (the PicoCalc's Shift-F1.. / Shift-arrows arrive as other keys - F6.., PAGE_UP
+#   - and can be mapped on their own).
+#
+# HOST KEYS (names are not case-sensitive; the same as docs/c64-keymap.txt)
+#   A..Z  0..9  F1..F12  SPACE ENTER ESC BACKSPACE TAB DELETE INSERT HOME END PAGE_UP PAGE_DOWN
+#   UP DOWN LEFT RIGHT PAUSE (= BREAK) CAPSLOCK PRINTSCREEN SCROLLLOCK NUMLOCK
+#   MINUS EQUAL LBRACKET RBRACKET BACKSLASH NONUS_HASH SEMICOLON APOSTROPHE GRAVE COMMA PERIOD SLASH
+#   KP_0..KP_9 KP_PLUS KP_MINUS KP_MULTIPLY KP_DIVIDE KP_PERIOD KP_ENTER
+#   CTRL  ALT        the modifiers (either side; ALT also takes the GUI/Windows key)
+#   0xNN             any HID usage code, in hex
+#
+# NES BUTTONS
+#   UP DOWN LEFT RIGHT SELECT START B A
+#   NONE             the key does nothing
+#
+# PicoCalc notes: its F3 key arrives as F12, so on the PicoCalc the default has "F12 = SELECT" in
+# place of the "F3 = SELECT" below. The menu keys (Ctrl-F1 ...) are not remapped here.
+
+# ---- the D-pad ----
+UP = UP
+DOWN = DOWN
+LEFT = LEFT
+RIGHT = RIGHT
+
+# ---- the buttons ----
+X = A
+Z = B
+ENTER = START
+TAB = SELECT
+
+# ---- the function row (the PicoCalc's buttons) ----
+F2 = START
+F3 = SELECT
+F4 = A
+F5 = B

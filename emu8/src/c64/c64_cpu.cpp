@@ -419,6 +419,8 @@ C64_HOT void cpuLoop() {
     bool nmiNow = cia2NMIPending();
     if (nmiNow && !nmiPrev) cpuNMI();
     nmiPrev = nmiNow;
+    // RESTORE is not in the matrix: it pulls NMI through a one-shot, so a press is one NMI.
+    if (c64RestoreReq) { c64RestoreReq = false; cpuNMI(); }
 
     // Virtual disk: intercept the KERNAL LOAD entry before it runs the (absent) IEC code.
     if (PC == 0xF49E && c64LoadTrap()) continue;

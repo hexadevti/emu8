@@ -451,7 +451,7 @@ namespace pcd {
 static inline uint16_t avg565(uint16_t a, uint16_t b) {
   return (uint16_t)((((a ^ b) & 0xF7DE) >> 1) + (a & b));
 }
-// SCREEN: SMOOTH (setSmooth): a full row is blended before it goes out. Out of line, so the inline
+// SCREEN: ENLARGE / STRETCH (setSmooth): a full row is blended before it goes out. Out of line, so the inline
 // writeColor() stays a plain store.
 static void smoothKick() {
   uint16_t *cur = stage[stageHalf], *oth = stage[stageHalf ^ 1];
@@ -743,7 +743,7 @@ void DisplayGFX::setAddrWindow(int32_t x, int32_t y, int32_t w, int32_t h) {
   pcd::stageDrain();
   panelWindow(x, y + _offY, x + w - 1, y + _offY + h - 1);
 }
-// RAW panel rows, no letterbox offset: the NES SCREEN: FILL picture (320x300) is taller than the
+// RAW panel rows, no letterbox offset: the NES SCREEN: ENLARGE / STRETCH picture (320x300) is taller than the
 // logical 320x240, so it streams into the bars too.
 void DisplayGFX::setPanelAddrWindow(int32_t x, int32_t y, int32_t w, int32_t h) {
   pxFlush();
@@ -852,8 +852,8 @@ void DisplayGFX::flush() {
 // --- free-function shims (declared in display_picocalc.h / proto.h) ---
 void displayFlush() { tft.flush(); }
 void displaySetUiMode(bool ui) { tft.setUiMode(ui); }
-// The cores report their active video rect each frame so a SCREEN FILL mode could zoom it. This
-// board has no canvas to zoom: SCREEN: FILL is done by the MSX/SMS renderers (msx.cpp, sms.cpp)
+// The cores report their active video rect each frame so a SCREEN: ENLARGE / STRETCH mode could zoom it. This
+// board has no canvas to zoom: SCREEN: ENLARGE / STRETCH is done by the MSX/SMS renderers (msx.cpp, sms.cpp)
 // scaling straight into the 320x240 window, so there is nothing to record.
 void displaySetVideoRect(int, int) {}
 void displaySetVideoFill(int, int, bool) {}

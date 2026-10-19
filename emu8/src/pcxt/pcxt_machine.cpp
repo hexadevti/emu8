@@ -510,6 +510,42 @@ void Machine::setDriveImage(int drive, char const * filename, int cylinders, int
 }
 
 
+// Heads/sectors-per-track from a FAT BPB, if `bs` holds a plausible one.
+static bool bpbGeometry(uint8_t const * bs, int * heads, int * sectors)
+{
+  if (bs[510] != 0x55 || bs[511] != 0xAA || (bs[0] != 0xEB && bs[0] != 0xE9)) return false;
+  int bps = bs[11] | (bs[12] << 8);
+  int spt = bs[24] | (bs[25] << 8);
+  int hds = bs[26] | (bs[27] << 8);
+  if (bps != 512 || spt < 1 || spt > 63 || hds < 1 || hds > 255) return false;
+  *heads   = hds;
+  *sectors = spt;
+  return true;
+}
+
+// Geometry the image was formatted with: the active (else first) partition's BPB, else that
+// partition's end CHS in the MBR, else a BPB in sector 0 (partitionless image).
+bool Machine::detectImageGeometry(int drive, int * heads, int * sectors)
+{
+  uint8_t mbr[512], vbr[512];
+  if (diskRead(drive, 0, mbr, 512) != 512 || mbr[510] != 0x55 || mbr[511] != 0xAA) return false;
+  uint8_t const * part = nullptr;
+  for (int i = 0; i < 4; i++) {
+    uint8_t const * e = mbr + 446 + i * 16;
+    if (e[4] == 0 || (e[0] != 0x00 && e[0] != 0x80)) continue;
+    if (!part || e[0] == 0x80) part = e;
+  }
+  if (part) {
+    uint32_t lba = part[8] | (part[9] << 8) | (part[10] << 16) | ((uint32_t)part[11] << 24);
+    if (lba && diskRead(drive, (uint64_t)lba * 512, vbr, 512) == 512 && bpbGeometry(vbr, heads, sectors))
+      return true;
+    int eh = part[5] + 1, es = part[6] & 0x3f;
+    if (es >= 1 && eh >= 1) { *heads = eh; *sectors = es; return true; }
+  }
+  return bpbGeometry(mbr, heads, sectors);
+}
+
+
 void Machine::autoDetectDriveGeometry(int drive)
 {
   static const struct { uint16_t tracks; uint8_t sectors; uint8_t heads; } FLOPPYFORMATS[] = {
@@ -524,8 +560,18 @@ void Machine::autoDetectDriveGeometry(int drive)
       return;
     }
   }
-  // hard disk geometry (max ~528MB)
   constexpr int MAXCYL = 1024, MAXHEADS = 16, MAXSECTORS = 63;
+  // hard disk: use the geometry the image was formatted with. DOS converts LBA<->CHS with the
+  // heads/sectors in its BPB, so a BIOS geometry that differs (e.g. 16 heads vs an 8-head image)
+  // makes every read past cylinder 0 hit the wrong sector and the boot fails.
+  if (int geoH = 0, geoS = 0; detectImageGeometry(drive, &geoH, &geoS)) {
+    int c = (int)(m_diskSize[drive] / 512 / ((uint32_t)geoH * geoS));
+    m_diskCylinders[drive] = c < 1 ? 1 : (c > MAXCYL ? MAXCYL : c);
+    m_diskHeads[drive]     = geoH;
+    m_diskSectors[drive]   = geoS;
+    return;
+  }
+  // no usable MBR/BPB: derive a geometry from the size (max ~528MB)
   int c = 1, h = 1;
   int s = (int)(m_diskSize[drive] / 512);
   if (s > MAXSECTORS) { h = s / MAXSECTORS; s = MAXSECTORS; }
