@@ -39,6 +39,9 @@ void nesSetup() {
 
   nesScratch = (uint16_t *)malloc(NES_W * 8 * sizeof(uint16_t));
 
+#if BOARD_INPUT_USB
+  nesKeymapLoad();                                 // host key -> NES button overrides (/nes/keymap.txt)
+#endif
   nes::ppuReset();
   nes::nesBuildGrayPalette();   // for the VIDEO=MONO option
   nes::nesLoadFirstRom();   // scan SD root + load the first .nes (PRG/CHR malloc here)

@@ -106,6 +106,11 @@ static unsigned short lastPC, argument_addr;
 static unsigned char opcode, opflags, value8;
 static unsigned short value16, value16_2, result;
 
+// Conditional branch. Taken costs one more cycle, two if it lands on another page -- raster effects
+// (Rad Racer's road, status-bar splits) are cycle-counted loops built on exactly these.
+#define BRANCH(cond) do { if (cond) { unsigned short np_ = PC + argument_addr; \
+    instrCycles += 1 + (((np_ ^ PC) & 0xFF00) != 0); PC = np_; } } while (0)
+
 // Fast inline bus access for the CPU hot path: the common RAM ($0000-$1FFF, mirrored) and PRG
 // ROM ($8000-$FFFF) regions resolve inline, skipping the read8/write8 call + region-branch chain
 // that dominated per-instruction cost. PPU/APU/controller/mapper I/O still routes through the full
@@ -294,14 +299,18 @@ NES_HOT void cpuLoop() {
       case AD_ABS:
         argument_addr = cpuRead16(PC); PC += 2; break;
       case AD_ABSX:
-        argument_addr = cpuRead16(PC) + (unsigned short)X; PC += 2; break;
+        value16 = cpuRead16(PC); argument_addr = value16 + (unsigned short)X; PC += 2;
+        if (instrCycles == 4 && ((value16 ^ argument_addr) & 0xFF00)) instrCycles++;  // read crossed a page
+        break;
       case AD_IABX:
         argument_addr = cpuRead16(PC) + (unsigned short)X;
         value16 = (argument_addr + 1 & 0xFF00) | ((argument_addr + 1) & 0x00FF);
         argument_addr = (unsigned short)cpuRead(argument_addr) | ((unsigned short)cpuRead(value16) << 8);
         PC += 2; break;
       case AD_ABSY:
-        argument_addr = cpuRead16(PC) + (unsigned short)Y; PC += 2; break;
+        value16 = cpuRead16(PC); argument_addr = value16 + (unsigned short)Y; PC += 2;
+        if (instrCycles == 4 && ((value16 ^ argument_addr) & 0xFF00)) instrCycles++;  // read crossed a page
+        break;
       case AD_IMM:
         argument_addr = PC++; break;
       case AD_IND:
@@ -318,6 +327,7 @@ NES_HOT void cpuLoop() {
         argument_addr = (unsigned short)cpuRead(PC++);
         value16 = (argument_addr & 0xFF00) | ((argument_addr + 1) & 0x00FF);
         argument_addr = (unsigned short)cpuRead(argument_addr) | ((unsigned short)cpuRead(value16) << 8);
+        if (instrCycles == 5 && (((argument_addr & 0xFF) + Y) & 0x100)) instrCycles++;  // read crossed a page
         argument_addr += Y;
         break;
       case AD_REL:
@@ -372,13 +382,13 @@ NES_HOT void cpuLoop() {
       case 0x06: case 0x16: case 0x0E: case 0x1E:
         value16 = cpuRead(argument_addr); result = value16 << 1; setflags(); cpuWrite(argument_addr, result & 0xFF); break;
       // BCC
-      case 0x90: if (!(SR & SR_CARRY)) PC += argument_addr; break;
+      case 0x90: BRANCH(!(SR & SR_CARRY)); break;
       // BCS
-      case 0xB0: if ((SR & SR_CARRY)) PC += argument_addr; break;
+      case 0xB0: BRANCH((SR & SR_CARRY)); break;
       // BEQ
-      case 0xF0: if ((SR & SR_ZERO)) PC += argument_addr; break;
+      case 0xF0: BRANCH((SR & SR_ZERO)); break;
       // BNE
-      case 0xD0: if (!(SR & SR_ZERO)) PC += argument_addr; break;
+      case 0xD0: BRANCH(!(SR & SR_ZERO)); break;
       // BIT
       case 0x24: case 0x2C: case 0x34: case 0x3C:
         value8 = cpuRead(argument_addr); result = A & value8; setflags();
@@ -389,18 +399,18 @@ NES_HOT void cpuLoop() {
         value8 = cpuRead(argument_addr); result = A & value8;
         if (result == 0) SR |= 0x02; else SR &= 0xfd; break;
       // BMI
-      case 0x30: if ((SR & SR_NEG)) PC += argument_addr; break;
+      case 0x30: BRANCH((SR & SR_NEG)); break;
       // BPL
-      case 0x10: if (!(SR & SR_NEG)) PC += argument_addr; break;
+      case 0x10: BRANCH(!(SR & SR_NEG)); break;
       // BRK
       case 0x00:
         PC++; push16(PC); push8(SR | SR_BRK); SR |= SR_INT; PC = cpuRead16(0xFFFE); SR &= 0xF7; break;
       // BRA (65C02)
       case 0x80: PC += argument_addr; break;
       // BVC
-      case 0x50: if (!(SR & SR_OVER)) PC += argument_addr; break;
+      case 0x50: BRANCH(!(SR & SR_OVER)); break;
       // BVS
-      case 0x70: if (SR & SR_OVER) PC += argument_addr; break;
+      case 0x70: BRANCH(SR & SR_OVER); break;
       // CLC
       case 0x18: SR &= 0xFE; break;
       // CLD
@@ -560,9 +570,9 @@ NES_HOT void cpuLoop() {
 
     if (dmaStallCycles) { instrCycles += dmaStallCycles; dmaStallCycles = 0; }
     // Inlined ppuStep: the common per-instruction work is just an accumulate + compare;
-    // endScanline (the heavy per-scanline render) is still a call but fires only ~1/113 cycles.
+    // endScanline (draw the line at dot 256, next line at 341) is a call but fires only twice a line.
     dotAcc += instrCycles * 3;
-    while (dotAcc >= 341) { dotAcc -= 341; endScanline(); }
+    while (dotAcc >= dotNext) endScanline();
   }
 }
 

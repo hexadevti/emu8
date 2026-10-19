@@ -250,10 +250,17 @@ void sidWrite(uint8_t reg, uint8_t val) {
   sidreg[reg] = val;
 }
 
+// A 2/3-button joystick's extra buttons (bit0 = button 2 on POTX, bit1 = button 3 on POTY), from
+// the keyboard's joystick map. The CIA1 PA6/PA7 paddle-port select is not modelled: the buttons
+// read on either port.
+static volatile uint8_t sidJoyButtons = 0;
+void c64SetJoyButtons(uint8_t held) { sidJoyButtons = held & 3; }
+
 unsigned char sidRead(uint8_t reg) {
-  // POTX/POTY with nothing on the paddle lines read $FF. They used to read 0 -- which is what a
-  // 3-button joystick's buttons 2 and 3 pull them to, so programs that check those saw both held.
-  if (reg == 0x19 || reg == 0x1a) return 0xff;
+  // POTX/POTY with nothing on the paddle lines read $FF; a held button 2 / 3 pulls its line to
+  // +5V, which charges the pot capacitor at once: $00.
+  if (reg == 0x19) return (sidJoyButtons & 1) ? 0x00 : 0xff;
+  if (reg == 0x1a) return (sidJoyButtons & 2) ? 0x00 : 0xff;
   if (reg == 0x1b) return (uint8_t)(voice[2].out >> 4);     // OSC3: top 8 bits of voice 3's waveform
   if (reg == 0x1c) return (uint8_t)(voice[2].env >> 16);    // ENV3
   return 0;

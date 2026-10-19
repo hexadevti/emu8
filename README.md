@@ -197,6 +197,20 @@ to some components).
 - Loads `.prg` programs, `.d64` disk images and `.crt` cartridges (cartridge cold-reset + VIC raster
   IRQ work; bank-switched / EasyFlash cartridge types are still incomplete).
 - Optional boot-autoload of the last image.
+- **Remappable keyboard** — every host key (PicoCalc, USB, PC) maps to a C64 key, optionally forcing
+  SHIFT on or off. The built-in default is positional for letters/digits and types the PC keycap's
+  symbol for punctuation (`Shift-2` = `@`, `[` `]` `\` = `[` `]` `£`, `` ` `` = `←`); `Esc` = RUN/STOP,
+  `Tab`/`Ctrl` = CTRL, `Alt` = C=, `Home`/`End` = HOME/CLR, `Ins` = INST, `PgUp` = RESTORE, `F1`–`F8` =
+  F1–F8. To change a key, open the system menu → **CONFIG → KEYBOARD**: pick the key (or choose
+  "press a key to find it"), then the C64 key and its SHIFT ("show only changed keys" lists just your changes).
+  On the PicoCalc, KEYBOARD shows both keyboards as pictures: move over the PicoCalc's keys with the
+  arrows (or type a key to jump to it, Shift-F1 included; pressing Shift, or Enter on a Shift key,
+  switches to the Shift layer: F6–F9, Brk, Home, End, PgUp/PgDn, `!@#`…). The C64 picture lights the key
+  it presses, and SHIFT too when the C64's SHIFT is held; Enter or Tab moves to that picture to pick the
+  C64 key (or DEFAULT / NONE; Tab goes back), then Enter picks its SHIFT. Changes apply at once and are saved to
+  `/c64/keymap.txt`. You can also edit that file by hand — start from
+  [`docs/c64-keymap.txt`](docs/c64-keymap.txt) (the default, with the syntax); it is read when the C64 boots.
+  On the C64 the menu's CONFIG card also holds ROMS and HELP.
 
 ### NES
 
@@ -205,6 +219,12 @@ to some components).
   scanline IRQ). PRG is streamed from SD; large ROMs that exceed the DRAM budget are skipped with an
   on-screen note.
 - Analog stick / USB gamepad → controller 1.
+- **Remappable keyboard** — every host key (PicoCalc, USB, PC) can press any NES button. The default:
+  arrows = D-pad, `X` / `Z` = A / B, `Enter` / `Tab` = Start / Select, and `F2` / `F3` / `F4` / `F5` =
+  Start / Select / A / B. To change a key, open the system menu → **CONFIG → KEYBOARD**; on the PicoCalc
+  it shows its keyboard over an NES controller: pick the key, then the button on the controller (or
+  DEFAULT / NONE). Other boards show it as a list. Changes apply at once and are saved to
+  `/nes/keymap.txt`; to edit it by hand start from [`docs/nes-keymap.txt`](docs/nes-keymap.txt).
 
 ### Atari 2600
 
@@ -303,7 +323,7 @@ USB keyboard mapping (works on every platform):
 
 | Keys | Action |
 | --- | --- |
-| Letters / digits / symbols | Type into the active system (Apple keycode, C64 keyboard matrix, …) |
+| Letters / digits / symbols | Type into the active system (Apple keycode, C64 keyboard matrix — remappable, see [Commodore 64](#commodore-64), …) |
 | Arrow keys | Cursor / d-pad |
 | `F10` | Open / close the options menu (arrows navigate, `Enter` activates) |
 | `F11` | Apple **Reset** (CPU reset) |
@@ -486,8 +506,8 @@ on the device). Full setup, toolchain and status notes live in
    so downloads are copied there as is. The settings menu's ROMS page can point any of them at another file, or at none.
 3. Copy your images to the card root, mixing systems freely:
    - Apple: `.dsk` / `.do` / `.po` / `.hdv` / `.2mg`
-   - C64: `.prg` / `.d64` / `.crt`
-   - NES: `.nes`
+   - C64: `.prg` / `.d64` / `.crt` (optional keyboard map: `/c64/keymap.txt`, from [`docs/c64-keymap.txt`](docs/c64-keymap.txt))
+   - NES: `.nes` (optional keyboard map: `/nes/keymap.txt`, from [`docs/nes-keymap.txt`](docs/nes-keymap.txt))
    - Atari 2600: `.a26` / `.bin`
    - MSX1: `.rom` / `.mx1` / `.dsk` (plus `/roms/hotbit12.rom`, and `/roms/hb3600_disk.rom` for disks)
    - Sega Master System: `.sms` / `.bin`

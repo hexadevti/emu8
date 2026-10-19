@@ -30,6 +30,12 @@ bool msxSnapshot(SnapIO &io)
     if (io.loading) io.reject("MSX is not running"); else io.fail("MSX is not running");
     return false;
   }
+#if BOARD_HAS_MSX2
+  if (msx::isMsx2) {                                    // V9938 / mapper / RTC state is not serialised
+    if (io.loading) io.reject("Save states not supported in MSX2 mode"); else io.fail("Save states not supported in MSX2 mode");
+    return false;
+  }
+#endif
 
   // ---- identity -----------------------------------------------------------------------------------
   int32_t biosLen = msx::biosLen;

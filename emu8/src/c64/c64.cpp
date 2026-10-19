@@ -74,6 +74,10 @@ void c64Setup() {
   if (!c64::vicRec) c64Scratch = (uint16_t *)malloc(320 * 8 * sizeof(uint16_t));
   c64::ciaReset();
   c64::kbReset();
+#if BOARD_INPUT_USB
+  c64KeymapLoad();                                 // host key -> C64 key overrides (/c64/keymap.txt)
+  c64JoymapLoad();                                 // host key -> joystick overrides (/c64/joymap.txt)
+#endif
   c64::register1 = 0x37;
   c64::decodeRegister1(0x37 & 7);                  // default banking: BASIC + KERNAL + I/O
   // NOTE: SID/I2S is initialised LAST (after FSSetup) in setup() — the I2S DMA buffers must
@@ -444,6 +448,9 @@ void drawFrame(uint16_t frameColor) { (void)frameColor; }  // border drawn in c6
 
 // Touch keyboard -> CIA1 keyboard matrix (C-linkage wrapper for src/shared/touchkeyboard.cpp).
 void c64KeyMatrix(uint8_t row, uint8_t col, bool down) { c64::kbSetKey(row, col, down); }
+
+// The RESTORE key (host keyboard, via the keymap): one NMI, taken by cpuLoop between instructions.
+void c64Restore() { c64::c64RestoreReq = true; }
 
 // Joystick -> CIA1 (C-linkage wrapper for src/shared/joystick.cpp). mask is active-low.
 // Routed to port 2 ($DC00) or port 1 ($DC01) per the joyPort setting; the other port is released.

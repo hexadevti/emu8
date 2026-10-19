@@ -5,52 +5,29 @@
 static void analogJoystickTask(void *pvParameters);   // defined below; used by joystickSetup
 #endif
 
-void processJoystick(float speedAdjust)
+// Advance the Apple II paddle timers (558) by `cycles` CPU cycles after a $C070 trigger.
+// timerpdl0-3 are 0..JOY_MAX; the ROM's PREAD loop counts once per 11 cycles, so the timeout is
+// timerpdl * 255*11/JOY_MAX cycles: JOY_MID reads 127, JOY_MAX reads 255, whatever loop the game
+// uses to time it. (Counting instructions instead made the result depend on the loop's
+// instruction mix, so a game's own read routine could see a centred stick as off-centre.)
+static inline void paddleStep(bool &reset, bool &cg, int &count, float timer, int cycles)
 {
-    if (CgReset0)
+    if (!reset) return;
+    count += cycles;
+    if (count >= (int)(timer * (255.0f * 11.0f / JOY_MAX)))
     {
-        joystickCycles0++;
+        count = 0;
+        cg = false;
+        reset = false;
     }
-    if (CgReset1)
-    {
-        joystickCycles1++;
-    }
-    if (CgReset2)
-    {
-        joystickCycles2++;
-    }
-    if (CgReset3)
-    {
-        joystickCycles3++;
-    }
+}
 
-    if (joystickCycles0 >= static_cast<int>(timerpdl0 * speedAdjust))
-    {
-        joystickCycles0 = 0;
-        Cg0 = false;
-        CgReset0 = false;
-    }
-
-    if (joystickCycles1 >= static_cast<int>(timerpdl1 * speedAdjust))
-    {
-        joystickCycles1 = 0;
-        Cg1 = false;
-        CgReset1 = false;
-    }
-
-    if (joystickCycles2 >= static_cast<int>(timerpdl2 * speedAdjust))
-    {
-        joystickCycles2 = 0;
-        Cg2 = false;
-        CgReset2 = false;
-    }
-
-    if (joystickCycles3 >= static_cast<int>(timerpdl3 * speedAdjust))
-    {
-        joystickCycles3 = 0;
-        Cg3 = false;
-        CgReset3 = false;
-    }
+void processJoystick(int cycles)
+{
+    paddleStep(CgReset0, Cg0, joystickCycles0, timerpdl0, cycles);
+    paddleStep(CgReset1, Cg1, joystickCycles1, timerpdl1, cycles);
+    paddleStep(CgReset2, Cg2, joystickCycles2, timerpdl2, cycles);
+    paddleStep(CgReset3, Cg3, joystickCycles3, timerpdl3, cycles);
 }
 
 // Per-platform gameplay mapping, shared by BOTH input backends (ADC analog joystick on the

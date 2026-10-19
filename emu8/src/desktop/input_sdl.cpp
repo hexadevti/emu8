@@ -135,6 +135,12 @@ static SDL_Scancode scancodeForChar(char c) {
   if (c == '0') return SDL_SCANCODE_0;
   if (c == ' ') return SDL_SCANCODE_SPACE;
   if (c == '\n') return SDL_SCANCODE_RETURN;
+  static const char kPunct[] = "-=[]\\;'`,./";   // US-layout punctuation keys, unshifted
+  static const SDL_Scancode kPunctSc[] = {
+    SDL_SCANCODE_MINUS, SDL_SCANCODE_EQUALS, SDL_SCANCODE_LEFTBRACKET, SDL_SCANCODE_RIGHTBRACKET,
+    SDL_SCANCODE_BACKSLASH, SDL_SCANCODE_SEMICOLON, SDL_SCANCODE_APOSTROPHE, SDL_SCANCODE_GRAVE,
+    SDL_SCANCODE_COMMA, SDL_SCANCODE_PERIOD, SDL_SCANCODE_SLASH};
+  if (const char *p = c ? strchr(kPunct, c) : nullptr) return kPunctSc[p - kPunct];
   return SDL_SCANCODE_UNKNOWN;
 }
 static void desktopTypeInject() {
@@ -145,11 +151,15 @@ static void desktopTypeInject() {
   static size_t idx = 0; static bool down = false;
   if (fr < at || (fr % 6) != 0) return;         // wait for boot, then ~1 transition / 6 frames
   if (!s[idx]) return;
-  // {F10} {F1} {F5} {UP} {DOWN} {LEFT} {RIGHT} {ENTER} {ESC} {DEL} name a special key; {WAIT} idles one step.
+  // {F10} {F1} {F5} {UP} {DOWN} {LEFT} {RIGHT} {ENTER} {ESC} {DEL} {HOME} {END} {INS} {PGUP} {PGDN}
+  // {TAB} {BKSP} name a special key; {WAIT} idles one step. Punctuation types its US-layout key.
   static const struct { const char *name; SDL_Scancode sc; } kTok[] = {
     {"F10", SDL_SCANCODE_F10}, {"F1", SDL_SCANCODE_F1}, {"F5", SDL_SCANCODE_F5}, {"UP", SDL_SCANCODE_UP}, {"DOWN", SDL_SCANCODE_DOWN},
     {"LEFT", SDL_SCANCODE_LEFT}, {"RIGHT", SDL_SCANCODE_RIGHT}, {"ENTER", SDL_SCANCODE_RETURN},
-    {"ESC", SDL_SCANCODE_ESCAPE}, {"DEL", SDL_SCANCODE_DELETE}, {"WAIT", SDL_SCANCODE_UNKNOWN}};
+    {"ESC", SDL_SCANCODE_ESCAPE}, {"DEL", SDL_SCANCODE_DELETE}, {"HOME", SDL_SCANCODE_HOME},
+    {"END", SDL_SCANCODE_END}, {"INS", SDL_SCANCODE_INSERT}, {"PGUP", SDL_SCANCODE_PAGEUP},
+    {"PGDN", SDL_SCANCODE_PAGEDOWN}, {"TAB", SDL_SCANCODE_TAB}, {"BKSP", SDL_SCANCODE_BACKSPACE},
+    {"WAIT", SDL_SCANCODE_UNKNOWN}};
   size_t len = 1;
   SDL_Scancode sc = SDL_SCANCODE_UNKNOWN;
   if (s[idx] == '{') {

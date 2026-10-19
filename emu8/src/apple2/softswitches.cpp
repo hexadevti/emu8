@@ -157,6 +157,9 @@ char processSoftSwitches(ushort address, char value, bool Read_Write)   // defau
     return (char)(Cg3 ? 0x80 : 0x00);
     break;
   case 0xc070:
+    // Every trigger restarts the count. Without this, a read abandoned mid-ramp left its counter
+    // part-way up and the next read timed out early (a centred stick read as up/left).
+    joystickCycles0 = joystickCycles1 = 0;
     CgReset0 = true;
     CgReset1 = true;
     // CgReset2 = true;

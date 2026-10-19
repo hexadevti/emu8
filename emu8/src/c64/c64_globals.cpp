@@ -18,6 +18,7 @@ uint8_t register1 = 0x37;
 uint8_t *cartROML = nullptr, *cartROMH = nullptr;
 bool cartActive = false, cartExrom = true, cartGame = true;
 volatile bool c64ResetReq = false;
+volatile bool c64RestoreReq = false;
 
 // VIC-II state
 uint8_t vicreg[0x40];

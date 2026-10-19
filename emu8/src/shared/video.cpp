@@ -207,7 +207,7 @@ static void hintText(const char **keys, const char **joy)
                 : "Ctrl-F1 options   Ctrl-F6 systems";
 #endif
   switch (currentPlatform) {
-    case PLATFORM_APPLE2: *joy = "Arrows joystick   Space/F4 btn0   F5 btn1";   break;
+    case PLATFORM_APPLE2: *joy = "Arrows joystick   Space/F5 btn0   F4 btn1";   break;
     case PLATFORM_C64:   *joy = "Arrows joystick   Space fire";                break;
     case PLATFORM_NES:   *joy = "Arrows dpad   X=A  Z=B  Tab select  Enter start"; break;
     case PLATFORM_ATARI: *joy = "Arrows stick   Space fire   F4 select   F3 reset"; break;
@@ -342,7 +342,7 @@ uint16_t last_x = 0;
 #define SPLASH_BTN_H   40
 #define SPLASH_ROW_GAP 4
 #define SPLASH_COLS    6
-struct SplashSystem { const char *label; uint8_t platform; int8_t iie; const char *why; };
+struct SplashSystem { const char *label; uint8_t platform; int8_t iie; const char *why; };   // iie: model (Apple IIe / MSX2), -1 = any
 #define SPLASH_SETUP 0xFF   // "platform" of the SETUP button: opens the general settings (optionsui.cpp)
 static const SplashSystem splashSystems[] = {
   { "II+",   PLATFORM_APPLE2,   0, "SOON"   },
@@ -350,12 +350,12 @@ static const SplashSystem splashSystems[] = {
   { "C64",   PLATFORM_C64,     -1, "SOON"   },
   { "NES",   PLATFORM_NES,     -1, "SOON"   },
   { "ATARI", PLATFORM_ATARI,   -1, "SOON"   },
-  { "MSX",   PLATFORM_MSX,     -1, "SOON"   },
+  { "MSX",   PLATFORM_MSX,      0, "SOON"   },
   { "SMS",   PLATFORM_SMS,     -1, "SOON"   },
   { "PCXT",  PLATFORM_PCXT,    -1, "SOON"   },
   { "COLECO", PLATFORM_COLECO, -1, "SOON"   },
   { "ZX48",  PLATFORM_ZX,      -1, "SOON"   },
-  { "SD MGR", PLATFORM_SDMANAGER, -1, "N/A"  },   // not an emulator: the SD card file manager
+  { "MSX2",  PLATFORM_MSX,      1, "SOON"   },   // the MSX2 BIOS slot (SD Manager moved to SETUP)
   { "SETUP", SPLASH_SETUP,          -1, ""     },   // not a system: the general settings (Ctrl-F1)
 };
 #define SPLASH_N     ((int)(sizeof(splashSystems) / sizeof(splashSystems[0])))
@@ -391,7 +391,8 @@ static bool splashEnabled(int i)
   // 30K of system ROM is ~119K of heap, which some boards have and the RP2040 does not. memoryAlloc()
   // is what finds out, by trying, so the first IIe boot on a board that cannot hold one comes up as
   // a II+ and sets this; from then on the button is greyed "NO RAM" instead of lying.
-  if (splashSystems[i].iie > 0 && apple2IIeUnavailable) return false;
+  if (splashSystems[i].iie > 0 && splashSystems[i].platform == PLATFORM_APPLE2 && apple2IIeUnavailable) return false;
+  if (splashSystems[i].iie > 0 && splashSystems[i].platform == PLATFORM_MSX && !BOARD_HAS_MSX2) return false;
   switch (splashSystems[i].platform) {
     case SPLASH_SETUP:      return true;
 #if defined(BOARD_DESKTOP)
@@ -413,13 +414,17 @@ static bool splashEnabled(int i)
   }
 }
 
-// Which button the running system is. The Apple entries match on AppleIIe as well, so a II+
-// session highlights II+ and a IIe session highlights IIe.
+// The model flag an entry's `iie` field is matched against: AppleIIe for the Apple, Msx2Selected
+// for the MSX.
+static bool splashModel(uint8_t platform) { return platform == PLATFORM_MSX ? Msx2Selected : AppleIIe; }
+
+// Which button the running system is. The Apple and MSX entries match on the model as well, so a
+// II+ session highlights II+ and a IIe session highlights IIe (MSX / MSX2 the same way).
 static int splashCurrentIndex()
 {
   for (int i = 0; i < SPLASH_N; i++)
     if (splashSystems[i].platform == currentPlatform &&
-        (splashSystems[i].iie < 0 || (splashSystems[i].iie != 0) == (bool)AppleIIe))
+        (splashSystems[i].iie < 0 || (splashSystems[i].iie != 0) == splashModel(currentPlatform)))
       return i;
   return 0;
 }
@@ -502,9 +507,12 @@ static void splashSelect(int idx)
   // changed, since setup() must re-init the new core / rebuild the Apple memory map).
   int     prevIdx  = splashCurrentIndex();
   uint8_t prevPlat = currentPlatform;
-  bool    prevIIe  = AppleIIe;
+  bool    prevIIe  = AppleIIe, prevMsx2 = Msx2Selected;
   currentPlatform = splashSystems[idx].platform;   // drives the highlight in splashDrawBtn below
-  if (splashSystems[idx].iie >= 0) AppleIIe = (splashSystems[idx].iie != 0);
+  if (splashSystems[idx].iie >= 0) {
+    if (currentPlatform == PLATFORM_MSX) Msx2Selected = (splashSystems[idx].iie != 0);
+    else AppleIIe = (splashSystems[idx].iie != 0);
+  }
   splashCursor = -1;                   // ...so stop overriding it with the keyboard cursor
   if (prevIdx != idx) splashDrawBtn(prevIdx, splashEnabled(prevIdx));
   splashDrawBtn(idx, splashEnabled(idx));
@@ -523,7 +531,7 @@ static void splashSelect(int idx)
     ESP.restart();
   }
 
-  if (prevPlat == currentPlatform && prevIIe == (bool)AppleIIe) { splashFinish(); return; }
+  if (prevPlat == currentPlatform && prevIIe == (bool)AppleIIe && prevMsx2 == Msx2Selected) { splashFinish(); return; }
   // Switching systems needs a reboot to re-init. ESP.restart() (an on-chip reset from firmware)
   // reboots this board cleanly - unlike the host-side RTS reset which wedges it. currentPlatform
   // and AppleIIe are already the new ones; persist them so setup() builds the saved system.

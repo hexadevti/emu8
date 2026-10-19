@@ -282,7 +282,9 @@ static bool pcMountInto(const char* path, int slot) {
   g_pcxtMachine.setDriveImage(slot, path);
   if (slot == 0) selectedPcFileName = path; else selectedPcHdFileName = path;
   pcUpdateBootDrive();   // floppy first, else boot the hard disk
-  sprintf(buf, "PCXT: mounted %s into %s", path, slot == 0 ? "A:" : "C:");
+  sprintf(buf, "PCXT: mounted %s into %s (C/H/S %u/%u/%u)", path, slot == 0 ? "A:" : "C:",
+          (unsigned)g_pcxtMachine.diskCylinders(slot), (unsigned)g_pcxtMachine.diskHeads(slot),
+          (unsigned)g_pcxtMachine.diskSectors(slot));
   printLog(buf);
   return true;
 }

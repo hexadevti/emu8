@@ -513,6 +513,16 @@
 #define BOARD_HAS_MSX_CORE 1
 #define BOARD_HAS_SMS_CORE 1
 
+// MSX2 (V9938 VDP + 128K VRAM, memory mapper, expanded slot 3 with the SUB-ROM, RP5C01 clock): the
+// MSX core switches to it at boot when the BIOS on the ROMS page is an MSX2 one (version byte 0x2D
+// >= 1). Only the PicoCalc ESP32-P4 (and the desktop build, for testing): the 256K mapper + 128K VRAM
+// + 512x212 framebuffer want PSRAM-class memory.
+#if defined(BOARD_PICOCALC_P4) || defined(BOARD_DESKTOP)
+#define BOARD_HAS_MSX2 1
+#else
+#define BOARD_HAS_MSX2 0
+#endif
+
 // The ColecoVision is assembled from the other two Z80 machines' parts -- the MSX TMS9918A VDP and
 // the SMS SN76489 PSG -- so it exists wherever both of them do. Its own state is 1K RAM + 16K VRAM
 // on the heap, with the 8K BIOS and the cartridge in flash on the PicoCalc (BOARD_ROM_IN_FLASH).
