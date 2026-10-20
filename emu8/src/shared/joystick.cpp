@@ -1,4 +1,5 @@
 #include "../../emu.h"
+#include "apple2joycal.h"
 #if BOARD_INPUT_ANALOG
 #include "driver/adc.h"   // adc1_config_*: re-assert the ADC config so analogRead doesn't freeze
 
@@ -192,6 +193,7 @@ void joystickSetup()
     timerpdl1 = JOY_MID;
     joyCenterX = 4095 - analogRead(ANALOG_X_PIN);
     joyCenterY = 4095 - analogRead(ANALOG_Y_PIN);
+    apple2JoycalDefaults(0, joyCenterX, joyCenterY, 4095);   // uncalibrated: the rest position read now
     pinMode(ANALOG_X_PIN, INPUT);
     pinMode(ANALOG_Y_PIN, INPUT);
     pinMode(DIGITAL_BUTTON12_PIN, INPUT);
@@ -241,6 +243,7 @@ static void buttonUp(uint8_t btn)
 
 static void changeDirection(bool x, uint8_t dir)
 {
+    if (OptionsWindow && apple2JoycalBusy()) return;   // calibrating: the stick moves, the menu doesn't
     if (OptionsWindow)
     {
         if (x)
@@ -301,18 +304,13 @@ static void analogJoystickTask(void *pvParameters)
         // Serial.printf(" Pb0=%d, Pb1=%d Pb2=%d, Pb3=%d (%d)\n", Pb0, Pb1, Pb2, Pb3, digital_button1);
         //Serial.printf("timer PDL(0)=%f PDL(1)=%f\n", timerpdl0, timerpdl1);
         // Serial.println(buf);
+        apple2JoycalFeed(analogX, analogY);
         if (joystick)
         {
-            if (analogX > joyCenterX) {
-               timerpdl0 = 512 + ((analogX - joyCenterX) * 512 / (4095 - joyCenterX)) ;
-            } else {
-               timerpdl0 = 512 * analogX / joyCenterX;
-            }
-            if (analogY > joyCenterY) {
-               timerpdl1 = 512 + ((analogY - joyCenterY) * 512 / (4095 - joyCenterY)) ;
-            } else {
-               timerpdl1 = 512 * analogY / joyCenterY;
-            }
+            // Through the CONFIG > CALIBRATE ranges (apple2joycal.cpp): the boot rest position and
+            // the full ADC range until the stick is calibrated.
+            timerpdl0 = apple2JoycalPaddle(0, analogX);
+            timerpdl1 = apple2JoycalPaddle(1, analogY);
         }
     
         if (digital_button1 > 3000 && digital_button1 <= 4095)

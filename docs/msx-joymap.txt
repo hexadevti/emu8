@@ -1,0 +1,50 @@
+# emu8 - MSX1 joystick map
+#
+# Copy this file to the SD card as /msx/joymap.txt (or /msxjoymap.txt) and edit it to choose which
+# keys steer and fire the joystick in port 1. It is read when the MSX boots. Every line below is
+# the BUILT-IN DEFAULT, so this file as shipped changes nothing; only lines that differ from the
+# default count (up to 64 of them). Deleting a line does not unmap the key, it just leaves the
+# default; use "= NONE" to take a key off the stick. Errors are reported in the log
+# ("MSX joymap line N: ...") and the line is skipped.
+#
+# The MSX menu edits it too: CONFIG > JOYSTICK (on the PicoCalc a picture of its keyboard over an
+# MSX joystick: black base, orange stick, TRIG A and TRIG B; elsewhere a list). A change there is
+# live at once and rewrites /msx/joymap.txt with only the changed keys.
+#
+# The map is used while JOYSTICK is ON in the MSX menu. It applies to every keyboard that reaches
+# the MSX through the HID path: the PicoCalc's built-in keyboard, a USB keyboard (JC4827W543 /
+# JC1060P470), and the PC keyboard in the desktop build. A key on the stick still types through
+# docs/msx-keymap.txt, as the arrows and Space always do on an MSX (BASIC reads them as STICK(0)
+# and STRIG(0)).
+#
+# FORMAT
+#   <host key> = <joystick action>      # comment
+#
+#   Any number of keys may pull the same line; keys held together add up (UP and LEFT = UP+LEFT).
+#
+# HOST KEYS (names are not case-sensitive; the same as docs/msx-keymap.txt, plus SHIFT for either
+# Shift key)
+#
+# JOYSTICK ACTIONS
+#   UP DOWN LEFT RIGHT
+#   UP+LEFT UP+RIGHT DOWN+LEFT DOWN+RIGHT   a diagonal on one key
+#   TRIG_A TRIG_B    the two buttons (FIRE / FIRE2 also accepted)
+#   NONE             the key does not touch the stick
+#
+# Example: WASD + J / K
+#   W = UP
+#   A = LEFT
+#   S = DOWN
+#   D = RIGHT
+#   J = TRIG_A
+#   K = TRIG_B
+
+# ---- the stick ----
+UP = UP
+DOWN = DOWN
+LEFT = LEFT
+RIGHT = RIGHT
+
+# ---- the buttons ----
+SPACE = TRIG_A
+# PicoCalc only: SHIFT = TRIG_A (both Shifts flank the bottom row, next to the cursor keys)

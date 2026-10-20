@@ -1,4 +1,5 @@
 #include "emu.h"
+#include "src/shared/apple2joycal.h"   // A2CAL_ANALOG, apple2JoycalLoad
 
 void setup() {
   if (LED_PIN >= 0) {
@@ -168,6 +169,13 @@ void setup() {
     bootProgressStep("Mounting SD card");
     FSSetup();
     apple2LoadRoms();  // system ROMs from /roms/apple2 (sets apple2RomLoadFailed -> halt on failure)
+#if BOARD_INPUT_USB
+    apple2KeymapLoad();  // host key -> Apple key overrides (/apple2/keymap.txt)
+    apple2JoymapLoad();  // host key -> joystick overrides (/apple2/joymap.txt)
+#endif
+#if A2CAL_ANALOG
+    apple2JoycalLoad();  // analog stick calibration (/apple2/joycal.txt)
+#endif
     // Either failure means the 6502 is not going to run, so skip the two SD scans and go straight
     // to the warning screen. apple2RomLoadFailed belongs in this test as much as the alloc one: a
     // ROM that would not fit leaves the heap nearly empty, and scanning the card from there ran it

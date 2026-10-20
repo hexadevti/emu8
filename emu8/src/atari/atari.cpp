@@ -42,6 +42,9 @@ void atariSetup() {
   if (atari::frontBuf) memset(atari::frontBuf, 0, A_W * A_H);
   else printLog("Atari: no heap for frame snapshot; rendering live buffer");
 
+#if BOARD_INPUT_USB
+  atariKeymapLoad();                 // host key -> stick / switch overrides (/atari/keymap.txt)
+#endif
   atari::tiaReset();
   atari::riotReset();
   atari::atariBuildGrayPalette();    // for the VIDEO=MONO option

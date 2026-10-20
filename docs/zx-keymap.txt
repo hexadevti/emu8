@@ -1,0 +1,135 @@
+# emu8 - ZX Spectrum 48K keyboard map
+#
+# Copy this file to the SD card as /zx/keymap.txt (or /zxkeymap.txt) and edit it to remap keys.
+# It is read when the Spectrum boots. Every line below is the BUILT-IN DEFAULT, so this file as
+# shipped changes nothing; only lines that differ from the default count (up to 64 of them).
+# Deleting a line does not unmap the key, it just leaves the default; use "= NONE" to make a key do
+# nothing. Errors are reported in the log ("ZX keymap line N: ...") and the line is skipped.
+#
+# The ZX menu edits it too: CONFIG > KEYBOARD (on the PicoCalc a picture of the 48K's rubber
+# keyboard, the red SYMBOL SHIFT words on the keys; elsewhere a list). A change there is live at
+# once and rewrites /zx/keymap.txt with only the changed keys.
+#
+# Applies to every keyboard that types into the Spectrum through the HID path: the PicoCalc's
+# built-in keyboard, a USB keyboard (JC4827W543 / JC1060P470), and the PC keyboard in the desktop
+# build.
+#
+# FORMAT
+#   <host key> = <Spectrum key> [+CAPS | -CAPS | +SYMBOL]      # comment
+#
+#   +CAPS     hold CAPS SHIFT while the key is down              (BACKSPACE = 0 +CAPS, DELETE)
+#   -CAPS     release CAPS SHIFT while the key is down
+#   +SYMBOL   hold SYMBOL SHIFT (and release CAPS SHIFT)         (COMMA = N +SYMBOL, ',')
+#   neither   SHIFT is passed through as typed (host SHIFT = CAPS SHIFT)
+#
+#   "SHIFT+<host key>" is a rule for that key typed with SHIFT; it wins over the plain rule for the
+#   key, and releases CAPS SHIFT unless +CAPS is given. A key with no SHIFT+ rule gets CAPS SHIFT
+#   when it is shifted on the host (so Shift-1 is EDIT, Shift-0 DELETE, as on the Spectrum).
+#
+# HOST KEYS (names are not case-sensitive; the same as docs/c64-keymap.txt)
+#   A..Z  0..9  F1..F12  SPACE ENTER ESC BACKSPACE TAB DELETE INSERT HOME END PAGE_UP PAGE_DOWN
+#   UP DOWN LEFT RIGHT PAUSE (= BREAK) CAPSLOCK PRINTSCREEN SCROLLLOCK NUMLOCK
+#   MINUS EQUAL LBRACKET RBRACKET BACKSLASH NONUS_HASH SEMICOLON APOSTROPHE GRAVE COMMA PERIOD SLASH
+#   KP_0..KP_9 KP_PLUS KP_MINUS KP_MULTIPLY KP_DIVIDE KP_PERIOD KP_ENTER
+#   CTRL  ALT        the modifiers (either side; ALT also takes the GUI/Windows key).
+#                    SHIFT is always CAPS SHIFT and cannot be remapped.
+#   0xNN             any HID usage code, in hex
+#
+# SPECTRUM KEYS (the 40 keys of the 48K)
+#   A..Z  0..9  ENTER SPACE  CAPS (CAPS_SHIFT)  SYMBOL (SYMBOL_SHIFT, SYM)
+#   (RETURN = ENTER, BREAK = SPACE also accepted; BREAK itself is SPACE +CAPS)
+#   NONE             the key does nothing
+#
+# With JOYSTICK on (ZX menu), a key with a Kempston rule (docs/zx-joymap.txt) moves the stick
+# instead of typing. The menu keys (Ctrl-F1 ...) are not remapped here.
+
+# ---- letters: where they are on the Spectrum ----
+A = A
+B = B
+C = C
+D = D
+E = E
+F = F
+G = G
+H = H
+I = I
+J = J
+K = K
+L = L
+M = M
+N = N
+O = O
+P = P
+Q = Q
+R = R
+S = S
+T = T
+U = U
+V = V
+W = W
+X = X
+Y = Y
+Z = Z
+
+# ---- digits (Shift-digit = CAPS SHIFT + digit: EDIT, CAPS LOCK, TRUE VIDEO, ..., DELETE) ----
+1 = 1
+2 = 2
+3 = 3
+4 = 4
+5 = 5
+6 = 6
+7 = 7
+8 = 8
+9 = 9
+0 = 0
+
+# ---- punctuation: the SYMBOL SHIFT chord printed in red on the key ----
+COMMA = N +SYMBOL              # ,
+SHIFT+COMMA = R +SYMBOL        # <
+PERIOD = M +SYMBOL             # .
+SHIFT+PERIOD = T +SYMBOL       # >
+SEMICOLON = O +SYMBOL          # ;
+SHIFT+SEMICOLON = Z +SYMBOL    # :
+APOSTROPHE = 7 +SYMBOL         # '
+SHIFT+APOSTROPHE = P +SYMBOL   # "
+MINUS = J +SYMBOL              # -
+SHIFT+MINUS = 0 +SYMBOL        # _
+EQUAL = L +SYMBOL              # =
+SHIFT+EQUAL = K +SYMBOL        # +
+SLASH = V +SYMBOL              # /
+SHIFT+SLASH = C +SYMBOL        # ?
+
+# ---- editing / control ----
+SPACE = SPACE
+ENTER = ENTER
+KP_ENTER = ENTER
+BACKSPACE = 0 +CAPS            # DELETE
+DELETE = 0 +CAPS
+ESC = SPACE +CAPS              # BREAK
+PAUSE = SPACE +CAPS
+TAB = SYMBOL +CAPS             # EXTENDED MODE
+CTRL = SYMBOL                  # SYMBOL SHIFT
+ALT = SYMBOL
+
+# ---- cursor: CAPS SHIFT + 5 / 6 / 7 / 8 ----
+LEFT = 5 +CAPS
+DOWN = 6 +CAPS
+UP = 7 +CAPS
+RIGHT = 8 +CAPS
+
+# ---- keypad ----
+KP_1 = 1
+KP_2 = 2
+KP_3 = 3
+KP_4 = 4
+KP_5 = 5
+KP_6 = 6
+KP_7 = 7
+KP_8 = 8
+KP_9 = 9
+KP_0 = 0
+KP_PLUS = K +SYMBOL            # +
+KP_MINUS = J +SYMBOL           # -
+KP_MULTIPLY = B +SYMBOL        # *
+KP_DIVIDE = V +SYMBOL          # /
+KP_PERIOD = M +SYMBOL          # .

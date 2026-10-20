@@ -13,6 +13,7 @@
 #include "../../emu.h"
 #include "ui_imgui.h"
 #include "picocalc_sim.h"
+#include "../shared/apple2joycal.h"
 #include <SDL.h>
 #include <cstring>
 #include <vector>
@@ -76,6 +77,17 @@ static void pollController() {
   auto b = [&](SDL_GameControllerButton btn) { return SDL_GameControllerGetButton(g_pad, btn) != 0; };
   int ax = SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_LEFTX);
   int ay = SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_LEFTY);
+  // Apple II: the left stick is the analog joystick, through CONFIG > CALIBRATE (apple2joycal.cpp).
+  // Only on a change, so a resting pad doesn't hold the paddles over the keyboard's arrows.
+  static bool calInit = false;
+  static int pax = 0x7FFFFFFF, pay = 0x7FFFFFFF;
+  if (!calInit) { apple2JoycalDefaults(-32768, 0, 0, 32767); calInit = true; }
+  apple2JoycalFeed(ax, ay);
+  if (currentPlatform == PLATFORM_APPLE2 && (ax != pax || ay != pay)) {
+    timerpdl0 = apple2JoycalPaddle(0, ax);
+    timerpdl1 = apple2JoycalPaddle(1, ay);
+  }
+  pax = ax; pay = ay;
   bool up    = b(SDL_CONTROLLER_BUTTON_DPAD_UP)    || ay < -12000;
   bool down  = b(SDL_CONTROLLER_BUTTON_DPAD_DOWN)  || ay >  12000;
   bool left  = b(SDL_CONTROLLER_BUTTON_DPAD_LEFT)  || ax < -12000;

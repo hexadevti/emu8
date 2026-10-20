@@ -21,6 +21,7 @@
 // (If the A/B feel is swapped for your pad, exchange GP_FACE_A and GP_FACE_B below.)
 
 #include "../../emu.h"
+#include "apple2joycal.h"
 
 // PicoCalc sets BOARD_INPUT_USB=1 to get usbkeyboard.cpp, but it has no USB host (and no
 // EspUsbHost library): src/picocalc/input_picocalc.cpp supplies usbGamepadSetup() instead.
@@ -165,10 +166,12 @@ private:
     Pb2 = sel && !menuCombo;                // Select (suppressed while the menu combo is held)
     Pb3 = sta && !menuCombo;                // Start
 
-    // Apple II: digital d-pad -> full-deflection paddle positions.
+    // Apple II: the axis bytes -> paddle positions, through the CONFIG > CALIBRATE ranges
+    // (apple2joycal.cpp). A digital d-pad (00 / 7F / FF) still lands on the ends and the centre.
+    apple2JoycalFeed(ax, ay);
     if (currentPlatform == PLATFORM_APPLE2) {
-      timerpdl0 = (joyY == 0) ? JOY_MIN : (joyY == 2) ? JOY_MAX : JOY_MID;
-      timerpdl1 = (joyX == 0) ? JOY_MIN : (joyX == 2) ? JOY_MAX : JOY_MID;
+      timerpdl0 = apple2JoycalPaddle(0, ax);
+      timerpdl1 = apple2JoycalPaddle(1, ay);
     }
 
     // Menu toggle (edge). The board has no physical buttons; touch is the primary way to open
@@ -177,9 +180,12 @@ private:
     _prevMenu = menuCombo;
 
     // In-menu navigation: left/right move the selection, up/down adjust, fire activates.
+    // While calibrating (CONFIG > CALIBRATE) the stick doesn't navigate; fire still moves it on.
     if (OptionsWindow) {
-      if (joyY != _pmY) { if (joyY == 0) optionsUiNav(-1);    else if (joyY == 2) optionsUiNav(+1); }
-      if (joyX != _pmX) { if (joyX == 0) optionsUiAdjust(-1); else if (joyX == 2) optionsUiAdjust(+1); }
+      if (!apple2JoycalBusy()) {
+        if (joyY != _pmY) { if (joyY == 0) optionsUiNav(-1);    else if (joyY == 2) optionsUiNav(+1); }
+        if (joyX != _pmX) { if (joyX == 0) optionsUiAdjust(-1); else if (joyX == 2) optionsUiAdjust(+1); }
+      }
       if (Pb0 && !_pmFire) optionsUiActivate();
     }
     _pmX = joyX; _pmY = joyY; _pmFire = Pb0;
@@ -202,6 +208,7 @@ static void usbGamepadTask(void *) {
 }
 
 void usbGamepadSetup() {
+  apple2JoycalDefaults(0x00, 0x80, 0x80, 0xFF);   // uncalibrated: the axis bytes' full range
   // Pin the USB host task to core 1 (with the emulator CPU), AWAY from the core-0 render loop.
   // The render loop's per-frame QSPI flush + XPT2046 touch SPI on core 0 were starving the USB
   // host (its task + ISR also ran on core 0), making the gamepad drop and the board reset-loop.

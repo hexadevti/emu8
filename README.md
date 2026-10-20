@@ -187,6 +187,12 @@ to some components).
 - **ProDOS hard disk** (block device) — large `.hdv` / `.po` / `.2mg` volumes.
 - Video: LoRes, HiRes, text 40/80-column, page 1/2, mixed/split, colour or mono.
 - Speaker, analog joystick/paddles, AppleMouse-style mouse plumbing.
+- **Remappable keyboard and joystick keys** — system menu → **CONFIG → KEYBOARD / JOYSTICK** (on the
+  PicoCalc a picture of the II+ or IIe keyboard, and of the Apple joystick). The IIe keyboard adds
+  DELETE, TAB, the four arrows, CAPS LOCK and the open-/solid-apple keys (Alt / right Alt). Saved to
+  `/apple2/keymap.txt` (II+), `/apple2/keymap-iie.txt` (IIe) and `/apple2/joymap.txt`; to edit by hand
+  start from [`docs/apple2-keymap.txt`](docs/apple2-keymap.txt),
+  [`docs/apple2e-keymap.txt`](docs/apple2e-keymap.txt) and [`docs/apple2-joymap.txt`](docs/apple2-joymap.txt).
 - Built-in **6502 debugger** (step / breakpoint / stack trace). System ROMs load from `/roms/` on the SD card (see [ROM sources](#rom-sources)) —
   on the PicoCalc that now includes the IIe ROM (`Apple2e_Enhanced.rom`), which is no longer built into the firmware.
 
@@ -248,6 +254,16 @@ to some components).
   `/roms/hb3600_disk.rom`. The **DISK ROM** setting is **AUTO** (on when a `.dsk` is mounted), **ON** or
   **OFF** (no drive, even with a disk mounted).
 - USB keyboard / on-screen keyboard for typing, joystick/gamepad on controller port 1.
+- **Remappable keyboard and joystick** — every host key (PicoCalc, USB, PC) can press any key of the MSX1
+  keyboard, with SHIFT held, released or as typed. The default follows the PC's US layout; F6–F9 and F11 are
+  SHIFT + F1–F5, End is CLS, Pause = STOP, Page Up = SELECT, Page Down = CODE, Alt = GRAPH. Open the
+  system menu → **CONFIG → KEYBOARD**; on the PicoCalc it shows its keyboard over an MSX1 keyboard
+  (Philips VG-8020 style): pick the key, then the MSX key (or DEFAULT / NONE), then the SHIFT state.
+  **CONFIG → JOYSTICK** does the same for the joystick in port 1 (drawn as a black MSX stick with an
+  orange top: TRIG A / TRIG B), used while **JOYSTICK** is on; the default is the arrows plus Space
+  (and, on the PicoCalc, either SHIFT) = TRIG A. Other boards show both as lists. Changes apply at once
+  and are saved to `/msx/keymap.txt` / `/msx/joymap.txt`; to edit them by hand start from
+  [`docs/msx-keymap.txt`](docs/msx-keymap.txt) and [`docs/msx-joymap.txt`](docs/msx-joymap.txt).
 
 ### Sega Master System
 
@@ -256,6 +272,12 @@ to some components).
 - Boots cartridge ROMs directly at `PC=0x0000` — **no BIOS** needed. **Sega memory mapper** for
   bank-switched carts; `.sms` / `.bin` images.
 - 8-way d-pad + two fire buttons on controller port 1; **F11** = the SMS **PAUSE** button (NMI).
+- **Remappable keyboard** — every host key (PicoCalc, USB, PC) can press any SMS pad button. The
+  default: arrows = D-pad, `Space` / `Z` = button 1 (START), `X` = button 2, and on the PicoCalc
+  `F4` / `F5` = 1 / 2. To change a key, open the system menu → **CONFIG → KEYBOARD**; on the PicoCalc
+  it shows its keyboard over an SMS control pad: pick the key, then the button on the pad (or
+  DEFAULT / NONE). Other boards show it as a list. Changes apply at once and are saved to
+  `/sms/keymap.txt`; to edit it by hand start from [`docs/sms-keymap.txt`](docs/sms-keymap.txt).
 
 ### ZX Spectrum 48K
 
@@ -269,12 +291,29 @@ to some components).
 - USB keyboard: `Shift` = CAPS SHIFT, `Ctrl`/`Alt` = SYMBOL SHIFT, `Backspace` = DELETE, `Esc` = BREAK,
   arrows = cursor keys (Kempston stick + `Space` fire when **JOYSTICK** is on), common punctuation is
   translated to its SYMBOL SHIFT chord, `F12` = reset.
+- **Remappable keyboard and joystick** — every host key (PicoCalc, USB, PC) can press any of the 48K's
+  40 keys, with CAPS SHIFT held or released or SYMBOL SHIFT held (the default is the line above). Open
+  the system menu → **CONFIG → KEYBOARD**; on the PicoCalc it shows its keyboard over the Spectrum's
+  rubber keyboard (the red SYMBOL SHIFT words on the keys): pick the key, then the Spectrum key (or
+  DEFAULT / NONE), then AS TYPED / +CAPS / -CAPS / +SYMBOL. **CONFIG → JOYSTICK** does the same for the
+  Kempston stick (drawn as a Cheetah 125+: trigger and both base buttons = FIRE), used while
+  **JOYSTICK** is on; a key on the stick does not type. Other boards show both as lists. Changes apply
+  at once and are saved to `/zx/keymap.txt` / `/zx/joymap.txt`; to edit them by hand start from
+  [`docs/zx-keymap.txt`](docs/zx-keymap.txt) and [`docs/zx-joymap.txt`](docs/zx-joymap.txt).
 
 ### ColecoVision
 
 - **Z80** CPU with the **TMS9918** VDP (shared with the MSX core) and the **SN76489** PSG (shared with the SMS core).
 - Needs the ColecoVision BIOS on the SD card at `/roms/coleco.rom`; loads `.col` / `.rom` / `.bin` cartridges.
 - Arrows = joystick, `Space`/`F4` = left fire, `X`/`F5` = right fire, `0`–`9` = keypad, `-` = `*`, `=` = `#`, `F3` = reset.
+- **Remappable keyboard** — every host key (PicoCalc, USB, PC) can press any hand-controller button:
+  the stick, the two side buttons and the 12 keypad keys. The default is the line above, plus
+  `Z` = left fire, the numeric keypad, and `Shift`+`8` / `Shift`+`3` = `*` / `#` (how the PicoCalc
+  types them). To change a key, open the system menu → **CONFIG → KEYBOARD**; on the PicoCalc it
+  shows its keyboard over a ColecoVision controller (stick, side buttons, keypad): pick the key, then
+  the button on the controller (or DEFAULT / NONE). Other boards show it as a list. Changes apply at
+  once and are saved to `/coleco/keymap.txt`; to edit it by hand start from
+  [`docs/coleco-keymap.txt`](docs/coleco-keymap.txt).
 
 ### PC-XT *(in development)*
 
@@ -509,9 +548,9 @@ on the device). Full setup, toolchain and status notes live in
    - C64: `.prg` / `.d64` / `.crt` (optional keyboard map: `/c64/keymap.txt`, from [`docs/c64-keymap.txt`](docs/c64-keymap.txt))
    - NES: `.nes` (optional keyboard map: `/nes/keymap.txt`, from [`docs/nes-keymap.txt`](docs/nes-keymap.txt))
    - Atari 2600: `.a26` / `.bin`
-   - MSX1: `.rom` / `.mx1` / `.dsk` (plus `/roms/hotbit12.rom`, and `/roms/hb3600_disk.rom` for disks)
+   - MSX1: `.rom` / `.mx1` / `.dsk` (plus `/roms/hotbit12.rom`, and `/roms/hb3600_disk.rom` for disks; optional maps: `/msx/keymap.txt` / `/msx/joymap.txt`, from [`docs/msx-keymap.txt`](docs/msx-keymap.txt) / [`docs/msx-joymap.txt`](docs/msx-joymap.txt))
    - Sega Master System: `.sms` / `.bin`
-   - ZX Spectrum 48K: `.sna` / `.z80` / `.tap` / `.tzx` (plus the ROM at `/roms/48.rom`)
+   - ZX Spectrum 48K: `.sna` / `.z80` / `.tap` / `.tzx` (plus the ROM at `/roms/48.rom`; optional maps: `/zx/keymap.txt` / `/zx/joymap.txt`, from [`docs/zx-keymap.txt`](docs/zx-keymap.txt) / [`docs/zx-joymap.txt`](docs/zx-joymap.txt))
    - PC-XT: `.img` / `.ima` / `.dsk` / `.vhd` / `.hdd` (plus the BIOS at `/roms/pcxt_bios.bin`)
 4. Insert the card, power on, pick a platform on the splash, then choose an image from its on-screen
    file browser.

@@ -85,6 +85,9 @@ void smsSetup() {
     return;                                              // romLen stays 0: smsLoop idles, overlay shows
   }
 
+#if BOARD_INPUT_USB
+  smsKeymapLoad();                                 // host key -> SMS pad button overrides (/sms/keymap.txt)
+#endif
   sms::machineWire();
   sms::machineReset();
 

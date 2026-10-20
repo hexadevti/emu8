@@ -125,6 +125,10 @@ void zxSetup() {
   zxBuildPalette(videoColor);
 
   loadRomFromSD();
+#if BOARD_INPUT_USB
+  zxKeymapLoad();
+  zxJoymapLoad();
+#endif
   zx::machineWire();
   zx::machineReset();
 

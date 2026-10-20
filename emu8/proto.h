@@ -111,7 +111,16 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
 void usbKeyboardReset();   // release held keys on device disconnect
 void c64KeymapLoad();      // c64keymap.cpp: read the C64 key overrides from the SD card
 void nesKeymapLoad();      // neskeymap.cpp: read the NES key overrides from the SD card
+void atariKeymapLoad();    // atarikeymap.cpp: read the Atari 2600 key overrides from the SD card
+void smsKeymapLoad();      // smskeymap.cpp: read the SMS key overrides from the SD card
+void colecoKeymapLoad();   // colecokeymap.cpp: read the ColecoVision key overrides from the SD card
 void c64JoymapLoad();      // c64joymap.cpp: read the C64 joystick key overrides from the SD card
+void msxKeymapLoad();      // msxkeymap.cpp: read the MSX key overrides from the SD card
+void msxJoymapLoad();      // msxjoymap.cpp: read the MSX joystick key overrides from the SD card
+void apple2KeymapLoad();   // apple2keymap.cpp: read the Apple II key overrides from the SD card
+void apple2JoymapLoad();   // apple2joymap.cpp: read the Apple II joystick key overrides from the SD card
+void zxKeymapLoad();       // zxkeymap.cpp: read the ZX Spectrum key overrides from the SD card
+void zxJoymapLoad();       // zxjoymap.cpp: read the ZX Spectrum joystick key overrides from the SD card
 #endif
 
 // touchkeyboard.cpp

@@ -12,7 +12,12 @@
 //                       with PC Shift/Ctrl/Alt mapped to the C64 SHIFT/CTRL/Commodore lines.
 //   * NES             : each key presses the controller-1 button neskeymap.cpp says (default:
 //                       arrows, X/Z = A/B, Enter/Tab = Start/Select, F2-F5), nesSetController().
-//   * Atari 2600      : map the d-pad + Space/Enter/Tab onto the stick + Fire/Reset/Select.
+//   * SMS             : each key presses the control pad 1 button smskeymap.cpp says (default:
+//                       arrows, Space/Z = 1, X = 2, PicoCalc F4/F5), smsSetInput().
+//   * ColecoVision    : each key presses the controller 1 stick / fire / keypad key colecokeymap.cpp
+//                       says (default: arrows, Space/Z/F4 + X/F5 fire, digits, Shift-8/3 = * / #).
+//   * Atari 2600      : each key presses the stick direction / Fire / Select / Reset atarikeymap.cpp
+//                       says (default: arrows, Space/X = Fire, Tab/Enter = Select/Reset).
 //
 // Settings menu (every platform): F12 opens/closes it; while it is open the arrow keys navigate
 // (Left/Right move the selection, Up/Down change the value) and Enter activates. F11 is a CPU
@@ -34,6 +39,15 @@
 #include "c64keymap.h"
 #include "c64joymap.h"
 #include "neskeymap.h"
+#include "atarikeymap.h"
+#include "smskeymap.h"
+#include "msxkeymap.h"
+#include "msxjoymap.h"
+#include "colecokeymap.h"
+#include "apple2keymap.h"
+#include "apple2joymap.h"
+#include "zxkeymap.h"
+#include "zxjoymap.h"
 
 // --- small helpers -------------------------------------------------------------------------
 static bool kbContains(const uint8_t *arr, uint8_t kc)
@@ -42,83 +56,102 @@ static bool kbContains(const uint8_t *arr, uint8_t kc)
   return false;
 }
 
-// US-layout HID keycode -> ASCII, reusing the library's conversion table.
-static char kbToAscii(uint8_t kc, bool shift)
-{
-  static const uint8_t conv[128][2] = { HID_KEYCODE_TO_ASCII };
-  if (kc >= 128) return 0;
-  return (char)conv[kc][shift ? 1 : 0];
-}
-
 // ============================ Apple II =====================================================
-// Only key-down matters: write an Apple keycode into keymem (bit7 = key available).
-static void appleKeyDown(uint8_t kc, bool shift, bool ctrl)
+// Which Apple key a host key presses comes from apple2keymap.cpp, what it does to the joystick from
+// apple2joymap.cpp: built-in defaults, overridden per key from the SD card or CONFIG > KEYBOARD /
+// JOYSTICK. Only key-down types: the Apple keyboard is a strobe (keymem, bit 7 = key available),
+// and what a key sends comes from the II+ encoder (apple2KeyCode) with the Apple's SHIFT / CTRL as
+// they are at that moment: the host's SHIFT, keys held on the Apple's SHIFT / CTRL, and the rule's
+// own +SHIFT / -SHIFT / +CTRL.
+//
+// The JOYSTICK option (appleArrows) picks what the keys on the stick do: JOY = only the paddles --
+// their keycodes are game commands (Lode Runner's table is ESC ^R ^A ^S ^J ^K ^H ^U ^X ^Y, so Up
+// (^K) flipped it to keyboard control) -- KBD = only the keys, BOTH = both at once. The buttons
+// work in every mode (open-apple / solid-apple are keys on a real Apple too), except that in KBD
+// a key that types (Space) is not also a button. Space is button 0 and still types in JOY: in
+// Karateka's KEYBOARD control mode Space is a control key.
+//
+// The Apple has no digital stick: games read the PADDLE TIMERS at $C064/$C065, which
+// processJoystick() ramps toward timerpdl0/timerpdl1 after a $C070 trigger. So a held direction is
+// a full deflection and neutral is centre -- the same three values usbgamepad.cpp writes.
+static uint8_t appleLast = 0;   // the last code typed: REPT sends it again
+
+// Is a typing rule's key one of the Apple's modifiers (held, not typed)?
+static bool appleIsMod(uint8_t code, uint8_t index)
 {
-  // ARROWS = JOY: the arrows are the stick and nothing else. Their keycodes are ^H/^U/^K/^J, which
-  // games read as COMMANDS -- Lode Runner's table is ESC ^R ^A ^S ^J ^K ^H ^U ^X ^Y, so Up (^K)
-  // flipped it to keyboard control (no more climbing), Down (^J) back, and Left/Right changed the
-  // game speed. KBD and BOTH deliver them.
-  if (appleArrows == APPLE_ARROWS_JOY && (kc == HID_KEY_ARROW_LEFT || kc == HID_KEY_ARROW_RIGHT ||
-                   kc == HID_KEY_ARROW_UP   || kc == HID_KEY_ARROW_DOWN)) return;
-  uint8_t code;
-  switch (kc) {
-    case HID_KEY_ARROW_LEFT:   code = 0x88; break;   // back / left
-    case HID_KEY_ARROW_RIGHT:  code = 0x95; break;   // forward / right
-    case HID_KEY_ARROW_UP:     code = 0x8B; break;
-    case HID_KEY_ARROW_DOWN:   code = 0x8A; break;
-    case HID_KEY_ENTER:
-    case HID_KEY_KEYPAD_ENTER: code = 0x8D; break;
-    case HID_KEY_ESCAPE:       code = 0x9B; break;
-    case HID_KEY_TAB:          code = 0x89; break;
-    case HID_KEY_BACKSPACE:    code = 0x88; break;   // backspace == left
-    case HID_KEY_DELETE:       code = 0xFF; break;
-    default: {
-      char c = kbToAscii(kc, shift);
-      if (c == 0) return;
-      if (c >= 'a' && c <= 'z') c -= 32;                  // Apple keyboard is upper-case
-      if (ctrl && c >= '@' && c <= '_') c = (char)(c & 0x1F);  // Ctrl masks to 0x00-0x1F
-      code = (uint8_t)c | 0x80;
-      break;
-    }
+  return a2kIsKey(code) && a2kIndex(code) == index;
+}
+
+// The Apple's SHIFT / CTRL as held through mapped keys (a host key on the Apple's SHIFT or CTRL).
+static void appleHeldMods(bool ctrl, bool lalt, bool ralt, const uint8_t *keys, bool *aShift, bool *aCtrl)
+{
+  auto hold = [&](uint8_t code) {
+    if (appleIsMod(code, A2K_CTRL)) *aCtrl = true;
+    if (appleIsMod(code, A2K_LSHIFT) || appleIsMod(code, A2K_RSHIFT)) *aShift = true;
+  };
+  if (ctrl) hold(apple2KeymapLookup(C64K_HID_CTRL, false));   // CTRL by default
+  if (lalt) hold(apple2KeymapLookup(C64K_HID_ALT, false));
+  if (ralt) hold(apple2KeymapLookup(A2K_HID_RALT, false));
+  for (int i = 0; i < 6; i++) if (keys[i]) hold(apple2KeymapLookup(keys[i], false));
+}
+
+static void appleKeyDown(uint8_t kc, bool shift, bool ctrl, bool lalt, bool ralt, const uint8_t *keys)
+{
+  // JOYSTICK = JOY: a key on the stick only steers (see above).
+  if (appleArrows == APPLE_ARROWS_JOY) {
+    const uint8_t j = apple2JoymapLookup(kc);
+    if (a2jIsAction(j) && (j & A2J_DIRS)) return;
   }
-  keymem = (char)code;
+  const uint8_t code = apple2KeymapLookup(kc, shift);
+  if (code == A2K_RESET) { cpuReset(); return; }
+  if (!a2kIsKey(code)) return;                         // no rule / NONE
+  const uint8_t index = a2kIndex(code);
+  if (index == A2K_REPT) { if (appleLast) keymem = (char)appleLast; return; }
+  if (index == A2K_CAPS) { apple2CapsLock = !apple2CapsLock; return; }   // IIe CAPS LOCK: a toggle
+  bool aShift = shift, aCtrl = false;
+  appleHeldMods(ctrl, lalt, ralt, keys, &aShift, &aCtrl);
+  switch (a2kMode(code)) {
+    case A2K_SHIFT_ON:  aShift = true;  break;
+    case A2K_SHIFT_OFF: aShift = false; break;
+    case A2K_CTRL_ON:   aCtrl  = true;  break;
+    default: break;
+  }
+  const uint8_t c = apple2KeyCode(index, aShift, aCtrl);
+  if (!c) return;                                      // CTRL / SHIFT: held, not typed
+  keymem = (char)(appleLast = c);
 }
 
-// Apple II keyboard-as-joystick. With the JOYSTICK option ON the arrow keys deflect the paddles
-// and Space is the button, exactly as the C64/MSX cores already do -- and exactly as the CYD's
-// PS/2 path has always done (keyboardPs2.cpp), which is why this was the one input backend where
-// turning JOYSTICK on did nothing at all on a USB/matrix keyboard.
-//
-// The Apple II has no digital stick: games read the PADDLE TIMERS at $C064/$C065, which
-// processJoystick() ramps toward timerpdl0/timerpdl1 after a $C070 trigger. So a held arrow is a
-// full deflection and neutral is centre -- the same three values usbgamepad.cpp writes.
-// The ARROWS option picks what the arrows drive: JOY = only the paddles (see appleKeyDown: their
-// ^H/^U/^K/^J codes are game commands in Lode Runner and others), KBD = only the keycodes, BOTH =
-// both at once. With the paddles on, Space fires and still reaches keymem as 0xA0.
-//
-// Space used to be the exception, on the theory that typing a space into a running game was worse
-// than useless. Karateka disproves it: pick its KEYBOARD control mode and Space is a control key,
-// so with JOYSTICK on -- which is the DEFAULT (globals.cpp) -- every key worked except that one,
-// with nothing on screen to suggest the emulator was eating it. A game that misreads a stray space
-// is the milder failure, and it is the one the arrows already accept.
-
-// The two paddle buttons. Alt / right-Alt are open-apple / solid-apple on a PC keyboard, but
-// the PicoCalc has one Alt and no right-Alt, so F5 (button 0) and F4 (button 1) are the buttons there. They are
-// continuous state (held, not tapped), which is why they are read from keys[] below rather
-// than in the key-down loop, and they work whether or not JOYSTICK mode is on -- open-apple
-// and solid-apple are ordinary Apple II keys, not just game buttons.
-static bool appleIsButtonKey(uint8_t kc)
+// The held keys -> paddles + buttons, through the joystick map. CTRL / ALT / RALT / SHIFT count as
+// host keys too (C64K_HID_CTRL / C64K_HID_ALT / A2K_HID_RALT / C64K_HID_SHIFT).
+static void appleApplyJoystick(bool shift, bool ctrl, bool lalt, bool ralt, const uint8_t *keys)
 {
-  return kc == HID_KEY_F4 || kc == HID_KEY_F5;
-}
-
-static void appleApplyJoystick(const uint8_t *keys)
-{
-  bool l = kbContains(keys, HID_KEY_ARROW_LEFT),  r = kbContains(keys, HID_KEY_ARROW_RIGHT);
-  bool u = kbContains(keys, HID_KEY_ARROW_UP),    d = kbContains(keys, HID_KEY_ARROW_DOWN);
-  timerpdl0 = l ? JOY_MIN : r ? JOY_MAX : JOY_MID;   // paddle 0 = X
-  timerpdl1 = u ? JOY_MIN : d ? JOY_MAX : JOY_MID;   // paddle 1 = Y
-  if (kbContains(keys, HID_KEY_SPACE)) Pb0 = true;   // fire (also open-apple; Alt still works)
+  const bool kbd = appleArrows == APPLE_ARROWS_KBD;
+  uint8_t pull = 0;
+  auto press = [&](uint8_t hid) {
+    // A key on the IIe's OPEN-APPLE / SOLID-APPLE (keyboard map) is that button, in every mode.
+    const uint8_t k = apple2KeymapLookup(hid, false);
+    const bool apple = a2kIsKey(k) && (a2kIndex(k) == A2K_OAPPLE || a2kIndex(k) == A2K_SAPPLE);
+    if (apple) pull |= a2kIndex(k) == A2K_OAPPLE ? A2J_BTN0 : A2J_BTN1;
+    const uint8_t j = apple2JoymapLookup(hid);
+    if (!a2jIsAction(j)) return;
+    if (kbd) {                                         // KBD: no stick; a key that types is no button
+      if (!apple && a2kIsKey(apple2KeymapLookup(hid, shift))) return;
+      pull |= j & ~A2J_DIRS;
+    } else {
+      pull |= j;
+    }
+  };
+  for (int i = 0; i < 6; i++) if (keys[i]) press(keys[i]);
+  if (ctrl)  press(C64K_HID_CTRL);
+  if (lalt)  press(C64K_HID_ALT);
+  if (ralt)  press(A2K_HID_RALT);
+  if (shift) press(C64K_HID_SHIFT);
+  // Both ways at once is centre, as on a real stick.
+  const uint8_t x = pull & (A2J_LEFT | A2J_RIGHT), y = pull & (A2J_UP | A2J_DOWN);
+  timerpdl0 = x == A2J_LEFT ? JOY_MIN : x == A2J_RIGHT ? JOY_MAX : JOY_MID;   // paddle 0 = X
+  timerpdl1 = y == A2J_UP   ? JOY_MIN : y == A2J_DOWN  ? JOY_MAX : JOY_MID;   // paddle 1 = Y
+  Pb0 = (pull & A2J_BTN0) != 0;                      // open-apple
+  Pb1 = (pull & A2J_BTN1) != 0;                      // solid-apple
 }
 
 // ============================ C64 keyboard matrix ========================================
@@ -250,143 +283,141 @@ static void nesApplyKeyboard(bool ctrl, bool alt, const uint8_t *keys)
 }
 
 // ============================ Atari 2600 ================================================
-// dirBits: bit0=Up bit1=Down bit2=Left bit3=Right, plus Fire / Select / Reset switches.
-static uint8_t atariDir = 0;
-static bool    atariFire = false, atariSelect = false, atariReset = false;
-static void atariApply() { atariSetInput(atariDir, atariFire, atariSelect, atariReset); }
-static bool atariKey(uint8_t kc, bool down)   // returns true if it was an Atari key
+// dirBits: bit0=Up bit1=Down bit2=Left bit3=Right, plus Fire / Select / Reset switches. Rebuilt
+// from the held keys + CTRL / ALT on every report (atarikeymap.cpp: a built-in default, overridden
+// per key by /atari/keymap.txt), so two keys on the same line don't release each other.
+static uint8_t atariKbBits = 0;
+static void atariApplyBits(uint8_t bits)
 {
-  switch (kc) {
-    case HID_KEY_ARROW_UP:    if (down) atariDir |= 0x01; else atariDir &= ~0x01; return true;
-    case HID_KEY_ARROW_DOWN:  if (down) atariDir |= 0x02; else atariDir &= ~0x02; return true;
-    case HID_KEY_ARROW_LEFT:  if (down) atariDir |= 0x04; else atariDir &= ~0x04; return true;
-    case HID_KEY_ARROW_RIGHT: if (down) atariDir |= 0x08; else atariDir &= ~0x08; return true;
-    case HID_KEY_SPACE:
-    case HID_KEY_X:           atariFire   = down; return true;
-    case HID_KEY_TAB:         atariSelect = down; return true;
-    case HID_KEY_ENTER:       atariReset  = down; return true;
-#if UI_PICOCALC
-    // PicoCalc function row (input_picocalc.cpp sends its F3 as HID F12): F5 = fire,
-    // F3 = Reset switch, F4 = Select switch.
-    case HID_KEY_F5:          atariFire   = down; return true;
-    case HID_KEY_F12:         atariReset  = down; return true;
-    case HID_KEY_F4:          atariSelect = down; return true;
-#endif
-  }
-  return false;
+  atariSetInput(bits & ATARIK_DIRS, bits & ATARIK_FIRE, bits & ATARIK_SELECT, bits & ATARIK_RESET);
+}
+static void atariApplyKeyboard(bool ctrl, bool alt, const uint8_t *keys)
+{
+  uint8_t bits = 0;
+  auto press = [&](uint8_t hid) { const uint8_t c = atariKeymapLookup(hid); if (atariKIsAction(c)) bits |= c; };
+  if (ctrl) press(C64K_HID_CTRL);
+  if (alt)  press(C64K_HID_ALT);
+  for (int i = 0; i < 6; i++) if (keys[i]) press(keys[i]);
+  if (bits != atariKbBits) { atariKbBits = bits; atariApplyBits(bits); }
 }
 
 // ============================ MSX keyboard matrix ========================================
-// Map a HID keycode to an MSX 8x11 matrix position in this codebase's (col,row) convention; fed to
-// msxKeyMatrix(row, col, down). col < 0 = unmapped. See the matrix table in src/msx/msx_ppi.cpp.
-struct MsxPos { int8_t col, row; };
-static MsxPos msxMap(uint8_t kc)
-{
-  switch (kc) {
-    case HID_KEY_A: return {6,2}; case HID_KEY_B: return {7,2}; case HID_KEY_C: return {0,3};
-    case HID_KEY_D: return {1,3}; case HID_KEY_E: return {2,3}; case HID_KEY_F: return {3,3};
-    case HID_KEY_G: return {4,3}; case HID_KEY_H: return {5,3}; case HID_KEY_I: return {6,3};
-    case HID_KEY_J: return {7,3}; case HID_KEY_K: return {0,4}; case HID_KEY_L: return {1,4};
-    case HID_KEY_M: return {2,4}; case HID_KEY_N: return {3,4}; case HID_KEY_O: return {4,4};
-    case HID_KEY_P: return {5,4}; case HID_KEY_Q: return {6,4}; case HID_KEY_R: return {7,4};
-    case HID_KEY_S: return {0,5}; case HID_KEY_T: return {1,5}; case HID_KEY_U: return {2,5};
-    case HID_KEY_V: return {3,5}; case HID_KEY_W: return {4,5}; case HID_KEY_X: return {5,5};
-    case HID_KEY_Y: return {6,5}; case HID_KEY_Z: return {7,5};
-    case HID_KEY_0: return {0,0}; case HID_KEY_1: return {1,0}; case HID_KEY_2: return {2,0};
-    case HID_KEY_3: return {3,0}; case HID_KEY_4: return {4,0}; case HID_KEY_5: return {5,0};
-    case HID_KEY_6: return {6,0}; case HID_KEY_7: return {7,0}; case HID_KEY_8: return {0,1};
-    case HID_KEY_9: return {1,1};
-    case HID_KEY_MINUS:        return {2,1};   // -
-    case HID_KEY_EQUAL:        return {3,1};   // =
-    case HID_KEY_BACKSLASH:    return {4,1};   // backslash
-    case HID_KEY_BRACKET_LEFT: return {5,1};   // [
-    case HID_KEY_BRACKET_RIGHT:return {6,1};   // ]
-    case HID_KEY_SEMICOLON:    return {7,1};   // ;
-    case HID_KEY_APOSTROPHE:   return {0,2};   // '
-    case HID_KEY_GRAVE:        return {1,2};   // `
-    case HID_KEY_COMMA:        return {2,2};   // ,
-    case HID_KEY_PERIOD:       return {3,2};   // .
-    case HID_KEY_SLASH:        return {4,2};   // /
-    case HID_KEY_ENTER:
-    case HID_KEY_KEYPAD_ENTER: return {7,7};   // RETURN
-    case HID_KEY_BACKSPACE:    return {5,7};   // BS
-    case HID_KEY_DELETE:       return {3,8};   // DEL
-    case HID_KEY_SPACE:        return {0,8};
-    case HID_KEY_ESCAPE:       return {2,7};
-    case HID_KEY_TAB:          return {3,7};
-    case HID_KEY_ARROW_LEFT:   return {4,8};
-    case HID_KEY_ARROW_UP:     return {5,8};
-    case HID_KEY_ARROW_DOWN:   return {6,8};
-    case HID_KEY_ARROW_RIGHT:  return {7,8};
-    case HID_KEY_F1: return {5,6}; case HID_KEY_F2: return {6,6}; case HID_KEY_F3: return {7,6};
-    case HID_KEY_F4: return {0,7}; case HID_KEY_F5: return {1,7};
-  }
-  return {-1, -1};
-}
-static inline void msxMatrix(int r, int c, bool d) { msxKeyMatrix(r, c, d); }
+// Each host key presses the MSX key msxkeymap.cpp names (a built-in default, overridden per key by
+// /msx/keymap.txt), fed to msxKeyMatrix(row, bit, down); see the matrix table in src/msx/msx_ppi.cpp.
+// Same scheme as the C64 above: the rule is resolved on key-down with that moment's SHIFT and
+// remembered with the key, the matrix is rebuilt from the held keys + modifiers on every report and
+// only the CHANGES are written, so two host keys on the same MSX key don't release each other.
+struct MsxHeld { uint8_t kc, code; };
+static MsxHeld  msxHeld[6];
+static uint8_t  msxDown[MSXK_KEYS / 8];   // matrix keys this keyboard holds; bit = row*8 + bit
 static inline void msxJoy(uint8_t m) { msxSetInput(m); }
-static void msxKeyDown(uint8_t kc) { MsxPos p = msxMap(kc); if (p.col >= 0) msxMatrix(p.row, p.col, true); }
-static void msxKeyUp(uint8_t kc)   { MsxPos p = msxMap(kc); if (p.col >= 0) msxMatrix(p.row, p.col, false); }
-static void msxApplyModifiers(bool shift, bool ctrl, bool alt)
+
+static void msxKeyDown(uint8_t kc, bool shift)
 {
-  msxMatrix(6, 0, shift);   // SHIFT (row6,col0)
-  msxMatrix(6, 1, ctrl);    // CTRL  (row6,col1)
-  msxMatrix(6, 2, alt);     // GRAPH (row6,col2) via Alt
+  const uint8_t code = msxKeymapLookup(kc, shift);
+  if (!msxkIsKey(code)) return;
+  for (auto &h : msxHeld) if (!h.kc) { h.kc = kc; h.code = code; return; }
 }
-static void msxApplyJoystick(const uint8_t *keys)   // active-low: b0 up b1 down b2 left b3 right b4 trgA
+static void msxKeyUp(uint8_t kc)
+{
+  for (auto &h : msxHeld) if (h.kc == kc) h.kc = 0;
+}
+
+// A key in the report that is not on the joystick: a keystroke, not steering.
+static bool msxHasTypingKey(const uint8_t *keys)
+{
+  for (int i = 0; i < 6; i++)
+    if (keys[i] && !c64jIsAction(msxJoymapLookup(keys[i]))) return true;
+  return false;
+}
+
+// Rebuild this keyboard's matrix keys from the held keys + modifiers and write the changes.
+static void msxApplyModifiers(bool shift, bool ctrl, bool alt, const uint8_t *keys)
+{
+  bool wantShift = shift;
+  // SHIFT on the joystick (the PicoCalc's default: TRIG A) fires when pressed alone and shifts
+  // when pressed with a character key -- the C64's rule, see c64ApplyModifiers.
+  if (shift && joystick && c64jIsAction(msxJoymapLookup(C64K_HID_SHIFT)) && !msxHasTypingKey(keys)) wantShift = false;
+
+  uint8_t want[MSXK_KEYS / 8] = {0};
+  auto hold = [&](uint8_t code) {
+    if (!msxkIsKey(code)) return;
+    const uint8_t i = msxkIndex(code);
+    want[i >> 3] |= 1 << (i & 7);
+    if (msxkShift(code) == MSXK_SHIFT_ON)  wantShift = true;    // the key's rule decides SHIFT
+    if (msxkShift(code) == MSXK_SHIFT_OFF) wantShift = false;
+  };
+  if (ctrl) hold(msxKeymapLookup(C64K_HID_CTRL, false));   // CTRL by default
+  if (alt)  hold(msxKeymapLookup(C64K_HID_ALT, false));    // GRAPH by default
+  for (auto &h : msxHeld) {
+    if (!h.kc) continue;
+    if (!kbContains(keys, h.kc)) { h.kc = 0; continue; }   // its key-up was lost (menu open): drop it
+    hold(h.code);
+  }
+  if (wantShift) want[MSXK_SHIFT_INDEX >> 3] |= 1 << (MSXK_SHIFT_INDEX & 7);
+
+  for (int r = 0; r < MSXK_KEYS / 8; r++) {
+    const uint8_t changed = want[r] ^ msxDown[r];
+    for (int b = 0; b < 8; b++)
+      if ((changed >> b) & 1) msxKeyMatrix(r, b, (want[r] >> b) & 1);
+    msxDown[r] = want[r];
+  }
+}
+
+// Release every matrix key this keyboard holds.
+static void msxReleaseAll()
+{
+  for (auto &h : msxHeld) h.kc = 0;
+  for (int r = 0; r < MSXK_KEYS / 8; r++) {
+    for (int b = 0; b < 8; b++)
+      if ((msxDown[r] >> b) & 1) msxKeyMatrix(r, b, false);
+    msxDown[r] = 0;
+  }
+}
+
+// With JOYSTICK on, the keys on the joystick map (msxjoymap.cpp: the arrows + Space by default, +
+// either SHIFT on the PicoCalc) also drive port 1. Active-low: b0 up b1 down b2 left b3 right
+// b4 trigger A b5 trigger B.
+static void msxApplyJoystick(const uint8_t *keys, bool shift, bool ctrl, bool alt)
+{
+  uint8_t pull = 0;
+  auto press = [&](uint8_t hid) { const uint8_t c = msxJoymapLookup(hid); if (c64jIsAction(c)) pull |= c; };
+  for (int i = 0; i < 6; i++) if (keys[i]) press(keys[i]);
+  if (shift) press(C64K_HID_SHIFT);
+  if (ctrl)  press(C64K_HID_CTRL);
+  if (alt)   press(C64K_HID_ALT);
+  msxJoy((uint8_t)~(pull & MSXJ_LINES));
+}
+// SMS has no keyboard: the keys press control pad 1's buttons (active-low, b0 up b1 down b2 left
+// b3 right b4 button 1 b5 button 2). Rebuilt from the held keys + CTRL / ALT on every report
+// (smskeymap.cpp: a built-in default, overridden per key by /sms/keymap.txt).
+static void smsApplyJoystick(bool ctrl, bool alt, const uint8_t *keys)
 {
   uint8_t m = 0xFF;
-  if (kbContains(keys, HID_KEY_ARROW_UP))    m &= ~0x01;
-  if (kbContains(keys, HID_KEY_ARROW_DOWN))  m &= ~0x02;
-  if (kbContains(keys, HID_KEY_ARROW_LEFT))  m &= ~0x04;
-  if (kbContains(keys, HID_KEY_ARROW_RIGHT)) m &= ~0x08;
-  if (kbContains(keys, HID_KEY_SPACE))       m &= ~0x10;   // trigger A
-  msxJoy(m);
-}
-// SMS has no keyboard: map the USB keyboard straight to controller 1 (active-low, same bit order).
-static void smsApplyJoystick(const uint8_t *keys)   // b0 up b1 down b2 left b3 right b4 btn1 b5 btn2
-{
-  uint8_t m = 0xFF;
-  if (kbContains(keys, HID_KEY_ARROW_UP))    m &= ~0x01;
-  if (kbContains(keys, HID_KEY_ARROW_DOWN))  m &= ~0x02;
-  if (kbContains(keys, HID_KEY_ARROW_LEFT))  m &= ~0x04;
-  if (kbContains(keys, HID_KEY_ARROW_RIGHT)) m &= ~0x08;
-  if (kbContains(keys, HID_KEY_SPACE) || kbContains(keys, HID_KEY_Z)) m &= ~0x10;   // button 1
-  if (kbContains(keys, HID_KEY_X))           m &= ~0x20;                            // button 2
-#if UI_PICOCALC
-  // PicoCalc: the F4/F5 keys sit right above the arrows, so they make the natural fire buttons
-  // (input_picocalc.cpp passes them through as bare HID F4/F5).
-  if (kbContains(keys, HID_KEY_F4))          m &= ~0x10;                            // button 1 / start
-  if (kbContains(keys, HID_KEY_F5))          m &= ~0x20;                            // button 2
-#endif
+  auto press = [&](uint8_t hid) { const uint8_t c = smsKeymapLookup(hid); if (smsKIsButton(c)) m &= ~(1 << c); };
+  if (ctrl) press(C64K_HID_CTRL);
+  if (alt)  press(C64K_HID_ALT);
+  for (int i = 0; i < 6; i++) if (keys[i]) press(keys[i]);
   smsSetInput(m);
 }
-// ColecoVision: arrows + fire buttons -> controller 1, and the 12-key keypad from the digit row.
-// '*' and '#' are Shift-8 / Shift-3 (what they are printed on, and how the PicoCalc sends them) or
-// '-' / '=' for one-key access. The keypad holds a single key, so the first one found wins.
-static void colecoApplyJoystick(uint8_t modifier, const uint8_t *keys)
+// ColecoVision: the keys press controller 1's stick, side buttons and keypad (colecokeymap.cpp: a
+// built-in default - arrows, Space/Z/F4 + X/F5 fire, the digit row / numeric keypad, '*' / '#' on
+// Shift-8 / Shift-3 and '-' / '=' - overridden per key by /coleco/keymap.txt). Rebuilt from the held
+// keys + CTRL / ALT on every report. The keypad holds a single key, so the first one found wins.
+static void colecoApplyJoystick(bool shift, bool ctrl, bool alt, const uint8_t *keys)
 {
-  const bool shift = modifier & (KEYBOARD_MODIFIER_LEFTSHIFT | KEYBOARD_MODIFIER_RIGHTSHIFT);
   uint8_t m = 0xFF;
-  if (kbContains(keys, HID_KEY_ARROW_UP))    m &= ~0x01;
-  if (kbContains(keys, HID_KEY_ARROW_DOWN))  m &= ~0x02;
-  if (kbContains(keys, HID_KEY_ARROW_LEFT))  m &= ~0x04;
-  if (kbContains(keys, HID_KEY_ARROW_RIGHT)) m &= ~0x08;
-  if (kbContains(keys, HID_KEY_SPACE) || kbContains(keys, HID_KEY_Z) || kbContains(keys, HID_KEY_F4)) m &= ~0x10;  // left fire
-  if (kbContains(keys, HID_KEY_X) || kbContains(keys, HID_KEY_F5))                                   m &= ~0x20;  // right fire
-  colecoSetInput(m);
-
   int key = -1;
-  for (int i = 0; i < 6 && key < 0; i++) {
-    const uint8_t kc = keys[i];
-    if (shift && kc == HID_KEY_8)                          key = 10;   // '*'
-    else if (shift && kc == HID_KEY_3)                     key = 11;   // '#'
-    else if (kc == HID_KEY_MINUS || kc == HID_KEY_KEYPAD_MULTIPLY) key = 10;
-    else if (kc == HID_KEY_EQUAL)                          key = 11;
-    else if (kc == HID_KEY_0 || kc == HID_KEY_KEYPAD_0)    key = 0;
-    else if (kc >= HID_KEY_1 && kc <= HID_KEY_9)           key = kc - HID_KEY_1 + 1;
-    else if (kc >= HID_KEY_KEYPAD_1 && kc <= HID_KEY_KEYPAD_9) key = kc - HID_KEY_KEYPAD_1 + 1;
-  }
+  auto press = [&](uint8_t hid, bool sh) {
+    const uint8_t c = colecoKeymapLookup(hid, sh);
+    if (!colKIsButton(c)) return;
+    if (colKIsKeypad(c)) { if (key < 0) key = c - COLK_KEY0; }
+    else m &= ~(1 << c);
+  };
+  if (ctrl) press(C64K_HID_CTRL, false);
+  if (alt)  press(C64K_HID_ALT, false);
+  for (int i = 0; i < 6; i++) if (keys[i]) press(keys[i], shift);
+  colecoSetInput(m);
   colecoSetKeypad(key);
 }
 
@@ -398,68 +429,34 @@ static void colecoApplyJoystick(uint8_t modifier, const uint8_t *keys)
 //   Shift = CAPS SHIFT, Ctrl/Alt = SYMBOL SHIFT, Backspace = DELETE, arrows = cursor keys,
 //   Esc = BREAK, Tab = EXTENDED MODE, and PC punctuation types the Spectrum symbol printed on it.
 // With JOY on, arrows + Space drive the Kempston joystick instead (as on the MSX).
-struct ZxPos { int8_t row, bit; };
-static const char ZX_ROWS[8][6] = { "cZXCV", "ASDFG", "QWERT", "12345", "09876", "POIUY", "eLKJH", "syMNB" };  // c/e/s/y = CAPS/ENTER/SPACE/SYMBOL
-static ZxPos zxFindChar(char ch)
-{
-  for (int r = 0; r < 8; r++) for (int b = 0; b < 5; b++) if (ZX_ROWS[r][b] == ch) return {(int8_t)r, (int8_t)b};
-  return {-1, -1};
-}
-static const ZxPos ZX_CAPS = {0, 0}, ZX_SYM = {7, 1}, ZX_SPACE = {7, 0}, ZX_ENTER = {6, 0};
-
+// The Spectrum's 8 half-rows x 5 keys; zxkeymap.cpp's rules give each key as half-row*5 + bit.
+// The keyboard map says which key each host key presses and what it does to CAPS / SYMBOL SHIFT;
+// with JOYSTICK on, a key the joystick map gives a Kempston line to only moves the stick.
 static void zxApplyKeyboard(uint8_t modifier, const uint8_t *keys)
 {
-  bool shift = modifier & (KEYBOARD_MODIFIER_LEFTSHIFT | KEYBOARD_MODIFIER_RIGHTSHIFT);
-  bool sym   = modifier & (KEYBOARD_MODIFIER_LEFTCTRL | KEYBOARD_MODIFIER_RIGHTCTRL |
-                           KEYBOARD_MODIFIER_LEFTALT  | KEYBOARD_MODIFIER_RIGHTALT);
-  bool caps  = shift;
+  const bool shift = modifier & (KEYBOARD_MODIFIER_LEFTSHIFT | KEYBOARD_MODIFIER_RIGHTSHIFT);
   uint8_t rows[8] = {0, 0, 0, 0, 0, 0, 0, 0};          // 1 = held
-  auto hold = [&](ZxPos p) { if (p.row >= 0) rows[p.row] |= (uint8_t)(1 << p.bit); };
+  auto hold = [&](uint8_t idx) { if (idx < ZXK_KEYS) rows[idx / 5] |= (uint8_t)(1 << (idx % 5)); };
+  bool forceCaps = false, noCaps = false;
   uint8_t kemp = 0;
-  for (int i = 0; i < 6; i++) {
-    const uint8_t kc = keys[i];
-    if (!kc) continue;
+  auto press = [&](uint8_t hid) {
     if (joystick) {
-      switch (kc) {
-        case HID_KEY_ARROW_RIGHT: kemp |= 0x01; continue;
-        case HID_KEY_ARROW_LEFT:  kemp |= 0x02; continue;
-        case HID_KEY_ARROW_DOWN:  kemp |= 0x04; continue;
-        case HID_KEY_ARROW_UP:    kemp |= 0x08; continue;
-        case HID_KEY_SPACE:       kemp |= 0x10; continue;
-      }
+      const uint8_t j = zxJoymapLookup(hid);
+      if (zxjIsAction(j)) { kemp |= j; return; }
     }
-    if (kc >= HID_KEY_A && kc <= HID_KEY_Z) { hold(zxFindChar((char)('A' + kc - HID_KEY_A))); continue; }
-    if (kc >= HID_KEY_1 && kc <= HID_KEY_9) { hold(zxFindChar((char)('1' + kc - HID_KEY_1))); continue; }
-    // A punctuation key: its SYMBOL SHIFT chord, the shifted PC symbol when Shift is down (which
-    // then must not also press CAPS SHIFT).
-    char plain = 0, shifted = 0;
-    switch (kc) {
-      case HID_KEY_0:            hold(zxFindChar('0')); continue;
-      case HID_KEY_ENTER:
-      case HID_KEY_KEYPAD_ENTER: hold(ZX_ENTER); continue;
-      case HID_KEY_SPACE:        hold(ZX_SPACE); continue;
-      case HID_KEY_BACKSPACE:    hold(ZX_CAPS); hold(zxFindChar('0')); continue;
-      case HID_KEY_ESCAPE:       hold(ZX_CAPS); hold(ZX_SPACE); continue;   // BREAK
-      case HID_KEY_TAB:          hold(ZX_CAPS); hold(ZX_SYM); continue;     // EXTENDED MODE
-      case HID_KEY_ARROW_LEFT:   hold(ZX_CAPS); hold(zxFindChar('5')); continue;
-      case HID_KEY_ARROW_DOWN:   hold(ZX_CAPS); hold(zxFindChar('6')); continue;
-      case HID_KEY_ARROW_UP:     hold(ZX_CAPS); hold(zxFindChar('7')); continue;
-      case HID_KEY_ARROW_RIGHT:  hold(ZX_CAPS); hold(zxFindChar('8')); continue;
-      case HID_KEY_COMMA:        plain = 'N'; shifted = 'R'; break;   // ,  <
-      case HID_KEY_PERIOD:       plain = 'M'; shifted = 'T'; break;   // .  >
-      case HID_KEY_SEMICOLON:    plain = 'O'; shifted = 'Z'; break;   // ;  :
-      case HID_KEY_APOSTROPHE:   plain = '7'; shifted = 'P'; break;   // '  "
-      case HID_KEY_MINUS:        plain = 'J'; shifted = '0'; break;   // -  _
-      case HID_KEY_EQUAL:        plain = 'L'; shifted = 'K'; break;   // =  +
-      case HID_KEY_SLASH:        plain = 'V'; shifted = 'C'; break;   // /  ?
-      default: continue;
+    const uint8_t c = zxKeymapLookup(hid, shift);
+    if (!zxkIsKey(c)) return;
+    hold(zxkIndex(c));
+    switch (zxkMode(c)) {
+      case ZXK_CAPS:  forceCaps = true; break;
+      case ZXK_PLAIN: noCaps = true; break;
+      case ZXK_SYM:   noCaps = true; hold(ZXK_SYM_INDEX); break;
     }
-    hold(zxFindChar(shift ? shifted : plain));
-    hold(ZX_SYM);
-    caps = false;
-  }
-  if (caps) hold(ZX_CAPS);
-  if (sym)  hold(ZX_SYM);
+  };
+  if (modifier & (KEYBOARD_MODIFIER_LEFTCTRL | KEYBOARD_MODIFIER_RIGHTCTRL)) press(C64K_HID_CTRL);
+  if (modifier & (KEYBOARD_MODIFIER_LEFTALT | KEYBOARD_MODIFIER_RIGHTALT))   press(C64K_HID_ALT);
+  for (int i = 0; i < 6; i++) if (keys[i]) press(keys[i]);
+  if ((shift && !noCaps) || forceCaps) hold(ZXK_CAPS_INDEX);
   for (int r = 0; r < 8; r++)
     for (int b = 0; b < 5; b++) zxKey(r, b, (rows[r] >> b) & 1);
   zxSetKempston(kemp);
@@ -474,6 +471,8 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
   bool ctrl  = modifier & (KEYBOARD_MODIFIER_LEFTCTRL  | KEYBOARD_MODIFIER_RIGHTCTRL);
   bool alt   = modifier & (KEYBOARD_MODIFIER_LEFTALT   | KEYBOARD_MODIFIER_RIGHTALT |
                            KEYBOARD_MODIFIER_LEFTGUI   | KEYBOARD_MODIFIER_RIGHTGUI);
+  bool lalt  = modifier & (KEYBOARD_MODIFIER_LEFTALT   | KEYBOARD_MODIFIER_LEFTGUI);    // Apple: open-apple
+  bool ralt  = modifier & (KEYBOARD_MODIFIER_RIGHTALT  | KEYBOARD_MODIFIER_RIGHTGUI);   // Apple: solid-apple
 
   // SD Manager mode has no core to type into and no settings menu to open (F10 would open one the
   // render loop never draws). Its one key, Ctrl-F6 back to the system menu, is taken upstream.
@@ -487,7 +486,9 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
   if (OptionsWindow && newMods) {
     if (newMods & (KEYBOARD_MODIFIER_LEFTCTRL | KEYBOARD_MODIFIER_RIGHTCTRL)) optionsUiKeyCapture(C64K_HID_CTRL, false);
     else if (newMods & (KEYBOARD_MODIFIER_LEFTALT | KEYBOARD_MODIFIER_RIGHTALT |
-                        KEYBOARD_MODIFIER_LEFTGUI | KEYBOARD_MODIFIER_RIGHTGUI)) optionsUiKeyCapture(C64K_HID_ALT, false);
+                        KEYBOARD_MODIFIER_LEFTGUI | KEYBOARD_MODIFIER_RIGHTGUI))   // the Apple tells the two apart
+      optionsUiKeyCapture(currentPlatform == PLATFORM_APPLE2 &&
+                          !(newMods & (KEYBOARD_MODIFIER_LEFTALT | KEYBOARD_MODIFIER_LEFTGUI)) ? A2K_HID_RALT : C64K_HID_ALT, false);
     if (newMods & (KEYBOARD_MODIFIER_LEFTSHIFT | KEYBOARD_MODIFIER_RIGHTSHIFT)) optionsUiKeyCapture(C64K_HID_SHIFT, true);
   }
 
@@ -552,13 +553,11 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
     if (currentPlatform == PLATFORM_ZX && kc == HID_KEY_F12) { zxHardReset(); continue; }         // power-cycle
 
     switch (currentPlatform) {
-      case PLATFORM_APPLE2: if (!appleIsButtonKey(kc)) appleKeyDown(kc, shift, ctrl);
-                            break;   // arrows/Space = paddles AND keys; F4/F5 = buttons only
+      case PLATFORM_APPLE2: appleKeyDown(kc, shift, ctrl, lalt, ralt, keys); break;   // apple2keymap.cpp
       case PLATFORM_C64:   c64KeyDown(kc, shift); break;   // every key types; the stick reads the arrows too
-      case PLATFORM_ATARI: if (atariKey(kc, true)) atariApply(); break;
       // Arrows and Space are keyboard keys on a real MSX (the BIOS reads them as STICK(0)/STRIG(0)),
       // so they always type; with JOY on they also drive port 1 (msxApplyJoystick).
-      case PLATFORM_MSX:   msxKeyDown(kc); break;
+      case PLATFORM_MSX:   msxKeyDown(kc, shift); break;   // msxkeymap.cpp
       case PLATFORM_PCXT:  pcxtKeyDown(kc, shift, ctrl, alt); break;                    // USB key -> XT make scancode
     }
   }
@@ -572,7 +571,6 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
     if (!kc || kbContains(keys, kc)) continue;
     switch (currentPlatform) {
       case PLATFORM_C64:   c64KeyUp(kc); break;
-      case PLATFORM_ATARI: if (atariKey(kc, false)) atariApply(); break;
       case PLATFORM_MSX:   msxKeyUp(kc); break;
       case PLATFORM_PCXT:  pcxtKeyUp(kc); break;   // USB key -> XT break scancode
       default: break;   // Apple keystrokes are edge-triggered (keymem); nothing to release
@@ -586,14 +584,16 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
     else        { c64SetJoystick(0xff); c64SetJoyButtons(0); }   // typing mode: keep the joystick released
   } else if (currentPlatform == PLATFORM_NES) {
     nesApplyKeyboard(ctrl, alt, keys);      // held keys -> controller 1 buttons (neskeymap.cpp)
+  } else if (currentPlatform == PLATFORM_ATARI) {
+    atariApplyKeyboard(ctrl, alt, keys);    // held keys -> stick + Fire / Select / Reset (atarikeymap.cpp)
   } else if (currentPlatform == PLATFORM_MSX) {
-    msxApplyModifiers(shift, ctrl, alt);
-    if (joystick) msxApplyJoystick(keys);   // arrows + Space -> joystick
-    else          msxJoy(0xFF);             // typing mode: joystick released
+    msxApplyModifiers(shift, ctrl, alt, keys);
+    if (joystick) msxApplyJoystick(keys, shift, ctrl, alt);   // the joystick map's keys -> joystick
+    else          msxJoy(0xFF);                               // typing mode: joystick released
   } else if (currentPlatform == PLATFORM_SMS) {
-    smsApplyJoystick(keys);                 // joystick-only: arrows + Z/X/Space -> controller 1
+    smsApplyJoystick(ctrl, alt, keys);      // held keys -> control pad 1 buttons (smskeymap.cpp)
   } else if (currentPlatform == PLATFORM_COLECO) {
-    colecoApplyJoystick(modifier, keys);    // arrows + fire keys + digit-row keypad -> controller 1
+    colecoApplyJoystick(shift, ctrl, alt, keys);   // held keys -> controller 1 (colecokeymap.cpp)
   } else if (currentPlatform == PLATFORM_ZX) {
     zxApplyKeyboard(modifier, keys);        // the whole matrix (+ Kempston when JOY on), rebuilt per report
   } else if (currentPlatform == PLATFORM_PCXT) {
@@ -608,11 +608,9 @@ void usbKeyboardReport(uint8_t modifier, const uint8_t *keys, const uint8_t *las
     }
     prevMod = modifier;
   } else if (currentPlatform == PLATFORM_APPLE2) {
-    // open-apple / solid-apple: Alt and right-Alt on a PC keyboard, F5 and F4 on the PicoCalc.
-    Pb0 = (modifier & KEYBOARD_MODIFIER_LEFTALT)  != 0 || kbContains(keys, HID_KEY_F5);
-    Pb1 = (modifier & KEYBOARD_MODIFIER_RIGHTALT) != 0 || kbContains(keys, HID_KEY_F4);
-    if (appleArrows != APPLE_ARROWS_KBD) appleApplyJoystick(keys);   // arrows -> paddles, Space -> button 0
-    else { timerpdl0 = JOY_MID; timerpdl1 = JOY_MID; }               // KBD: paddles centred
+    // held keys -> paddles + open-apple / solid-apple (apple2joymap.cpp): by default the arrows,
+    // Space / Alt / F5 button 0, right Alt / F4 button 1 (the PicoCalc has one Alt).
+    appleApplyJoystick(shift, ctrl, lalt, ralt, keys);
   }
 }
 
@@ -626,10 +624,10 @@ void usbKeyboardReset()
   }
   nesKbBits = 0;
   if (currentPlatform == PLATFORM_NES) nesSetController(0);
-  atariDir = 0; atariFire = atariSelect = atariReset = false;
-  if (currentPlatform == PLATFORM_ATARI) atariApply();
+  atariKbBits = 0;
+  if (currentPlatform == PLATFORM_ATARI) atariApplyBits(0);
   if (currentPlatform == PLATFORM_MSX) {
-    msxMatrix(6, 0, false); msxMatrix(6, 1, false); msxMatrix(6, 2, false);
+    msxReleaseAll();
     msxJoy(0xFF);
   }
   if (currentPlatform == PLATFORM_SMS) smsSetInput(0xFF);

@@ -1,0 +1,141 @@
+# emu8 - Apple II+ keyboard map
+#
+# (The Apple IIe has its own file and default: docs/apple2e-keymap.txt.)
+#
+# Copy this file to the SD card as /apple2/keymap.txt (or /apple2keymap.txt) and edit it to choose
+# which Apple key each host key presses. It is read when the Apple boots. Every line below is the
+# BUILT-IN DEFAULT, so this file as shipped changes nothing; only lines that differ from the default
+# count (up to 64 of them). Deleting a line does not unmap the key, it just leaves the default; use
+# "= NONE" to make a key do nothing. Errors are reported in the log ("Apple keymap line N: ...") and
+# the line is skipped.
+#
+# The Apple menu edits it too: CONFIG > KEYBOARD (on the PicoCalc a picture of its keyboard over the
+# Apple II+ keyboard; elsewhere a list). A change there is live at once and rewrites
+# /apple2/keymap.txt with only the changed keys.
+#
+# It applies to every keyboard that reaches the Apple through the HID path: the PicoCalc's built-in
+# keyboard, a USB keyboard, and the PC keyboard in the desktop build.
+#
+# FORMAT
+#   <host key> = <Apple key> [+SHIFT | -SHIFT | +CTRL]     # comment
+#   SHIFT+<host key> = <Apple key> [+SHIFT | -SHIFT | +CTRL]
+#
+#   A plain rule passes the host's SHIFT through as typed. A SHIFT+ rule is used when the key is
+#   typed with SHIFT and wins over the plain rule; it releases the Apple's SHIFT unless it says
+#   +SHIFT or +CTRL. +SHIFT / -SHIFT hold or release the Apple's SHIFT while the key is down; +CTRL
+#   holds the Apple's CTRL (SHIFT as typed).
+#
+# HOST KEYS (names are not case-sensitive; the same as docs/c64-keymap.txt, plus RALT)
+#   A..Z  0..9  F1..F12  SPACE ENTER ESC BACKSPACE TAB DELETE INSERT HOME END PAGE_UP PAGE_DOWN
+#   UP DOWN LEFT RIGHT PAUSE (= BREAK) CAPSLOCK PRINTSCREEN SCROLLLOCK NUMLOCK
+#   MINUS EQUAL LBRACKET RBRACKET BACKSLASH NONUS_HASH SEMICOLON APOSTROPHE GRAVE COMMA PERIOD SLASH
+#   KP_0..KP_9 KP_PLUS KP_MINUS KP_MULTIPLY KP_DIVIDE KP_PERIOD KP_ENTER
+#   CTRL  ALT        the modifiers (either side; ALT also takes the left GUI/Windows key)
+#   RALT             the right Alt / GUI key on its own
+#   0xNN             any HID usage code, in hex
+#
+# APPLE KEYS (the II+ keyboard)
+#   A..Z  0..9  COLON (:*)  MINUS (-=)  SEMICOLON (;+)  COMMA (,<)  PERIOD (.>)  SLASH (/?)
+#   SPACE RETURN ESC LEFT RIGHT REPT CTRL LSHIFT RSHIFT (SHIFT = LSHIFT)
+#   RESET            resets the 6502 (not a character)
+#   NONE             the key does nothing
+#   What a key sends comes from the II+ keyboard encoder: Shift-M is ']', Shift-N '^', Shift-P '@',
+#   CTRL changes the letters only. The II+ cannot type [ \ _ ` { | } ~.
+#
+# Notes: F11 (PicoCalc: Ctrl-F3) still resets the Apple whatever this file says. The arrows also
+# steer the joystick when ARROWS is JOY or BOTH (docs/apple2-joymap.txt). The menu keys are not
+# remapped here.
+
+# ---- letters (the PC's Shift-M/N/P type the capital, not the II+'s ] ^ @) ----
+A = A
+B = B
+C = C
+D = D
+E = E
+F = F
+G = G
+H = H
+I = I
+J = J
+K = K
+L = L
+M = M
+N = N
+O = O
+P = P
+Q = Q
+R = R
+S = S
+T = T
+U = U
+V = V
+W = W
+X = X
+Y = Y
+Z = Z
+SHIFT+M = M -SHIFT
+SHIFT+N = N -SHIFT
+SHIFT+P = P -SHIFT
+
+# ---- digits (shifted: the symbol on the PC keycap) ----
+1 = 1
+2 = 2
+3 = 3
+4 = 4
+5 = 5
+6 = 6
+7 = 7
+8 = 8
+9 = 9
+0 = 0
+SHIFT+2 = P +SHIFT          # @
+SHIFT+6 = N +SHIFT          # ^
+SHIFT+7 = 6 +SHIFT          # &
+SHIFT+8 = COLON +SHIFT      # *
+SHIFT+9 = 8 +SHIFT          # (
+SHIFT+0 = 9 +SHIFT          # )
+
+# ---- punctuation ----
+MINUS = MINUS
+SHIFT+MINUS = NONE          # _ (no _ on a II+)
+EQUAL = MINUS +SHIFT        # =
+SHIFT+EQUAL = SEMICOLON +SHIFT   # +
+RBRACKET = M +SHIFT         # ]
+SEMICOLON = SEMICOLON
+SHIFT+SEMICOLON = COLON -SHIFT   # :
+APOSTROPHE = 7 +SHIFT       # '
+SHIFT+APOSTROPHE = 2 +SHIFT # "
+COMMA = COMMA
+PERIOD = PERIOD
+SLASH = SLASH
+SPACE = SPACE
+
+# ---- editing / control ----
+ENTER = RETURN
+KP_ENTER = RETURN
+ESC = ESC
+BACKSPACE = LEFT
+DELETE = LEFT
+LEFT = LEFT
+RIGHT = RIGHT
+UP = K +CTRL                # CTRL-K, as the IIe's up arrow
+DOWN = J +CTRL              # CTRL-J
+TAB = I +CTRL               # CTRL-I
+CTRL = CTRL
+
+# ---- keypad ----
+KP_1 = 1
+KP_2 = 2
+KP_3 = 3
+KP_4 = 4
+KP_5 = 5
+KP_6 = 6
+KP_7 = 7
+KP_8 = 8
+KP_9 = 9
+KP_0 = 0
+KP_PLUS = SEMICOLON +SHIFT
+KP_MINUS = MINUS -SHIFT
+KP_MULTIPLY = COLON +SHIFT
+KP_DIVIDE = SLASH -SHIFT
+KP_PERIOD = PERIOD -SHIFT

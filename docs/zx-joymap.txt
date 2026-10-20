@@ -1,0 +1,47 @@
+# emu8 - ZX Spectrum Kempston joystick map
+#
+# Copy this file to the SD card as /zx/joymap.txt (or /zxjoymap.txt) and edit it to choose which
+# keys steer and fire the Kempston joystick. It is read when the Spectrum boots. Every line below
+# is the BUILT-IN DEFAULT, so this file as shipped changes nothing; only lines that differ from the
+# default count (up to 64 of them). Deleting a line does not unmap the key, it just leaves the
+# default; use "= NONE" to take a key off the stick. Errors are reported in the log
+# ("ZX joymap line N: ...") and the line is skipped.
+#
+# The ZX menu edits it too: CONFIG > JOYSTICK (on the PicoCalc a picture of its keyboard over a
+# Cheetah 125+: the trigger and both red base buttons are FIRE; elsewhere a list). A change there
+# is live at once and rewrites /zx/joymap.txt with only the changed keys.
+#
+# The map is used while JOYSTICK is ON in the ZX menu (Kempston interface, port 0x1F). It applies
+# to every keyboard that reaches the Spectrum through the HID path: the PicoCalc's built-in
+# keyboard, a USB keyboard (JC4827W543 / JC1060P470), and the PC keyboard in the desktop build.
+# A key on the stick does not type; every other key types through docs/zx-keymap.txt.
+#
+# FORMAT
+#   <host key> = <joystick action>      # comment
+#
+#   Any number of keys may pull the same line; keys held together add up (UP and LEFT = UP+LEFT).
+#
+# HOST KEYS (names are not case-sensitive; the same as docs/zx-keymap.txt. SHIFT is CAPS SHIFT and
+# cannot be put on the stick.)
+#
+# JOYSTICK ACTIONS
+#   UP DOWN LEFT RIGHT
+#   UP+LEFT UP+RIGHT DOWN+LEFT DOWN+RIGHT   a diagonal on one key (LEFT+UP etc. also accepted)
+#   FIRE
+#   NONE             the key does not touch the stick
+#
+# Example: QAOP + M, the classic Spectrum layout
+#   Q = UP
+#   A = DOWN
+#   O = LEFT
+#   P = RIGHT
+#   M = FIRE
+
+# ---- the stick ----
+UP = UP
+DOWN = DOWN
+LEFT = LEFT
+RIGHT = RIGHT
+
+# ---- the button ----
+SPACE = FIRE

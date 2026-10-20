@@ -1,0 +1,120 @@
+# emu8 - Apple IIe keyboard map
+#
+# Copy this file to the SD card as /apple2/keymap-iie.txt (or /apple2keymap-iie.txt) and edit it to
+# choose which IIe key each host key presses. It is read when the IIe boots; the II+ has its own file
+# (/apple2/keymap.txt, docs/apple2-keymap.txt) because its default is different. Every line below is
+# the BUILT-IN DEFAULT, so this file as shipped changes nothing; only lines that differ from the
+# default count (up to 64 of them). Deleting a line does not unmap the key, it just leaves the
+# default; use "= NONE" to make a key do nothing. Errors are reported in the log
+# ("Apple keymap line N: ...") and the line is skipped.
+#
+# The Apple menu edits it too: CONFIG > KEYBOARD (on the PicoCalc a picture of its keyboard over the
+# IIe keyboard; elsewhere a list). A change there is live at once and rewrites
+# /apple2/keymap-iie.txt with only the changed keys.
+#
+# FORMAT, HOST KEYS: as docs/apple2-keymap.txt.
+#
+# APPLE KEYS (the IIe keyboard, US layout)
+#   A..Z  0..9  MINUS (-_)  EQUAL (=+)  LBRACKET ([{)  RBRACKET (]})  BACKSLASH (\|)
+#   SEMICOLON (;:)  QUOTE ('")  GRAVE (`~)  COMMA (,<)  PERIOD (.>)  SLASH (/?)
+#   SPACE RETURN ESC TAB DELETE LEFT RIGHT UP DOWN CTRL LSHIFT RSHIFT (SHIFT = LSHIFT)
+#   CAPSLOCK         toggles CAPS LOCK (on at power-up: letters typed without SHIFT are capitals)
+#   OPEN-APPLE       held: paddle button 0 (as on the IIe, where the two are wired together)
+#   SOLID-APPLE      held: paddle button 1
+#   RESET            resets the 6502 (not a character)
+#   NONE             the key does nothing
+#   The symbols in brackets work as names too (= [ ] \ ' ` ...); OA / SA / CAPS as well.
+#   CAPSLOCK, OPEN-APPLE and SOLID-APPLE take no +SHIFT / -SHIFT / +CTRL.
+#   What a key sends comes from the IIe keyboard encoder, which has the PC's US layout: Shift-2 is
+#   '@', Shift-; ':', and CTRL makes control codes of the letters and of @ [ \ ] ^ _.
+#
+# Notes: F11 (PicoCalc: Ctrl-F3) still resets the Apple whatever this file says. The arrows also
+# steer the joystick when ARROWS is JOY or BOTH, and Alt / right Alt are buttons 0 / 1 there too
+# (docs/apple2-joymap.txt). The menu keys are not remapped here.
+
+# ---- letters ----
+A = A
+B = B
+C = C
+D = D
+E = E
+F = F
+G = G
+H = H
+I = I
+J = J
+K = K
+L = L
+M = M
+N = N
+O = O
+P = P
+Q = Q
+R = R
+S = S
+T = T
+U = U
+V = V
+W = W
+X = X
+Y = Y
+Z = Z
+
+# ---- digits (SHIFT as typed: the IIe's Shift-digits are the PC's) ----
+1 = 1
+2 = 2
+3 = 3
+4 = 4
+5 = 5
+6 = 6
+7 = 7
+8 = 8
+9 = 9
+0 = 0
+
+# ---- punctuation ----
+MINUS = MINUS
+EQUAL = EQUAL
+LBRACKET = LBRACKET
+RBRACKET = RBRACKET
+BACKSLASH = BACKSLASH
+SEMICOLON = SEMICOLON
+APOSTROPHE = QUOTE
+GRAVE = GRAVE
+COMMA = COMMA
+PERIOD = PERIOD
+SLASH = SLASH
+SPACE = SPACE
+
+# ---- editing / control ----
+ENTER = RETURN
+KP_ENTER = RETURN
+ESC = ESC
+TAB = TAB
+BACKSPACE = LEFT
+DELETE = DELETE
+LEFT = LEFT
+RIGHT = RIGHT
+UP = UP
+DOWN = DOWN
+CTRL = CTRL
+CAPSLOCK = CAPSLOCK
+ALT = OPEN-APPLE
+RALT = SOLID-APPLE
+
+# ---- keypad ----
+KP_1 = 1
+KP_2 = 2
+KP_3 = 3
+KP_4 = 4
+KP_5 = 5
+KP_6 = 6
+KP_7 = 7
+KP_8 = 8
+KP_9 = 9
+KP_0 = 0
+KP_PLUS = EQUAL +SHIFT
+KP_MINUS = MINUS -SHIFT
+KP_MULTIPLY = 8 +SHIFT
+KP_DIVIDE = SLASH -SHIFT
+KP_PERIOD = PERIOD -SHIFT

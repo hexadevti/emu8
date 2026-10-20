@@ -1,0 +1,53 @@
+# emu8 - Atari 2600 keyboard map
+#
+# Copy this file to the SD card as /atari/keymap.txt (or /atarikeymap.txt) and edit it to remap keys.
+# It is read when the Atari boots. Every line below is the BUILT-IN DEFAULT, so this file as shipped
+# changes nothing; only lines that differ from the default count (up to 64 of them). Deleting a
+# line does not unmap the key, it just leaves the default; use "= NONE" to make a key do nothing.
+# Errors are reported in the log ("Atari keymap line N: ...") and the line is skipped.
+#
+# The Atari menu edits it too: CONFIG > KEYBOARD (on the PicoCalc a picture of its keyboard over an
+# Atari joystick and the console's SELECT / RESET switches; elsewhere a list). A change there is
+# live at once and rewrites /atari/keymap.txt with only the changed keys.
+#
+# Applies to every keyboard that reaches the Atari through the HID path: the PicoCalc's built-in
+# keyboard, a USB keyboard (JC4827W543 / JC1060P470), and the PC keyboard in the desktop build.
+# A gamepad is not affected.
+#
+# FORMAT
+#   <host key> = <action>      # comment
+#
+#   Any number of keys may press the same action. The Atari has no SHIFT: a key is the same with
+#   or without it (the PicoCalc's Shift-F1.. / Shift-arrows arrive as other keys - F6.., PAGE_UP
+#   - and can be mapped on their own).
+#
+# HOST KEYS (names are not case-sensitive; the same as docs/c64-keymap.txt)
+#   A..Z  0..9  F1..F12  SPACE ENTER ESC BACKSPACE TAB DELETE INSERT HOME END PAGE_UP PAGE_DOWN
+#   UP DOWN LEFT RIGHT PAUSE (= BREAK) CAPSLOCK PRINTSCREEN SCROLLLOCK NUMLOCK
+#   MINUS EQUAL LBRACKET RBRACKET BACKSLASH NONUS_HASH SEMICOLON APOSTROPHE GRAVE COMMA PERIOD SLASH
+#   KP_0..KP_9 KP_PLUS KP_MINUS KP_MULTIPLY KP_DIVIDE KP_PERIOD KP_ENTER
+#   CTRL  ALT        the modifiers (either side; ALT also takes the GUI/Windows key)
+#   0xNN             any HID usage code, in hex
+#
+# ACTIONS
+#   UP DOWN LEFT RIGHT                         the joystick
+#   UP+LEFT UP+RIGHT DOWN+LEFT DOWN+RIGHT      a diagonal on one key
+#   FIRE                                       the joystick's button
+#   SELECT RESET                               the console's GAME SELECT / GAME RESET switches
+#   NONE                                       the key does nothing
+#
+# PicoCalc notes: its F3 key arrives as F12. On the PicoCalc the default also has
+# "F5 = FIRE", "F4 = SELECT" and "F12 = RESET" (the F3 key). The menu keys (Ctrl-F1 ...) are not
+# remapped here.
+
+# ---- the joystick ----
+UP = UP
+DOWN = DOWN
+LEFT = LEFT
+RIGHT = RIGHT
+SPACE = FIRE
+X = FIRE
+
+# ---- the console switches ----
+TAB = SELECT
+ENTER = RESET

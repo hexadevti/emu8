@@ -1,0 +1,83 @@
+# emu8 - ColecoVision keyboard map
+#
+# Copy this file to the SD card as /coleco/keymap.txt (or /colecokeymap.txt) and edit it to remap
+# keys. It is read when the ColecoVision boots. Every line below is the BUILT-IN DEFAULT, so this
+# file as shipped changes nothing; only lines that differ from the default count (up to 64 of them).
+# Deleting a line does not unmap the key, it just leaves the default; use "= NONE" to make a key do
+# nothing. Errors are reported in the log ("Coleco keymap line N: ...") and the line is skipped.
+#
+# The Coleco menu edits it too: CONFIG > KEYBOARD (on the PicoCalc a picture of its keyboard over a
+# ColecoVision hand controller; elsewhere a list). A change there is live at once and rewrites
+# /coleco/keymap.txt with only the changed keys.
+#
+# Applies to every keyboard that reaches the ColecoVision through the HID path: the PicoCalc's
+# built-in keyboard, a USB keyboard (JC4827W543 / JC1060P470), and the PC keyboard in the desktop
+# build. A gamepad is not affected. Reset (F3) is a console button and is not remapped here.
+#
+# FORMAT
+#   [SHIFT+]<host key> = <Coleco button>      # comment
+#
+#   Any number of keys may press the same button. A SHIFT+ rule is used while SHIFT is held; a key
+#   with no SHIFT+ rule is the same button with or without SHIFT. The PicoCalc types '*' as SHIFT+8
+#   and '#' as SHIFT+3, hence the two SHIFT+ lines below. SHIFT+ is not allowed on CTRL / ALT.
+#
+# HOST KEYS (names are not case-sensitive; the same as docs/c64-keymap.txt)
+#   A..Z  0..9  F1..F12  SPACE ENTER ESC BACKSPACE TAB DELETE INSERT HOME END PAGE_UP PAGE_DOWN
+#   UP DOWN LEFT RIGHT PAUSE (= BREAK) CAPSLOCK PRINTSCREEN SCROLLLOCK NUMLOCK
+#   MINUS EQUAL LBRACKET RBRACKET BACKSLASH NONUS_HASH SEMICOLON APOSTROPHE GRAVE COMMA PERIOD SLASH
+#   KP_0..KP_9 KP_PLUS KP_MINUS KP_MULTIPLY KP_DIVIDE KP_PERIOD KP_ENTER
+#   CTRL  ALT        the modifiers (either side; ALT also takes the GUI/Windows key)
+#   0xNN             any HID usage code, in hex
+#
+# COLECO BUTTONS (hand controller 1)
+#   UP DOWN LEFT RIGHT     the joystick
+#   LFIRE            left side button (also accepted: FIRE, FIRE1)
+#   RFIRE            right side button (also accepted: FIRE2)
+#   0..9             keypad digits
+#   *                keypad star (also accepted: STAR)
+#   HASH             keypad '#'  ('#' itself starts a comment, so it is written HASH)
+#   NONE             the key does nothing
+#
+# Only one keypad key is seen at a time (the real keypad is the same); the first one held wins.
+
+# ---- the joystick ----
+UP = UP
+DOWN = DOWN
+LEFT = LEFT
+RIGHT = RIGHT
+
+# ---- the side buttons ----
+SPACE = LFIRE
+Z = LFIRE
+F4 = LFIRE
+X = RFIRE
+F5 = RFIRE
+
+# ---- the keypad ----
+1 = 1
+2 = 2
+3 = 3
+4 = 4
+5 = 5
+6 = 6
+7 = 7
+8 = 8
+9 = 9
+0 = 0
+MINUS = *
+EQUAL = HASH
+SHIFT+8 = *
+SHIFT+3 = HASH
+
+# ---- the numeric keypad ----
+KP_1 = 1
+KP_2 = 2
+KP_3 = 3
+KP_4 = 4
+KP_5 = 5
+KP_6 = 6
+KP_7 = 7
+KP_8 = 8
+KP_9 = 9
+KP_0 = 0
+KP_MULTIPLY = *

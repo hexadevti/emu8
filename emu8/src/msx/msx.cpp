@@ -262,6 +262,10 @@ void msxSetup() {
   menuColor  = (unsigned char*)malloc(0x546);
   msxScratch = (uint16_t*)malloc(256 * 8 * sizeof(uint16_t));
 #endif
+#if BOARD_INPUT_USB
+  msxKeymapLoad();                                 // host key -> MSX key overrides (/msx/keymap.txt)
+  msxJoymapLoad();                                 // host key -> joystick overrides (/msx/joymap.txt)
+#endif
 
 #if BOARD_HAS_MSX2
   // The BIOS decides MSX1 or MSX2, so it is loaded before the machine memory is sized.
