@@ -4,7 +4,7 @@
 #include <stddef.h>
 
 // A resolved rule is the Kempston lines the key pulls, as a mask of zxSetKempston()'s bits (set =
-// pulled; port 0x1F reads them active high): one direction, a diagonal, or FIRE.
+// pulled; port 0x1F reads them active high): one direction, or FIRE.
 #define ZXJ_RIGHT 0x01
 #define ZXJ_LEFT  0x02
 #define ZXJ_DOWN  0x04
@@ -18,14 +18,14 @@ static inline bool zxjIsAction(uint8_t c) { return c && c < 0x80; }
 // The lines host key `hid` pulls (ZXJ_NONE / ZXJ_UNMAP: none); overrides before the default.
 // CTRL / ALT are looked up as C64K_HID_CTRL / C64K_HID_ALT (c64keymap.h).
 uint8_t zxJoymapLookup(uint8_t hid);
-// (Re)read the overrides from /zx/joymap.txt (or /zxjoymap.txt). Missing file = defaults only.
+// (Re)read the overrides from /emu8/zx/joymap.txt (or /zxjoymap.txt). Missing file = defaults only.
 void    zxJoymapLoad();
 
 // ---- for the JOYSTICK page (optionsui.cpp); the host keys are the KEYBOARD page's ----
-// The picker: the eight directions (clockwise from UP) then FIRE.
+// The picker: the four directions (UP RIGHT DOWN LEFT) then FIRE.
 int     zxJoymapActionCount();
 uint8_t zxJoymapActionAt(int i);
-const char *zxJoymapActionName(uint8_t code);               // "UP", "UP+LEFT", "FIRE"
+const char *zxJoymapActionName(uint8_t code);               // "UP", "LEFT", "FIRE"
 // The rule as text: "FIRE", "NONE", "-" (no rule).
 void    zxJoymapDescribe(uint8_t code, char *out, size_t n);
 // The rule for `hid`: `over` true when it comes from the overrides.
@@ -35,5 +35,5 @@ uint8_t zxJoymapDefault(uint8_t hid);
 bool    zxJoymapSet(uint8_t hid, uint8_t code);
 void    zxJoymapResetAll();
 int     zxJoymapChangedCount();
-// Write the overrides to /zx/joymap.txt. False if the card could not be written.
+// Write the overrides to /emu8/zx/joymap.txt. False if the card could not be written.
 bool    zxJoymapSave();

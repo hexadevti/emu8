@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-// A resolved rule is what the key does to the joystick, as a mask: a direction, a diagonal, or one
+// A resolved rule is what the key does to the joystick, as a mask: a direction, or one
 // of the two buttons. The Apple has no digital stick: a direction is a paddle timer held at its end
 // (timerpdl0 = X, timerpdl1 = Y), a button is $C061 / $C062 (Pb0 = open-apple, Pb1 = solid-apple).
 #define A2J_UP    0x01
@@ -21,7 +21,7 @@ static inline bool a2jIsAction(uint8_t c) { return c && c < 0x80; }
 // What host key `hid` does to the joystick (A2J_NONE / A2J_UNMAP: nothing); overrides first.
 // CTRL / ALT / RALT / SHIFT are looked up as C64K_HID_CTRL / C64K_HID_ALT / A2K_HID_RALT / C64K_HID_SHIFT.
 uint8_t apple2JoymapLookup(uint8_t hid);
-// (Re)read the overrides from /apple2/joymap.txt (or /apple2joymap.txt). Missing file = defaults only.
+// (Re)read the overrides from /emu8/apple2/joymap.txt (or /apple2joymap.txt). Missing file = defaults only.
 void    apple2JoymapLoad();
 
 // ---- for the JOYSTICK page (optionsui.cpp) ----
@@ -29,14 +29,14 @@ void    apple2JoymapLoad();
 int     apple2JoymapHostCount();
 uint8_t apple2JoymapHostAt(int i);
 void    apple2JoymapHostName(uint8_t hid, char *out, size_t n);   // apple2KeymapHostName + "SHIFT"
-// The picker: the eight directions (clockwise from UP) then BUTTON0, BUTTON1.
+// The picker: the four directions (UP RIGHT DOWN LEFT) then BUTTON0, BUTTON1.
 int     apple2JoymapActionCount();
 uint8_t apple2JoymapActionAt(int i);
-const char *apple2JoymapActionName(uint8_t code);              // "UP", "UP+LEFT", "BUTTON0"
+const char *apple2JoymapActionName(uint8_t code);              // "UP", "LEFT", "BUTTON0"
 void    apple2JoymapDescribe(uint8_t code, char *out, size_t n);   // "BUTTON0", "NONE", "-"
 uint8_t apple2JoymapRule(uint8_t hid, bool *over);
 uint8_t apple2JoymapDefault(uint8_t hid);
 bool    apple2JoymapSet(uint8_t hid, uint8_t code);            // A2J_NONE = back to the default
 void    apple2JoymapResetAll();
 int     apple2JoymapChangedCount();
-bool    apple2JoymapSave();                                    // /apple2/joymap.txt
+bool    apple2JoymapSave();                                    // /emu8/apple2/joymap.txt

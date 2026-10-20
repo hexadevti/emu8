@@ -2,7 +2,7 @@
 // keyboard, the desktop build's PC keyboard: everything that reaches usbKeyboardReport()).
 //
 // A built-in default map, plus overrides read from a text file on the SD card when the Coleco
-// boots: /coleco/keymap.txt (or /colecokeymap.txt at the root). One rule per line, '#' starts a
+// boots: /emu8/coleco/keymap.txt (or /colecokeymap.txt at the root). One rule per line, '#' starts a
 // comment:
 //
 //     [SHIFT+]<host key> = <Coleco button>
@@ -18,7 +18,7 @@
 // The full default map is in docs/coleco-keymap.txt. Reset (F12 / PicoCalc F3) is the console's,
 // not the controller's: not here.
 //
-// The default: the arrows are the stick, Space / Z / F4 the left fire, X / F5 the right fire, the
+// The default: the arrows are the stick, [ / ] (the PicoCalc's third row) the left / right fire, the
 // digit row and the numeric keypad the keypad, with '*' / '#' on Shift-8 / Shift-3 (as printed;
 // it is what the PicoCalc's own '*' / '#' send) and on '-' / '='.
 
@@ -39,8 +39,7 @@ struct ColRule { uint8_t hid, shifted, code; };
 // HID usage codes (the standard USB HID keyboard page), numeric so every board's header works.
 static const ColRule kDefault[] = {
   {0x52, 0, COLK_UP}, {0x51, 0, COLK_DOWN}, {0x50, 0, COLK_LEFT}, {0x4F, 0, COLK_RIGHT},   // arrows
-  {0x2C, 0, COLK_LFIRE}, {0x1D, 0, COLK_LFIRE}, {0x3D, 0, COLK_LFIRE},                    // Space  Z  F4
-  {0x1B, 0, COLK_RFIRE}, {0x3E, 0, COLK_RFIRE},                                           // X  F5
+  {0x2F, 0, COLK_LFIRE}, {0x30, 0, COLK_RFIRE},                                           // [  ]
   {0x27, 0, COLK_KEY0 + 0}, {0x1E, 0, COLK_KEY0 + 1}, {0x1F, 0, COLK_KEY0 + 2},           // 0 .. 9
   {0x20, 0, COLK_KEY0 + 3}, {0x21, 0, COLK_KEY0 + 4}, {0x22, 0, COLK_KEY0 + 5},
   {0x23, 0, COLK_KEY0 + 6}, {0x24, 0, COLK_KEY0 + 7}, {0x25, 0, COLK_KEY0 + 8},
@@ -133,7 +132,7 @@ static void parseLine(char *s, int line)
 void colecoKeymapLoad()
 {
   kOverCount = 0;
-  static const char *const kPaths[] = { "/coleco/keymap.txt", "/colecokeymap.txt" };
+  static const char *const kPaths[] = { "/emu8/coleco/keymap.txt", "/coleco/keymap.txt", "/colecokeymap.txt" };
   for (const char *path : kPaths) {
     File f;
     try { f = FSTYPE.open(path, FILE_READ); }
@@ -198,12 +197,13 @@ int  colecoKeymapChangedCount() { return kOverCount; }
 
 bool colecoKeymapSave()
 {
-  static const char *const kPath = "/coleco/keymap.txt";
+  static const char *const kPath = "/emu8/coleco/keymap.txt";
   // Timed lock, not busTake(): this runs in the render task (the menu).
   if (gBusLock && xSemaphoreTake(gBusLock, pdMS_TO_TICKS(5000)) != pdTRUE) return false;
   bool ok = false;
   try {
-    if (!FSTYPE.exists("/coleco")) FSTYPE.mkdir("/coleco");
+    if (!FSTYPE.exists("/emu8")) FSTYPE.mkdir("/emu8");
+    if (!FSTYPE.exists("/emu8/coleco")) FSTYPE.mkdir("/emu8/coleco");
     if (FSTYPE.exists(kPath)) FSTYPE.remove(kPath);     // FILE_WRITE appends on arduino-pico
     File f = FSTYPE.open(kPath, FILE_WRITE);
     if (f) {

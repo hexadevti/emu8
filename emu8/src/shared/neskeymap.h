@@ -20,7 +20,7 @@ static inline bool nesKIsButton(uint8_t c) { return c < 8; }
 // The button host key `hid` presses (NESK_NONE / NESK_UNMAP: none); overrides before the default.
 // CTRL / ALT are looked up as C64K_HID_CTRL / C64K_HID_ALT (c64keymap.h), like the C64.
 uint8_t nesKeymapLookup(uint8_t hid);
-// (Re)read the overrides from /nes/keymap.txt (or /neskeymap.txt). Missing file = defaults only.
+// (Re)read the overrides from /emu8/nes/keymap.txt (or /neskeymap.txt). Missing file = defaults only.
 void    nesKeymapLoad();
 
 // ---- for the KEYBOARD page (optionsui.cpp); the host keys and their names are the C64 page's ----
@@ -37,5 +37,5 @@ uint8_t nesKeymapDefault(uint8_t hid);
 bool    nesKeymapSet(uint8_t hid, uint8_t code);
 void    nesKeymapResetAll();
 int     nesKeymapChangedCount();
-// Write the overrides to /nes/keymap.txt. False if the card could not be written.
+// Write the overrides to /emu8/nes/keymap.txt. False if the card could not be written.
 bool    nesKeymapSave();

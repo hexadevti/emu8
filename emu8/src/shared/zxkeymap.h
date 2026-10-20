@@ -25,7 +25,7 @@ static inline uint8_t zxkMode(uint8_t c)  { return c >> 6; }
 // then the plain rule; the SD card's overrides before the built-in default in each case.
 // CTRL / ALT are looked up as C64K_HID_CTRL / C64K_HID_ALT (c64keymap.h).
 uint8_t zxKeymapLookup(uint8_t hid, bool shift);
-// (Re)read the overrides from /zx/keymap.txt (or /zxkeymap.txt). Missing file = defaults only.
+// (Re)read the overrides from /emu8/zx/keymap.txt (or /zxkeymap.txt). Missing file = defaults only.
 void    zxKeymapLoad();
 
 // ---- for the KEYBOARD page (optionsui.cpp); the host keys are the C64 page's ----
@@ -40,5 +40,5 @@ uint8_t zxKeymapDefault(uint8_t hid, bool shifted);
 bool    zxKeymapSet(uint8_t hid, bool shifted, uint8_t code);
 void    zxKeymapResetAll();
 int     zxKeymapChangedCount();
-// Write the overrides to /zx/keymap.txt. False if the card could not be written.
+// Write the overrides to /emu8/zx/keymap.txt. False if the card could not be written.
 bool    zxKeymapSave();

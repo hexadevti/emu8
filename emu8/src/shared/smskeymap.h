@@ -18,7 +18,7 @@ static inline bool smsKIsButton(uint8_t c) { return c < 6; }
 // The button host key `hid` presses (SMSK_NONE / SMSK_UNMAP: none); overrides before the default.
 // CTRL / ALT are looked up as C64K_HID_CTRL / C64K_HID_ALT (c64keymap.h), like the C64.
 uint8_t smsKeymapLookup(uint8_t hid);
-// (Re)read the overrides from /sms/keymap.txt (or /smskeymap.txt). Missing file = defaults only.
+// (Re)read the overrides from /emu8/sms/keymap.txt (or /smskeymap.txt). Missing file = defaults only.
 void    smsKeymapLoad();
 
 // ---- for the KEYBOARD page (optionsui.cpp); the host keys and their names are the C64 page's ----
@@ -35,5 +35,5 @@ uint8_t smsKeymapDefault(uint8_t hid);
 bool    smsKeymapSet(uint8_t hid, uint8_t code);
 void    smsKeymapResetAll();
 int     smsKeymapChangedCount();
-// Write the overrides to /sms/keymap.txt. False if the card could not be written.
+// Write the overrides to /emu8/sms/keymap.txt. False if the card could not be written.
 bool    smsKeymapSave();

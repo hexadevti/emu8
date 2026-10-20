@@ -2,7 +2,7 @@
 // keyboard, the desktop build's PC keyboard: everything that reaches usbKeyboardReport()).
 //
 // A built-in default map, plus overrides read from a text file on the SD card when the SMS boots:
-// /sms/keymap.txt (or /smskeymap.txt at the root). One rule per line, '#' starts a comment:
+// /emu8/sms/keymap.txt (or /smskeymap.txt at the root). One rule per line, '#' starts a comment:
 //
 //     <host key> = <SMS button>
 //
@@ -15,8 +15,7 @@
 // button. The pad has no SHIFT: a key is the same button with or without it. The full default map
 // is in docs/sms-keymap.txt. PAUSE (F11) and reset (F12) are the console's, not the pad's: not here.
 //
-// The default: the arrows are the D-pad, Space / Z are button 1, X is button 2, and on the PicoCalc
-// F4 / F5 (right above the arrows) are buttons 1 / 2.
+// The default: the arrows are the D-pad; the PicoCalc's third row gives the buttons: [ 1, ] 2.
 
 #include "../../emu.h"
 
@@ -32,10 +31,7 @@ struct SmsRule { uint8_t hid, code; };
 // HID usage codes (the standard USB HID keyboard page), numeric so every board's header works.
 static const SmsRule kDefault[] = {
   {0x52, SMSK_UP}, {0x51, SMSK_DOWN}, {0x50, SMSK_LEFT}, {0x4F, SMSK_RIGHT},   // arrows
-  {0x2C, SMSK_1}, {0x1D, SMSK_1}, {0x1B, SMSK_2},                              // Space  Z  X
-#if UI_PICOCALC
-  {0x3D, SMSK_1}, {0x3E, SMSK_2},                                              // F4  F5
-#endif
+  {0x2F, SMSK_1}, {0x30, SMSK_2},                                              // [  ]
 };
 
 // Overrides from the SD card. Rules equal to the default are not stored.
@@ -101,7 +97,7 @@ static void parseLine(char *s, int line)
 void smsKeymapLoad()
 {
   kOverCount = 0;
-  static const char *const kPaths[] = { "/sms/keymap.txt", "/smskeymap.txt" };
+  static const char *const kPaths[] = { "/emu8/sms/keymap.txt", "/sms/keymap.txt", "/smskeymap.txt" };
   for (const char *path : kPaths) {
     File f;
     try { f = FSTYPE.open(path, FILE_READ); }
@@ -169,12 +165,13 @@ int  smsKeymapChangedCount() { return kOverCount; }
 
 bool smsKeymapSave()
 {
-  static const char *const kPath = "/sms/keymap.txt";
+  static const char *const kPath = "/emu8/sms/keymap.txt";
   // Timed lock, not busTake(): this runs in the render task (the menu).
   if (gBusLock && xSemaphoreTake(gBusLock, pdMS_TO_TICKS(5000)) != pdTRUE) return false;
   bool ok = false;
   try {
-    if (!FSTYPE.exists("/sms")) FSTYPE.mkdir("/sms");
+    if (!FSTYPE.exists("/emu8")) FSTYPE.mkdir("/emu8");
+    if (!FSTYPE.exists("/emu8/sms")) FSTYPE.mkdir("/emu8/sms");
     if (FSTYPE.exists(kPath)) FSTYPE.remove(kPath);     // FILE_WRITE appends on arduino-pico
     File f = FSTYPE.open(kPath, FILE_WRITE);
     if (f) {

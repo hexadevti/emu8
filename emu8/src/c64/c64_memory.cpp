@@ -59,7 +59,17 @@ C64_HOT unsigned char read8(unsigned short addr) {
         uint8_t raster8 = (rasterline >= 256) ? 0x80 : 0;
         return (vicreg[0x11] & 0x7f) | raster8;
       }
-      return vicreg[vicidx];
+      // Bits the VIC does not implement read as 1 ($D02F-$D03F are all unused). Programs test
+      // e.g. $D019 or a colour register whole; reading them as 0 broke those checks.
+      uint8_t v = vicreg[vicidx];
+      if (vicidx >= 0x20) return (vicidx >= 0x2f) ? 0xff : (v | 0xf0);
+      switch (vicidx) {
+        case 0x16: return v | 0xc0;
+        case 0x18: return v | 0x01;
+        case 0x19: return v | 0x70;
+        case 0x1a: return v | 0xf0;
+        default:   return v;
+      }
     } else if (addr <= 0xd7ff) {          // SID ($D400-$D41F, mirrored to $D7FF)
       return ::sidRead((addr - 0xd400) & 0x1f);
     } else if (addr <= 0xdbff) {          // color RAM
@@ -75,7 +85,11 @@ C64_HOT unsigned char read8(unsigned short addr) {
   } else if ((!bankDRAM) && (addr >= 0xd000) && (addr <= 0xdfff)) {
     return charset_rom[addr - 0xd000];    // character ROM
   } else if (addr == 0x0001) {
-    return register1;
+    // 6510 port: output bits read the latch, input bits the lines. With the KERNAL's DDR ($2F)
+    // bit 4 is an input, the cassette sense: 1 = no PLAY key down. Returning the raw latch ($E7
+    // after IOINIT) said PLAY was held, so LOAD without ",8" skipped "PRESS PLAY ON TAPE",
+    // blanked the screen and waited for a tape that never came.
+    return (uint8_t)(((register1 & ram[0]) | (~ram[0] & 0x17)) & 0x3F);
   }
   return ram[addr];
 }
@@ -102,7 +116,11 @@ C64_HOT void write8(unsigned short addr, unsigned char val) {
         vicreg[vicidx] = val;
         adaptVICBaseAddrs(false);
       } else if (vicidx == 0x19) {
-        vicreg[vicidx] = 0;
+        // Acknowledge: a 1 clears that flag, a 0 leaves it pending; the IRQ line (bit 7) stays
+        // up while any enabled flag is still set. (Clearing all of them on any write lost the
+        // sprite-collision / second raster IRQ a handler had not acknowledged yet.)
+        uint8_t f = vicreg[0x19] & ~val & 0x0f;
+        vicreg[0x19] = f | ((f & vicreg[0x1a] & 0x0f) ? 0x80 : 0);
       } else if ((vicidx == 0x1e) || (vicidx == 0x1f)) {
         vicreg[vicidx] = 0;
       } else {
@@ -123,9 +141,11 @@ C64_HOT void write8(unsigned short addr, unsigned char val) {
       if (::c64CartIsEF()) ::c64CartRamWrite(addr, val);
       else ram[addr] = val;
     }
-  } else if (addr == 0x0001) {
-    register1 = val;
-    decodeRegister1(register1 & 7);
+  } else if (addr <= 0x0001) {
+    // $00 is the port's direction register (kept in ram[0], so snapshots carry it), $01 the
+    // latch. A bit set as input floats high through the pull-ups, so it maps as a 1.
+    if (addr == 0) ram[0] = val; else register1 = val;
+    decodeRegister1((register1 | ~ram[0]) & 7);
   } else {
     ram[addr] = val;
   }

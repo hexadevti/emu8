@@ -40,7 +40,7 @@ void nesSetup() {
   nesScratch = (uint16_t *)malloc(NES_W * 8 * sizeof(uint16_t));
 
 #if BOARD_INPUT_USB
-  nesKeymapLoad();                                 // host key -> NES button overrides (/nes/keymap.txt)
+  nesKeymapLoad();                                 // host key -> NES button overrides (/emu8/nes/keymap.txt)
 #endif
   nes::ppuReset();
   nes::nesBuildGrayPalette();   // for the VIDEO=MONO option

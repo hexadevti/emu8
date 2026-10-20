@@ -1,6 +1,6 @@
 # emu8 - Apple II joystick map
 #
-# Copy this file to the SD card as /apple2/joymap.txt (or /apple2joymap.txt) and edit it to choose
+# Copy this file to the SD card as /emu8/apple2/joymap.txt (or /apple2joymap.txt) and edit it to choose
 # which keys steer the Apple joystick and press its buttons. It is read when the Apple boots. Every
 # line below is the BUILT-IN DEFAULT, so this file as shipped changes nothing; only lines that differ
 # from the default count (up to 32 of them). Use "= NONE" to take a key off the joystick. Errors are
@@ -8,7 +8,7 @@
 #
 # The Apple menu edits it too: CONFIG > JOYSTICK (on the PicoCalc a picture of its keyboard over the
 # Apple joystick: orange button 0 on the left side, 1 on the back edge; elsewhere a list). A change
-# there is live at once and rewrites /apple2/joymap.txt with only the changed keys.
+# there is live at once and rewrites /emu8/apple2/joymap.txt with only the changed keys.
 #
 # The stick is read while ARROWS is JOY or BOTH in the Apple menu; with KBD the keys only type. The
 # buttons always work, except that with KBD a key that types something is not a button. A direction
@@ -21,7 +21,6 @@
 #
 # JOYSTICK ACTIONS
 #   UP DOWN LEFT RIGHT
-#   UP+LEFT UP+RIGHT DOWN+LEFT DOWN+RIGHT   a diagonal on one key (LEFT+UP etc. also accepted)
 #   BUTTON0          PB0, the open-apple ($C061; also PB0, OPEN-APPLE)
 #   BUTTON1          PB1, the solid-apple ($C062; also PB1, SOLID-APPLE)
 #   NONE             the key does not touch the joystick
@@ -33,8 +32,5 @@ LEFT = LEFT
 RIGHT = RIGHT
 
 # ---- the buttons ----
-SPACE = BUTTON0
-ALT = BUTTON0
-RALT = BUTTON1
-F5 = BUTTON0
-F4 = BUTTON1
+RBRACKET = BUTTON0
+LBRACKET = BUTTON1

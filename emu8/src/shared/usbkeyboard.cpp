@@ -156,7 +156,7 @@ static void appleApplyJoystick(bool shift, bool ctrl, bool lalt, bool ralt, cons
 
 // ============================ C64 keyboard matrix ========================================
 // Which C64 key a host key presses comes from c64keymap.cpp: a built-in default, overridden per key
-// by /c64/keymap.txt on the SD card. A rule names a matrix key and what it does to SHIFT (F2 =
+// by /emu8/c64/keymap.txt on the SD card. A rule names a matrix key and what it does to SHIFT (F2 =
 // SHIFT+F1, CRSR LEFT = SHIFT+CRSR RIGHT, Shift-2 '@' = the C64's unshifted @ key).
 //
 // The rule is resolved once, on key-down, with the SHIFT state of that moment, and remembered with
@@ -260,7 +260,9 @@ static void c64ApplyJoystick(const uint8_t *keys, bool shift, bool ctrl, bool al
   uint8_t pull = 0;
   auto press = [&](uint8_t hid) { const uint8_t c = c64JoymapLookup(hid); if (c64jIsAction(c)) pull |= c; };
   for (int i = 0; i < 6; i++) if (keys[i]) press(keys[i]);
-  if (shift) press(C64K_HID_SHIFT);
+  // The other half of c64ApplyModifiers' rule: SHIFT with a typing key is a keystroke, not a shot.
+  // Firing on it anyway pulled the stick's FIRE line while typing shifted characters.
+  if (shift && !c64HasTypingKey(keys)) press(C64K_HID_SHIFT);
   if (ctrl)  press(C64K_HID_CTRL);
   if (alt)   press(C64K_HID_ALT);
   c64SetJoystick((uint8_t)~(pull & C64J_LINES));
@@ -270,7 +272,7 @@ static void c64ApplyJoystick(const uint8_t *keys, bool shift, bool ctrl, bool al
 // ============================ NES controller 1 ===========================================
 // Active-high bits: bit0=A bit1=B bit2=Select bit3=Start bit4=Up bit5=Down bit6=Left bit7=Right.
 // Rebuilt from the held keys + CTRL / ALT on every report (neskeymap.cpp: a built-in default,
-// overridden per key by /nes/keymap.txt), so two keys on the same button don't release each other.
+// overridden per key by /emu8/nes/keymap.txt), so two keys on the same button don't release each other.
 static uint8_t nesKbBits = 0;
 static void nesApplyKeyboard(bool ctrl, bool alt, const uint8_t *keys)
 {
@@ -285,7 +287,7 @@ static void nesApplyKeyboard(bool ctrl, bool alt, const uint8_t *keys)
 // ============================ Atari 2600 ================================================
 // dirBits: bit0=Up bit1=Down bit2=Left bit3=Right, plus Fire / Select / Reset switches. Rebuilt
 // from the held keys + CTRL / ALT on every report (atarikeymap.cpp: a built-in default, overridden
-// per key by /atari/keymap.txt), so two keys on the same line don't release each other.
+// per key by /emu8/atari/keymap.txt), so two keys on the same line don't release each other.
 static uint8_t atariKbBits = 0;
 static void atariApplyBits(uint8_t bits)
 {
@@ -303,7 +305,7 @@ static void atariApplyKeyboard(bool ctrl, bool alt, const uint8_t *keys)
 
 // ============================ MSX keyboard matrix ========================================
 // Each host key presses the MSX key msxkeymap.cpp names (a built-in default, overridden per key by
-// /msx/keymap.txt), fed to msxKeyMatrix(row, bit, down); see the matrix table in src/msx/msx_ppi.cpp.
+// /emu8/msx/keymap.txt), fed to msxKeyMatrix(row, bit, down); see the matrix table in src/msx/msx_ppi.cpp.
 // Same scheme as the C64 above: the rule is resolved on key-down with that moment's SHIFT and
 // remembered with the key, the matrix is rebuilt from the held keys + modifiers on every report and
 // only the CHANGES are written, so two host keys on the same MSX key don't release each other.
@@ -390,7 +392,7 @@ static void msxApplyJoystick(const uint8_t *keys, bool shift, bool ctrl, bool al
 }
 // SMS has no keyboard: the keys press control pad 1's buttons (active-low, b0 up b1 down b2 left
 // b3 right b4 button 1 b5 button 2). Rebuilt from the held keys + CTRL / ALT on every report
-// (smskeymap.cpp: a built-in default, overridden per key by /sms/keymap.txt).
+// (smskeymap.cpp: a built-in default, overridden per key by /emu8/sms/keymap.txt).
 static void smsApplyJoystick(bool ctrl, bool alt, const uint8_t *keys)
 {
   uint8_t m = 0xFF;
@@ -402,7 +404,7 @@ static void smsApplyJoystick(bool ctrl, bool alt, const uint8_t *keys)
 }
 // ColecoVision: the keys press controller 1's stick, side buttons and keypad (colecokeymap.cpp: a
 // built-in default - arrows, Space/Z/F4 + X/F5 fire, the digit row / numeric keypad, '*' / '#' on
-// Shift-8 / Shift-3 and '-' / '=' - overridden per key by /coleco/keymap.txt). Rebuilt from the held
+// Shift-8 / Shift-3 and '-' / '=' - overridden per key by /emu8/coleco/keymap.txt). Rebuilt from the held
 // keys + CTRL / ALT on every report. The keypad holds a single key, so the first one found wins.
 static void colecoApplyJoystick(bool shift, bool ctrl, bool alt, const uint8_t *keys)
 {

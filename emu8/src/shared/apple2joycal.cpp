@@ -7,7 +7,7 @@
 // an end is that end, and a small dead zone round the centre reads exactly 127.
 //
 // Recorded from the Apple menu (CONFIG > CALIBRATE): let the stick rest and press Enter / fire,
-// then move it to every edge and press again. Saved to /apple2/joycal.txt:
+// then move it to every edge and press again. Saved to /emu8/apple2/joycal.txt:
 //
 //     X = <lo> <center> <hi>
 //     Y = <lo> <center> <hi>
@@ -75,12 +75,12 @@ float apple2JoycalPaddle(int axis, int raw)
 }
 
 // ---- the file ---------------------------------------------------------------------------------
-static const char *const kPath = "/apple2/joycal.txt";
+static const char *const kPath = "/emu8/apple2/joycal.txt";
 
 void apple2JoycalLoad()
 {
   gHaveCal = false;
-  static const char *const kPaths[] = { "/apple2/joycal.txt", "/apple2joycal.txt" };
+  static const char *const kPaths[] = { "/emu8/apple2/joycal.txt", "/apple2/joycal.txt", "/apple2joycal.txt" };
   for (const char *path : kPaths) {
     File f;
     try { f = FSTYPE.open(path, FILE_READ); }
@@ -121,7 +121,8 @@ bool apple2JoycalSave()
   if (gBusLock && xSemaphoreTake(gBusLock, pdMS_TO_TICKS(5000)) != pdTRUE) return false;
   bool ok = false;
   try {
-    if (!FSTYPE.exists("/apple2")) FSTYPE.mkdir("/apple2");
+    if (!FSTYPE.exists("/emu8")) FSTYPE.mkdir("/emu8");
+    if (!FSTYPE.exists("/emu8/apple2")) FSTYPE.mkdir("/emu8/apple2");
     if (FSTYPE.exists(kPath)) FSTYPE.remove(kPath);     // FILE_WRITE appends on arduino-pico
     File f = FSTYPE.open(kPath, FILE_WRITE);
     if (f) {
@@ -147,7 +148,9 @@ bool apple2JoycalReset()
   gDirty = true;
   if (gBusLock && xSemaphoreTake(gBusLock, pdMS_TO_TICKS(5000)) != pdTRUE) return false;
   bool ok = true;
-  try { if (FSTYPE.exists(kPath)) ok = FSTYPE.remove(kPath); }
+  // The old locations too, or the loader would fall back to them.
+  static const char *const kAll[] = { kPath, "/apple2/joycal.txt", "/apple2joycal.txt" };
+  try { for (const char *p : kAll) if (FSTYPE.exists(p)) ok = FSTYPE.remove(p) && ok; }
   catch (const std::bad_alloc &) { ok = false; }
   if (gBusLock) xSemaphoreGive(gBusLock);
   return ok;

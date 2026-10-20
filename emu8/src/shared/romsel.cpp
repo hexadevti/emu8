@@ -197,7 +197,7 @@ static bool setBaseDir(int rec, const char *dir, const char *def, const char *wh
 bool setRomBaseDir(const char *dir)  { return setBaseDir(ROMSEL_BASE_ROMS, dir, "/roms", "ROM base"); }
 bool setAppsBaseDir(const char *dir) { return setBaseDir(ROMSEL_BASE_APPS, dir, "/", "apps base"); }
 
-// Snapshot base: save states go to <this>/<system>/ (snapshot.cpp), "/emu8-snapshot" unless changed.
+// Snapshot base: save states go to <this>/<emulator>/snapshot/ (snapshot.cpp), "/emu8" unless changed.
 const char *snapBaseDir()
 {
   static char d[ROMSEL_SLOT_LEN];

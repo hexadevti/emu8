@@ -2,7 +2,7 @@
 // desktop build's PC keyboard: everything that reaches usbKeyboardReport()).
 //
 // A built-in default map, plus overrides read from a text file on the SD card when the Spectrum
-// boots: /zx/keymap.txt (or /zxkeymap.txt at the root). One rule per line, '#' starts a comment:
+// boots: /emu8/zx/keymap.txt (or /zxkeymap.txt at the root). One rule per line, '#' starts a comment:
 //
 //     <host key> = <Spectrum key> [+CAPS | -CAPS | +SYMBOL]
 //
@@ -190,7 +190,7 @@ static void parseLine(char *s, int line)
 void zxKeymapLoad()
 {
   kOverCount = 0;
-  static const char *const kPaths[] = { "/zx/keymap.txt", "/zxkeymap.txt" };
+  static const char *const kPaths[] = { "/emu8/zx/keymap.txt", "/zx/keymap.txt", "/zxkeymap.txt" };
   for (const char *path : kPaths) {
     File f;
     try { f = FSTYPE.open(path, FILE_READ); }
@@ -272,12 +272,13 @@ int  zxKeymapChangedCount() { return kOverCount; }
 
 bool zxKeymapSave()
 {
-  static const char *const kPath = "/zx/keymap.txt";
+  static const char *const kPath = "/emu8/zx/keymap.txt";
   // Timed lock, not busTake(): this runs in the render task (the menu).
   if (gBusLock && xSemaphoreTake(gBusLock, pdMS_TO_TICKS(5000)) != pdTRUE) return false;
   bool ok = false;
   try {
-    if (!FSTYPE.exists("/zx")) FSTYPE.mkdir("/zx");
+    if (!FSTYPE.exists("/emu8")) FSTYPE.mkdir("/emu8");
+    if (!FSTYPE.exists("/emu8/zx")) FSTYPE.mkdir("/emu8/zx");
     if (FSTYPE.exists(kPath)) FSTYPE.remove(kPath);     // FILE_WRITE appends on arduino-pico
     File f = FSTYPE.open(kPath, FILE_WRITE);
     if (f) {

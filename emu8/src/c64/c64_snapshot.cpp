@@ -11,7 +11,7 @@
 //           the processor port ($01 latch; $00 is in RAM), a pending reset request
 //   "RAM "  the 64K RAM
 //   "CRAM"  the 1K colour RAM
-//   "CIA "  both CIAs: ports, data directions, timers + latches, control, ICR data / mask
+//   "CIA "  both CIAs: ports, data directions, timers + latches, control, ICR data / mask, TOD
 //   "VIC "  $D000-$D03F, the $D011/$D012 latches, the bank, the raster line and the border /
 //           badline / character-row state of the frame in progress
 //   "SID "  the registers, each voice's oscillator / noise / envelope, the filter integrators
@@ -27,7 +27,8 @@
 // Taken with cpuLoop idling in its paused spin -- at an instruction boundary, anywhere in a frame:
 // the raster position and the cycles towards the next line go with it, so the frame carries on.
 
-#define C64_SNAP_VERSION 1
+// 2: CIA1 Timer B, CIA2 port B and both TOD clocks (a version 1 file still loads; those reset).
+#define C64_SNAP_VERSION 2
 
 bool c64Snapshot(SnapIO &io)
 {
@@ -37,7 +38,7 @@ bool c64Snapshot(SnapIO &io)
   uint32_t ramSize = 0x10000;
   io.val(ver);
   io.val(ramSize);
-  if (io.ok && io.loading && (ver != C64_SNAP_VERSION || ramSize != 0x10000))
+  if (io.ok && io.loading && ((ver != 1 && ver != C64_SNAP_VERSION) || ramSize != 0x10000))
     io.reject("Snapshot from another C64 version");
   if (io.ok && (!c64::ram || !c64::colormap || !c64::cpuWaitParked(500))) {
     if (io.loading) io.reject("C64 not running - try again");
@@ -68,7 +69,7 @@ bool c64Snapshot(SnapIO &io)
 
   // ---- chips ----
   io.tag("CIA ");
-  c64::ciaSnapshot(io);
+  c64::ciaSnapshot(io, ver);
   io.tag("VIC ");
   c64::vicSnapshot(io);
   io.tag("SID ");
@@ -79,8 +80,8 @@ bool c64Snapshot(SnapIO &io)
   }
 
   if (io.loading && io.ok) {
-    c64::register1 = port;                    // $01: rebuild the banking from the latch
-    c64::decodeRegister1(port & 7);
+    c64::register1 = port;                    // $01: rebuild the banking from the latch + DDR ($00)
+    c64::decodeRegister1((port | ~c64::ram[0]) & 7);
     c64::c64ResetReq = resetReq;
     c64::kbReset();                           // nothing held: the host keys are not the snapshot's
     ::c64AutoloadPending = false;             // a queued boot load must not land on top of it

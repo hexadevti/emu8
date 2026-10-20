@@ -2,7 +2,7 @@
 // desktop build's PC keyboard: everything that reaches usbKeyboardReport()).
 //
 // A built-in default map, plus overrides read from a text file on the SD card when the C64 boots:
-// /c64/keymap.txt (or /c64keymap.txt at the root). One rule per line, '#' starts a comment:
+// /emu8/c64/keymap.txt (or /c64keymap.txt at the root). One rule per line, '#' starts a comment:
 //
 //     <host key> = <C64 key> [+SHIFT | -SHIFT]
 //
@@ -250,7 +250,7 @@ static void parseLine(char *s, int line)
 void c64KeymapLoad()
 {
   kOverCount = 0;
-  static const char *const kPaths[] = { "/c64/keymap.txt", "/c64keymap.txt" };
+  static const char *const kPaths[] = { "/emu8/c64/keymap.txt", "/c64/keymap.txt", "/c64keymap.txt" };
   for (const char *path : kPaths) {
     File f;
     try { f = FSTYPE.open(path, FILE_READ); }
@@ -377,12 +377,13 @@ int  c64KeymapChangedCount() { return kOverCount; }
 
 bool c64KeymapSave()
 {
-  static const char *const kPath = "/c64/keymap.txt";
+  static const char *const kPath = "/emu8/c64/keymap.txt";
   // Timed lock, not busTake(): this runs in the render task (the menu).
   if (gBusLock && xSemaphoreTake(gBusLock, pdMS_TO_TICKS(5000)) != pdTRUE) return false;
   bool ok = false;
   try {
-    if (!FSTYPE.exists("/c64")) FSTYPE.mkdir("/c64");
+    if (!FSTYPE.exists("/emu8")) FSTYPE.mkdir("/emu8");
+    if (!FSTYPE.exists("/emu8/c64")) FSTYPE.mkdir("/emu8/c64");
     if (FSTYPE.exists(kPath)) FSTYPE.remove(kPath);     // FILE_WRITE appends on arduino-pico
     File f = FSTYPE.open(kPath, FILE_WRITE);
     if (f) {

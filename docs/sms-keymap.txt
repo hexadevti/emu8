@@ -1,6 +1,6 @@
 # emu8 - Sega Master System keyboard map
 #
-# Copy this file to the SD card as /sms/keymap.txt (or /smskeymap.txt) and edit it to remap keys.
+# Copy this file to the SD card as /emu8/sms/keymap.txt (or /smskeymap.txt) and edit it to remap keys.
 # It is read when the SMS boots. Every line below is the BUILT-IN DEFAULT, so this file as shipped
 # changes nothing; only lines that differ from the default count (up to 64 of them). Deleting a
 # line does not unmap the key, it just leaves the default; use "= NONE" to make a key do nothing.
@@ -8,7 +8,7 @@
 #
 # The SMS menu edits it too: CONFIG > KEYBOARD (on the PicoCalc a picture of its keyboard over an
 # SMS control pad; elsewhere a list). A change there is live at once and rewrites
-# /sms/keymap.txt with only the changed keys.
+# /emu8/sms/keymap.txt with only the changed keys.
 #
 # Applies to every keyboard that reaches the SMS through the HID path: the PicoCalc's built-in
 # keyboard, a USB keyboard (JC4827W543 / JC1060P470), and the PC keyboard in the desktop build.
@@ -35,8 +35,7 @@
 #   2                button 2 (also accepted: BUTTON2)
 #   NONE             the key does nothing
 #
-# PicoCalc notes: the default also has "F4 = 1" and "F5 = 2" (the PicoCalc's buttons); they are
-# PicoCalc-only, so they are commented out below. The menu keys (Ctrl-F1 ...) are not remapped here.
+# PicoCalc notes: the menu keys (Ctrl-F1 ...) are not remapped here.
 
 # ---- the D-pad ----
 UP = UP
@@ -45,10 +44,5 @@ LEFT = LEFT
 RIGHT = RIGHT
 
 # ---- the buttons ----
-SPACE = 1
-Z = 1
-X = 2
-
-# ---- PicoCalc only ----
-# F4 = 1
-# F5 = 2
+LBRACKET = 1
+RBRACKET = 2

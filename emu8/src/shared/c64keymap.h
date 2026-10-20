@@ -26,7 +26,7 @@ static inline uint8_t c64kShift(uint8_t c)    { return c >> 6; }
 // The C64 key for host key `hid` typed with the host SHIFT `shift` down: a SHIFT+ rule first,
 // then the plain rule; the SD card's overrides before the built-in default in each case.
 uint8_t c64KeymapLookup(uint8_t hid, bool shift);
-// (Re)read the overrides from /c64/keymap.txt (or /c64keymap.txt). Missing file = defaults only.
+// (Re)read the overrides from /emu8/c64/keymap.txt (or /c64keymap.txt). Missing file = defaults only.
 void c64KeymapLoad();
 
 // ---- for the KEYBOARD page (optionsui.cpp) ----
@@ -51,5 +51,5 @@ uint8_t c64KeymapDefault(uint8_t hid, bool shifted);
 bool    c64KeymapSet(uint8_t hid, bool shifted, uint8_t code);
 void    c64KeymapResetAll();
 int     c64KeymapChangedCount();
-// Write the overrides to /c64/keymap.txt. False if the card could not be written.
+// Write the overrides to /emu8/c64/keymap.txt. False if the card could not be written.
 bool    c64KeymapSave();

@@ -2,7 +2,7 @@
 // the desktop build's PC keyboard: everything that reaches usbKeyboardReport()).
 //
 // A built-in default map, plus overrides read from a text file on the SD card when the Apple boots:
-// /apple2/keymap.txt (or /apple2keymap.txt at the root). One rule per line, '#' starts a comment:
+// /emu8/apple2/keymap.txt (or /apple2keymap.txt at the root). One rule per line, '#' starts a comment:
 //
 //     <host key> = <Apple key> [+SHIFT | -SHIFT | +CTRL]
 //
@@ -15,7 +15,7 @@
 // the Apple's SHIFT unless +SHIFT / +CTRL says otherwise. A plain rule passes SHIFT through as
 // typed. +SHIFT / -SHIFT hold or release it whatever the host keyboard says; +CTRL holds CTRL. Host
 // keys are named as in the C64 map (c64keymap.cpp), plus RALT. The full default map is in
-// docs/apple2-keymap.txt. The IIe reads /apple2/keymap-iie.txt instead (docs/apple2e-keymap.txt).
+// docs/apple2-keymap.txt. The IIe reads /emu8/apple2/keymap-iie.txt instead (docs/apple2e-keymap.txt).
 //
 // The keys are the II+'s 52 (POWER is a light, not a key): what a key sends comes from the II+
 // keyboard encoder (apple2KeyCode), so Shift-M is ']', Shift-N '^', Shift-P '@', and CTRL changes
@@ -305,10 +305,10 @@ void apple2KeymapLoad()
 {
   kOverCount = 0;
   // The IIe has its own file: its default differs, so the II+ file read on it would be all changes.
-  static const char *const kPathsII[] = { "/apple2/keymap.txt", "/apple2keymap.txt" };
-  static const char *const kPathsIIe[] = { "/apple2/keymap-iie.txt", "/apple2keymap-iie.txt" };
+  static const char *const kPathsII[] = { "/emu8/apple2/keymap.txt", "/apple2/keymap.txt", "/apple2keymap.txt" };
+  static const char *const kPathsIIe[] = { "/emu8/apple2/keymap-iie.txt", "/apple2/keymap-iie.txt", "/apple2keymap-iie.txt" };
   const char *const *kPaths = AppleIIe ? kPathsIIe : kPathsII;
-  for (int pi = 0; pi < 2; pi++) {
+  for (int pi = 0; pi < 3; pi++) {
     const char *path = kPaths[pi];
     File f;
     try { f = FSTYPE.open(path, FILE_READ); }
@@ -377,12 +377,13 @@ int  apple2KeymapChangedCount() { return kOverCount; }
 
 bool apple2KeymapSave()
 {
-  const char *const kPath = AppleIIe ? "/apple2/keymap-iie.txt" : "/apple2/keymap.txt";
+  const char *const kPath = AppleIIe ? "/emu8/apple2/keymap-iie.txt" : "/emu8/apple2/keymap.txt";
   // Timed lock, not busTake(): this runs in the render task (the menu).
   if (gBusLock && xSemaphoreTake(gBusLock, pdMS_TO_TICKS(5000)) != pdTRUE) return false;
   bool ok = false;
   try {
-    if (!FSTYPE.exists("/apple2")) FSTYPE.mkdir("/apple2");
+    if (!FSTYPE.exists("/emu8")) FSTYPE.mkdir("/emu8");
+    if (!FSTYPE.exists("/emu8/apple2")) FSTYPE.mkdir("/emu8/apple2");
     if (FSTYPE.exists(kPath)) FSTYPE.remove(kPath);     // FILE_WRITE appends on arduino-pico
     File f = FSTYPE.open(kPath, FILE_WRITE);
     if (f) {

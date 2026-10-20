@@ -959,12 +959,8 @@ static void ouiDrawHelp()
   if (ouiIsNES()) {
     ouiHelpHdr(y, "NES  -  KEYBOARD");
     ouiHelpRow(y, "Arrows",      "D-pad");
-#if OUI_PICOCALC
-    ouiHelpRow(y, "F4 / F5",     "A / B");
-    ouiHelpRow(y, "F2 / F3",     "Start / Select");
-#endif
-    ouiHelpRow(y, "X / Z",       "A / B");
-    ouiHelpRow(y, "Enter / Tab", "Start / Select");
+    ouiHelpRow(y, "] / [",       "A / B");
+    ouiHelpRow(y, "/ / `",       "Start / Select");
 #if BOARD_INPUT_USB
     ouiHelpRow(y, "Remap",       "CONFIG>KEYBOARD");
 #endif
@@ -977,15 +973,9 @@ static void ouiDrawHelp()
   } else if (ouiIsAtari()) {
     ouiHelpHdr(y, "ATARI  -  KEYBOARD");
     ouiHelpRow(y, "Arrows",    "Joystick");
-#if OUI_PICOCALC
-    ouiHelpRow(y, "F5 / Space", "Fire");
-    ouiHelpRow(y, "F3 / Enter", "Reset switch");
-    ouiHelpRow(y, "F4 / Tab",   "Select switch");
-#else
-    ouiHelpRow(y, "Space / X", "Fire");
-    ouiHelpRow(y, "Enter",     "Reset switch");
-    ouiHelpRow(y, "Tab",       "Select switch");
-#endif
+    ouiHelpRow(y, "]",         "Fire");
+    ouiHelpRow(y, "/",         "Reset switch");
+    ouiHelpRow(y, "`",         "Select switch");
 #if BOARD_INPUT_USB
     ouiHelpRow(y, "Remap",     "CONFIG>KEYBOARD");
 #endif
@@ -999,7 +989,7 @@ static void ouiDrawHelp()
     ouiHelpHdr(y, "C64  -  KEYBOARD");
     ouiHelpRow(y, "Keys",      "C64 layout; CONFIG>KEYBOARD");
     ouiHelpRow(y, "Arrows",    "Cursor (JOY off)");
-    ouiHelpRow(y, "Arr+Space", "Joystick (JOY on)");
+    ouiHelpRow(y, "Arrows+] [ =", "Joystick (JOY on)");
     ouiHelpRow(y, "Enter",      "Files: mount");
     ouiHelpRow(y, "Ctrl-Enter", "Files: mount + run");
 #if !OUI_PICOCALC   // no gamepad port on this board; see the note at the Apple section
@@ -1015,7 +1005,7 @@ static void ouiDrawHelp()
     ouiHelpRow(y, "Keys",      "MSX layout");
 #endif
     ouiHelpRow(y, "Arrows",    "Cursor / Joystick");
-    ouiHelpRow(y, "Space",     "Trigger / Space");
+    ouiHelpRow(y, "] / [",     "Trigger A / B");
     ouiHelpRow(y, "Ctrl-Enter", "Files: mount only");
     ouiHelpRow(y, "Del",        "Files: unmount");
 #if !OUI_PICOCALC   // no gamepad port on this board; see the note at the Apple section
@@ -1031,12 +1021,10 @@ static void ouiDrawHelp()
 #endif
     ouiHelpHdr(y, "SMS  -  KEYBOARD");
     ouiHelpRow(y, "Arrows", "D-pad");
+    ouiHelpRow(y, "[ / ]",  "Button 1 / 2");
 #if OUI_PICOCALC
-    ouiHelpRow(y, "F4 / F5",  "Button 1 / 2");
-    ouiHelpRow(y, "Space / X","Button 1 / 2");
     ouiHelpRow(y, "Ctrl-F3",  "PAUSE");
 #else
-    ouiHelpRow(y, "Z / X",  "Button 1 / 2");
     ouiHelpRow(y, "F11",    "PAUSE");
     ouiHelpRow(y, "F12",    "Reset");
 #endif
@@ -1049,13 +1037,7 @@ static void ouiDrawHelp()
 #endif
     ouiHelpHdr(y, "COLECO  -  KEYBOARD");
     ouiHelpRow(y, "Arrows", "Stick");
-#if OUI_PICOCALC
-    ouiHelpRow(y, "Space/F4", "Left fire");
-    ouiHelpRow(y, "X / F5",   "Right fire");
-#else
-    ouiHelpRow(y, "Space/Z", "Left fire");
-    ouiHelpRow(y, "X",       "Right fire");
-#endif
+    ouiHelpRow(y, "[ / ]",  "Left / right fire");
     ouiHelpRow(y, "0-9",    "Keypad");
     ouiHelpRow(y, "- / =",  "Keypad * / #");
     ouiHelpRow(y, "F12",    "Reset");
@@ -1074,6 +1056,7 @@ static void ouiDrawHelp()
     ouiHelpRow(y, "Backspace", "DELETE");
     ouiHelpRow(y, "Esc",       "BREAK");
     ouiHelpRow(y, "Arrows",    "Cursor (JOYSTICK on: Kempston)");
+    ouiHelpRow(y, "]",         "Kempston fire (JOYSTICK on)");
     ouiHelpRow(y, "F12",       "Reset");
   } else if (ouiIsPcxt()) {
     ouiHelpHdr(y, "PC-XT  -  KEYBOARD");
@@ -1092,11 +1075,10 @@ static void ouiDrawHelp()
     ouiHelpRow(y, "Keys",   "Type into Apple");
 #endif
     ouiHelpRow(y, "Arrows", "ARROWS: JOY/KBD/BOTH");
+    ouiHelpRow(y, "] / [",   "Button 0 / 1");
 #if OUI_PICOCALC
-    ouiHelpRow(y, "F4 / F5", "Button 1 / 0");
     ouiHelpRow(y, "Ctrl-F3", "Reset the Apple");
 #else
-    ouiHelpRow(y, "Alt / AltGr", "Button 0 / 1");
     ouiHelpRow(y, "F11",    "Reset");
 #endif
 #if !OUI_PICOCALC
@@ -1755,8 +1737,8 @@ bool optionsUiGeneralOpen() { return ouiGenMode != 0; }
 //           (NES: the default, NONE, then the 8 buttons; a pick saves at once)
 //   mode 4  what that key does to the C64's SHIFT (not on the NES)
 //   mode 5  "reset every key?" confirmation
-// A change is live at once and saved to /c64/keymap.txt (/nes/keymap.txt).
-// JOYSTICK (C64) is the same pages over the joystick map (c64joymap.cpp, /c64/joymap.txt): each host
+// A change is live at once and saved to /emu8/c64/keymap.txt (/emu8/nes/keymap.txt).
+// JOYSTICK (C64) is the same pages over the joystick map (c64joymap.cpp, /emu8/c64/joymap.txt): each host
 // key and the stick direction / FIRE it gives, picked like an NES button (no SHIFT step). ROMS and HELP open over this page
 // (ouiRomMode / ouiHelpOpen are checked first everywhere) and come back to it.
 // Shares the list pages' state (ouiRomSel, ouiRomMsg...) like ROMS / general.
@@ -2189,8 +2171,8 @@ static void ouiCfgRow(int idx, char *a, size_t na, char *b, size_t nb, uint16_t 
 
 struct OuiKvR { int16_t x, y, w, h; };
 
-// 8x8 arrows etc. for the labels the UI font has no character for (label "\x01".."\x0B").
-static const uint8_t kOuiKvGlyph[13][8] = {
+// 8x8 arrows etc. for the labels the UI font has no character for (label "\x01".."\x09").
+static const uint8_t kOuiKvGlyph[9][8] = {
   { 0x00, 0x20, 0x40, 0xFE, 0x40, 0x20, 0x00, 0x00 },   // 1 left
   { 0x00, 0x08, 0x04, 0xFE, 0x04, 0x08, 0x00, 0x00 },   // 2 right
   { 0x10, 0x38, 0x54, 0x10, 0x10, 0x10, 0x10, 0x00 },   // 3 up
@@ -2198,12 +2180,8 @@ static const uint8_t kOuiKvGlyph[13][8] = {
   { 0x10, 0x38, 0x54, 0x10, 0x54, 0x38, 0x10, 0x00 },   // 5 up-down (CRSR)
   { 0x00, 0x24, 0x42, 0xFF, 0x42, 0x24, 0x00, 0x00 },   // 6 left-right (CRSR)
   { 0x1C, 0x22, 0x20, 0x78, 0x20, 0x20, 0x7E, 0x00 },   // 7 pound
-  { 0xF0, 0xC0, 0xA0, 0x90, 0x08, 0x04, 0x02, 0x00 },   // 8 up-left (the joystick's diagonals)
-  { 0x0F, 0x03, 0x05, 0x09, 0x10, 0x20, 0x40, 0x00 },   // 9 up-right
-  { 0x00, 0x02, 0x04, 0x08, 0x90, 0xA0, 0xC0, 0xF0 },   // 10 down-left
-  { 0x00, 0x40, 0x20, 0x10, 0x09, 0x05, 0x03, 0x0F },   // 11 down-right
-  { 0x08, 0x10, 0x6C, 0x92, 0x82, 0x82, 0x44, 0x38 },   // 12 open apple (the IIe's key)
-  { 0x08, 0x10, 0x6C, 0xFE, 0xFE, 0xFE, 0x7C, 0x38 },   // 13 solid apple
+  { 0x08, 0x10, 0x6C, 0x92, 0x82, 0x82, 0x44, 0x38 },   // 8 open apple (the IIe's key)
+  { 0x08, 0x10, 0x6C, 0xFE, 0xFE, 0xFE, 0x7C, 0x38 },   // 9 solid apple
 };
 
 // The PicoCalc keys: x, row, width, rows; the HID code and the one Shift turns it into (0 = the
@@ -2335,8 +2313,8 @@ static const OuiKvCk kOuiKvA2e[] = {
   { 11, 3, 2, A2L('V'), 0, "V" }, { 13, 3, 2, A2L('B'), 0, "B" }, { 15, 3, 2, A2L('N'), 0, "N" },
   { 17, 3, 2, A2L('M'), 0, "M" }, { 19, 3, 2, A2K_COMMA, 0, ",<" }, { 21, 3, 2, A2K_PERIOD, 0, ".>" },
   { 23, 3, 2, A2K_SLASH, 0, "/?" }, { 25, 3, 4, A2K_RSHIFT, 0, "SHIFT" },
-  {  0, 4, 3, A2K_CAPS, 0, "CAPS" }, {  3, 4, 2, A2K_OAPPLE, 0, "\x0C" }, {  5, 4, 2, A2K_GRAVE, 0, "`~" },
-  {  7, 4, 10, A2K_SPACE, 0, "" }, { 17, 4, 2, A2K_BACKSLASH, 0, "\\|" }, { 19, 4, 2, A2K_SAPPLE, 0, "\x0D" },
+  {  0, 4, 3, A2K_CAPS, 0, "CAPS" }, {  3, 4, 2, A2K_OAPPLE, 0, "\x08" }, {  5, 4, 2, A2K_GRAVE, 0, "`~" },
+  {  7, 4, 10, A2K_SPACE, 0, "" }, { 17, 4, 2, A2K_BACKSLASH, 0, "\\|" }, { 19, 4, 2, A2K_SAPPLE, 0, "\x09" },
   { 21, 4, 2, A2K_LEFT, 0, "\x01" }, { 23, 4, 2, A2K_RIGHT, 0, "\x02" }, { 25, 4, 2, A2K_DOWN, 0, "\x04" },
   { 27, 4, 2, A2K_UP, 0, "\x03" },
   {  0, 0, 0, A2K_RESET, OUI_KV_FCOL, "RESET" },
@@ -2427,24 +2405,20 @@ static const OuiKvNk kOuiKvNk[] = {
 #define OUI_KV_NNK ((int)(sizeof(kOuiKvNk) / sizeof(kOuiKvNk[0])))
 static const int8_t kOuiKvNkBtnMv[2][4] = { { 8, 9, 1, 8 }, { 8, 9, 6, 9 } };   // DEFAULT, NONE
 
-// The C64 joystick (a Competition Pro): the eight directions around the stick, the red buttons in
+// The C64 joystick (a Competition Pro): the four directions around the stick, the red buttons in
 // the base's top corners - FIRE on the left, FIRE2 on the right - and a small FIRE3 at the bottom
-// left; the lines (c64joymap.h). Moves as for the NES ({L, R, U, D}; 11 / 12 = DEFAULT / NONE).
+// left; the lines (c64joymap.h). Moves as for the NES ({L, R, U, D}; 7 / 8 = DEFAULT / NONE).
 static const OuiKvNk kOuiKvJk[] = {
-  { 124, 203, 16, 14, C64J_UP | C64J_LEFT,    OUI_NK_PAD,   "\x08", { 8, 1, 0, 3 } },
-  { 152, 203, 16, 14, C64J_UP,                OUI_NK_PAD,   "\x03", { 0, 2, 1, 6 } },
-  { 180, 203, 16, 14, C64J_UP | C64J_RIGHT,   OUI_NK_PAD,   "\x09", { 1, 9, 2, 4 } },
-  { 124, 224, 16, 14, C64J_LEFT,              OUI_NK_PAD,   "\x01", { 8, 4, 0, 5 } },
-  { 180, 224, 16, 14, C64J_RIGHT,             OUI_NK_PAD,   "\x02", { 3, 9, 2, 7 } },
-  { 124, 245, 16, 14, C64J_DOWN | C64J_LEFT,  OUI_NK_PAD,   "\x0A", { 10, 6, 3, 11 } },
-  { 152, 245, 16, 14, C64J_DOWN,              OUI_NK_PAD,   "\x04", { 5, 7, 1, 11 } },
-  { 180, 245, 16, 14, C64J_DOWN | C64J_RIGHT, OUI_NK_PAD,   "\x0B", { 6, 7, 4, 12 } },
-  {  86, 192, 24, 24, C64J_FIRE,              OUI_NK_ROUND, "",      { 8, 0, 8, 10 } },
-  { 210, 192, 24, 24, C64J_FIRE2,             OUI_NK_ROUND, "",      { 2, 9, 9, 7 } },
-  {  92, 244, 16, 16, C64J_FIRE3,             OUI_NK_ROUND, "",      { 10, 5, 8, 11 } },
+  { 152, 203, 16, 14, C64J_UP,                OUI_NK_PAD,   "\x03", { 1, 2, 0, 3 } },
+  { 124, 224, 16, 14, C64J_LEFT,              OUI_NK_PAD,   "\x01", { 4, 2, 0, 3 } },
+  { 180, 224, 16, 14, C64J_RIGHT,             OUI_NK_PAD,   "\x02", { 1, 5, 0, 3 } },
+  { 152, 245, 16, 14, C64J_DOWN,              OUI_NK_PAD,   "\x04", { 6, 2, 0, 7 } },
+  {  86, 192, 24, 24, C64J_FIRE,              OUI_NK_ROUND, "",      { 4, 0, 4, 6 } },
+  { 210, 192, 24, 24, C64J_FIRE2,             OUI_NK_ROUND, "",      { 0, 5, 5, 2 } },
+  {  92, 244, 16, 16, C64J_FIRE3,             OUI_NK_ROUND, "",      { 6, 3, 4, 7 } },
 };
 #define OUI_KV_NJK ((int)(sizeof(kOuiKvJk) / sizeof(kOuiKvJk[0])))
-static const int8_t kOuiKvJkBtnMv[2][4] = { { 11, 12, 10, 11 }, { 11, 12, 7, 12 } };   // DEFAULT, NONE
+static const int8_t kOuiKvJkBtnMv[2][4] = { { 7, 8, 6, 7 }, { 7, 8, 3, 8 } };   // DEFAULT, NONE
 
 // The SMS control pad (after the picture: a black pad, the red-framed CONTROL PAD panel with the
 // grey square D-pad on the left, SEGA in the middle, the "1 START" and "2" buttons on the right);
@@ -2490,79 +2464,63 @@ static const int8_t kOuiKvOkBtnMv[2][4] = { { 18, 19, 1, 18 }, { 18, 19, 16, 19 
 // The Atari 2600 (after the picture: the CX40 joystick - a square black base, the red FIRE button
 // in its top-left corner, the orange ring around the stick - and the console's GAME SELECT / GAME
 // RESET levers on the right); the action (atarikeymap.h). Moves as for the NES ({L, R, U, D};
-// 11 / 12 = DEFAULT / NONE).
+// 7 / 8 = DEFAULT / NONE).
 static const OuiKvNk kOuiKvAk[] = {
-  { 125, 202, 16, 14, ATARIK_UP | ATARIK_LEFT,    OUI_NK_PAD,   "\x08", { 8, 1, 8, 3 } },
-  { 142, 192, 16, 14, ATARIK_UP,                  OUI_NK_PAD,   "\x03", { 0, 2, 1, 6 } },
-  { 159, 202, 16, 14, ATARIK_UP | ATARIK_RIGHT,   OUI_NK_PAD,   "\x09", { 1, 9, 2, 4 } },
-  { 115, 219, 16, 14, ATARIK_LEFT,                OUI_NK_PAD,   "\x01", { 8, 4, 0, 5 } },
-  { 169, 219, 16, 14, ATARIK_RIGHT,               OUI_NK_PAD,   "\x02", { 3, 9, 2, 7 } },
-  { 125, 236, 16, 14, ATARIK_DOWN | ATARIK_LEFT,  OUI_NK_PAD,   "\x0A", { 3, 6, 3, 11 } },
-  { 142, 246, 16, 14, ATARIK_DOWN,                OUI_NK_PAD,   "\x04", { 5, 7, 1, 11 } },
-  { 159, 236, 16, 14, ATARIK_DOWN | ATARIK_RIGHT, OUI_NK_PAD,   "\x0B", { 6, 9, 4, 12 } },
-  { 112, 188, 14, 14, ATARIK_FIRE,                OUI_NK_ROUND, "",       { 8, 0, 8, 3 } },
-  { 236, 202, 14, 30, ATARIK_SELECT,              OUI_NK_PILL,  "",       { 4, 10, 9, 12 } },
-  { 280, 202, 14, 30, ATARIK_RESET,               OUI_NK_PILL,  "",       { 9, 10, 10, 12 } },
+  { 142, 192, 16, 14, ATARIK_UP,                  OUI_NK_PAD,   "\x03", { 4, 2, 0, 3 } },
+  { 115, 219, 16, 14, ATARIK_LEFT,                OUI_NK_PAD,   "\x01", { 4, 2, 0, 3 } },
+  { 169, 219, 16, 14, ATARIK_RIGHT,               OUI_NK_PAD,   "\x02", { 1, 5, 0, 3 } },
+  { 142, 246, 16, 14, ATARIK_DOWN,                OUI_NK_PAD,   "\x04", { 1, 2, 0, 7 } },
+  { 112, 188, 14, 14, ATARIK_FIRE,                OUI_NK_ROUND, "",       { 4, 0, 4, 1 } },
+  { 236, 202, 14, 30, ATARIK_SELECT,              OUI_NK_PILL,  "",       { 2, 6, 5, 8 } },
+  { 280, 202, 14, 30, ATARIK_RESET,               OUI_NK_PILL,  "",       { 5, 6, 6, 8 } },
 };
 #define OUI_KV_NAK ((int)(sizeof(kOuiKvAk) / sizeof(kOuiKvAk[0])))
-static const int8_t kOuiKvAkBtnMv[2][4] = { { 11, 12, 5, 11 }, { 11, 12, 9, 12 } };   // DEFAULT, NONE
+static const int8_t kOuiKvAkBtnMv[2][4] = { { 7, 8, 3, 7 }, { 7, 8, 5, 8 } };   // DEFAULT, NONE
 
 // The Apple joystick (after the picture: a beige square box, the orange button 0 on its left side
 // and button 1 on its back edge, the stick in a recessed square well at the front right); the
-// action (apple2joymap.h). Moves as for the NES ({L, R, U, D}; 10 / 11 = DEFAULT / NONE).
+// action (apple2joymap.h). Moves as for the NES ({L, R, U, D}; 6 / 7 = DEFAULT / NONE).
 static const OuiKvNk kOuiKvA2j[] = {
-  { 158, 199, 16, 14, A2J_UP | A2J_LEFT,    OUI_NK_PAD,   "\x08", { 9, 1, 9, 3 } },
-  { 184, 199, 16, 14, A2J_UP,               OUI_NK_PAD,   "\x03", { 0, 2, 1, 6 } },
-  { 210, 199, 16, 14, A2J_UP | A2J_RIGHT,   OUI_NK_PAD,   "\x09", { 1, 2, 2, 4 } },
-  { 158, 221, 16, 14, A2J_LEFT,             OUI_NK_PAD,   "\x01", { 8, 4, 0, 5 } },
-  { 210, 221, 16, 14, A2J_RIGHT,            OUI_NK_PAD,   "\x02", { 3, 4, 2, 7 } },
-  { 158, 243, 16, 14, A2J_DOWN | A2J_LEFT,  OUI_NK_PAD,   "\x0A", { 8, 6, 3, 10 } },
-  { 184, 243, 16, 14, A2J_DOWN,             OUI_NK_PAD,   "\x04", { 5, 7, 1, 10 } },
-  { 210, 243, 16, 14, A2J_DOWN | A2J_RIGHT, OUI_NK_PAD,   "\x0B", { 6, 7, 4, 11 } },
-  {  86, 214, 22, 22, A2J_BTN0,             OUI_NK_ROUND, "",       { 8, 3, 9, 10 } },
-  { 110, 192, 28, 12, A2J_BTN1,             OUI_NK_PILL,  "",       { 9, 0, 9, 8 } },
+  { 184, 199, 16, 14, A2J_UP,               OUI_NK_PAD,   "\x03", { 5, 2, 0, 3 } },
+  { 158, 221, 16, 14, A2J_LEFT,             OUI_NK_PAD,   "\x01", { 4, 2, 0, 3 } },
+  { 210, 221, 16, 14, A2J_RIGHT,            OUI_NK_PAD,   "\x02", { 1, 2, 0, 3 } },
+  { 184, 243, 16, 14, A2J_DOWN,             OUI_NK_PAD,   "\x04", { 1, 2, 0, 6 } },
+  {  86, 214, 22, 22, A2J_BTN0,             OUI_NK_ROUND, "",       { 4, 1, 5, 6 } },
+  { 110, 192, 28, 12, A2J_BTN1,             OUI_NK_PILL,  "",       { 5, 0, 5, 4 } },
 };
 #define OUI_KV_NA2J ((int)(sizeof(kOuiKvA2j) / sizeof(kOuiKvA2j[0])))
-static const int8_t kOuiKvA2jBtnMv[2][4] = { { 10, 11, 8, 10 }, { 10, 11, 7, 11 } };   // DEFAULT, NONE
+static const int8_t kOuiKvA2jBtnMv[2][4] = { { 6, 7, 4, 6 }, { 6, 7, 3, 7 } };   // DEFAULT, NONE
 
 // The MSX joystick (after the picture: a black square base, the black stick with its orange top,
 // the orange trigger A in the base's front-left corner; trigger B, which most MSX sticks lack,
-// small behind it); the lines (msxjoymap.h). Moves as for the NES ({L, R, U, D}; 10 / 11 = DEFAULT
+// small behind it); the lines (msxjoymap.h). Moves as for the NES ({L, R, U, D}; 6 / 7 = DEFAULT
 // / NONE).
 static const OuiKvNk kOuiKvMj[] = {
-  { 135, 202, 16, 14, C64J_UP | C64J_LEFT,    OUI_NK_PAD,   "\x08", { 9, 1, 9, 3 } },
-  { 152, 192, 16, 14, C64J_UP,                OUI_NK_PAD,   "\x03", { 0, 2, 1, 6 } },
-  { 169, 202, 16, 14, C64J_UP | C64J_RIGHT,   OUI_NK_PAD,   "\x09", { 1, 2, 2, 4 } },
-  { 125, 219, 16, 14, C64J_LEFT,              OUI_NK_PAD,   "\x01", { 8, 4, 0, 5 } },
-  { 179, 219, 16, 14, C64J_RIGHT,             OUI_NK_PAD,   "\x02", { 3, 4, 2, 7 } },
-  { 135, 236, 16, 14, C64J_DOWN | C64J_LEFT,  OUI_NK_PAD,   "\x0A", { 8, 6, 3, 10 } },
-  { 152, 246, 16, 14, C64J_DOWN,              OUI_NK_PAD,   "\x04", { 5, 7, 1, 10 } },
-  { 169, 236, 16, 14, C64J_DOWN | C64J_RIGHT, OUI_NK_PAD,   "\x0B", { 6, 7, 4, 11 } },
-  { 112, 244, 20, 20, MSXJ_TRIG_A,            OUI_NK_ROUND, "",       { 8, 5, 9, 10 } },
-  { 114, 190, 14, 14, MSXJ_TRIG_B,            OUI_NK_ROUND, "",       { 9, 0, 9, 8 } },
+  { 152, 192, 16, 14, C64J_UP,                OUI_NK_PAD,   "\x03", { 5, 2, 0, 3 } },
+  { 125, 219, 16, 14, C64J_LEFT,              OUI_NK_PAD,   "\x01", { 4, 2, 0, 3 } },
+  { 179, 219, 16, 14, C64J_RIGHT,             OUI_NK_PAD,   "\x02", { 1, 2, 0, 3 } },
+  { 152, 246, 16, 14, C64J_DOWN,              OUI_NK_PAD,   "\x04", { 4, 2, 0, 6 } },
+  { 112, 244, 20, 20, MSXJ_TRIG_A,            OUI_NK_ROUND, "",       { 4, 3, 5, 6 } },
+  { 114, 190, 14, 14, MSXJ_TRIG_B,            OUI_NK_ROUND, "",       { 5, 0, 5, 4 } },
 };
 #define OUI_KV_NMJ ((int)(sizeof(kOuiKvMj) / sizeof(kOuiKvMj[0])))
-static const int8_t kOuiKvMjBtnMv[2][4] = { { 10, 11, 8, 10 }, { 10, 11, 7, 11 } };   // DEFAULT, NONE
+static const int8_t kOuiKvMjBtnMv[2][4] = { { 6, 7, 4, 6 }, { 6, 7, 3, 7 } };   // DEFAULT, NONE
 
 // The ZX Spectrum's Kempston joystick, drawn as a Cheetah 125+ from above: the black base with a red
 // fire button at each side, the grip in the middle with the red trigger on top (all three FIRE),
-// the eight directions round the grip; the lines (zxjoymap.h). Moves as for the NES ({L, R, U, D};
-// 11 / 12 = DEFAULT / NONE).
+// the four directions round the grip; the lines (zxjoymap.h). Moves as for the NES ({L, R, U, D};
+// 7 / 8 = DEFAULT / NONE).
 static const OuiKvNk kOuiKvZj[] = {
-  { 134, 197, 16, 14, ZXJ_UP | ZXJ_LEFT,    OUI_NK_PAD,   "\x08", {  9,  1,  0,  3 } },
-  { 162, 197, 16, 14, ZXJ_UP,               OUI_NK_PAD,   "\x03", {  0,  2,  1,  8 } },
-  { 190, 197, 16, 14, ZXJ_UP | ZXJ_RIGHT,   OUI_NK_PAD,   "\x09", {  1, 10,  2,  4 } },
-  { 134, 219, 16, 14, ZXJ_LEFT,             OUI_NK_PAD,   "\x01", {  9,  8,  0,  5 } },
-  { 190, 219, 16, 14, ZXJ_RIGHT,            OUI_NK_PAD,   "\x02", {  8, 10,  2,  7 } },
-  { 134, 241, 16, 14, ZXJ_DOWN | ZXJ_LEFT,  OUI_NK_PAD,   "\x0A", {  9,  6,  3, 11 } },
-  { 162, 241, 16, 14, ZXJ_DOWN,             OUI_NK_PAD,   "\x04", {  5,  7,  8, 11 } },
-  { 190, 241, 16, 14, ZXJ_DOWN | ZXJ_RIGHT, OUI_NK_PAD,   "\x0B", {  6, 10,  4, 12 } },
-  { 163, 219, 14, 14, ZXJ_FIRE,             OUI_NK_ROUND, "",       {  3,  4,  1,  6 } },
-  {  96, 215, 22, 22, ZXJ_FIRE,             OUI_NK_ROUND, "",       {  9,  3,  0, 11 } },
-  { 222, 215, 22, 22, ZXJ_FIRE,             OUI_NK_ROUND, "",       {  4, 10,  2, 12 } },
+  { 162, 197, 16, 14, ZXJ_UP,               OUI_NK_PAD,   "\x03", {  1,  2,  0,  4 } },
+  { 134, 219, 16, 14, ZXJ_LEFT,             OUI_NK_PAD,   "\x01", {  5,  4,  0,  3 } },
+  { 190, 219, 16, 14, ZXJ_RIGHT,            OUI_NK_PAD,   "\x02", {  4,  6,  0,  3 } },
+  { 162, 241, 16, 14, ZXJ_DOWN,             OUI_NK_PAD,   "\x04", {  1,  2,  4,  7 } },
+  { 163, 219, 14, 14, ZXJ_FIRE,             OUI_NK_ROUND, "",       {  1,  2,  0,  3 } },
+  {  96, 215, 22, 22, ZXJ_FIRE,             OUI_NK_ROUND, "",       {  5,  1,  0,  7 } },
+  { 222, 215, 22, 22, ZXJ_FIRE,             OUI_NK_ROUND, "",       {  2,  6,  0,  8 } },
 };
 #define OUI_KV_NZJ ((int)(sizeof(kOuiKvZj) / sizeof(kOuiKvZj[0])))
-static const int8_t kOuiKvZjBtnMv[2][4] = { { 11, 12, 5, 11 }, { 11, 12, 7, 12 } };   // DEFAULT, NONE
+static const int8_t kOuiKvZjBtnMv[2][4] = { { 7, 8, 5, 7 }, { 7, 8, 6, 8 } };   // DEFAULT, NONE
 
 // TAB swaps the direction (ouiKvRev) and the pictures with it: the target picture (C64 keys / NES
 // controller / joystick) on top, the PicoCalc keyboard below. Then mode 6 picks the target, mode 7
@@ -2575,6 +2533,10 @@ static int     ouiKvCkSel = 0;          // the target under the cursor (mode 7, 
 static int     ouiKvShSel = 0;          // mode 8: the SHIFT button
 static int     ouiKvNavX = -1;          // x kept across Up / Down, so a column walk does not drift
 static bool    ouiKvRev = false;        // swapped: target first, then the keys
+// SPACE marks PicoCalc keys (per layer). Forward: the target picked goes to every marked key.
+// Swapped: the keys that press the target start marked; Esc gives / takes it as marked
+// (ouiKvMk0 = the marks as they started).
+static bool    ouiKvMk[2][OUI_KV_NPK], ouiKvMk0[2][OUI_KV_NPK];
 static uint32_t ouiKvSigPk[OUI_KV_NPK], ouiKvSigCk[OUI_KV_NCKMAX], ouiKvSigInfo, ouiKvSigBtn, ouiKvSigBody, ouiKvSigDir;
 
 static void ouiKvInvalidate()
@@ -2677,7 +2639,7 @@ static int ouiKvMove(int n, void (*rf)(int, OuiKvR &), bool (*ok)(int), int cur,
 static void ouiKvKey(const OuiKvR &r, const char *lbl, uint16_t bg, uint16_t fg)
 {
   tft.fillRoundRect(r.x, r.y, r.w, r.h, 3, bg);
-  if ((uint8_t)lbl[0] >= 1 && (uint8_t)lbl[0] <= 13 && !lbl[1]) {
+  if ((uint8_t)lbl[0] >= 1 && (uint8_t)lbl[0] <= 9 && !lbl[1]) {
     tft.drawGlyph8(r.x + (r.w - 8) / 2, r.y + (r.h - 8) / 2, 8, 8, kOuiKvGlyph[lbl[0] - 1], fg, bg, true);
     return;
   }
@@ -2888,7 +2850,7 @@ static void ouiKvA2JoyBody()
   tft.setTextColor(ink, beige);
   tft.drawString("0", 97, 246 + o, 1);
   tft.drawString("1", 148, 198 + o, 1);
-  tft.drawGlyph8(88, 250 + o, 8, 8, kOuiKvGlyph[12], ink, beige, true);   // the embossed apple
+  tft.drawGlyph8(88, 250 + o, 8, 8, kOuiKvGlyph[8], ink, beige, true);   // the embossed apple
   // the well: a shaded rim, the dark floor; the stick in the middle
   tft.fillRoundRect(150, 193 + o, 84, 68, 4, shade);
   tft.fillRoundRect(152, 195 + o, 80, 64, 3, well);
@@ -3052,6 +3014,79 @@ static bool ouiKvHits(uint8_t eff, int ti)
   return k == C64K_RESTORE ? eff == C64K_RESTORE : (ouiKmIsKey(eff) && ouiKmIdx(eff) == k);
 }
 
+// The marks (SPACE): how many rules are marked (diff: whose mark changed since it started). Two
+// picture keys can edit the same rule (a key with no SHIFT+ rule shows on both layers): one count.
+static int ouiKvMkScan(bool diff)
+{
+  uint16_t seen[2 * OUI_KV_NPK];
+  int n = 0;
+  for (int l = 0; l < 2; l++)
+    for (int i = 0; i < OUI_KV_NPK; i++) {
+      if (diff ? ouiKvMk[l][i] == ouiKvMk0[l][i] : !ouiKvMk[l][i]) continue;
+      uint8_t h; bool s;
+      if (!ouiKvTarget(i, l, h, s)) continue;
+      const uint16_t k = (uint16_t)(h << 1 | s);
+      int j = 0;
+      while (j < n && seen[j] != k) j++;
+      if (j == n) seen[n++] = k;
+    }
+  return n;
+}
+// Mark / unmark rule (h, s) on every picture key that edits it (start: as it started, too).
+static void ouiKvMkSet(uint8_t h, bool s, bool on, bool start)
+{
+  for (int l = 0; l < 2; l++)
+    for (int i = 0; i < OUI_KV_NPK; i++) {
+      uint8_t hh; bool ss;
+      if (!ouiKvTarget(i, l, hh, ss) || hh != h || ss != s) continue;
+      ouiKvMk[l][i] = on;
+      if (start) ouiKvMk0[l][i] = on;
+    }
+}
+static void ouiKvMkClear() { memset(ouiKvMk, 0, sizeof(ouiKvMk)); memset(ouiKvMk0, 0, sizeof(ouiKvMk0)); }
+// Swapped: the keys that press target ouiKvCkSel start marked.
+static void ouiKvMkHits()
+{
+  for (int l = 0; l < 2; l++)
+    for (int i = 0; i < OUI_KV_NPK; i++) {
+      uint8_t h; bool s;
+      ouiKvMk[l][i] = ouiKvMk0[l][i] = ouiKvTarget(i, l, h, s) && ouiKvHits(ouiKmLookup(h, s), ouiKvCkSel);
+    }
+}
+// The marked rule shown while the target is picked: the one under the cursor, else the first.
+static bool ouiKvMkFirst(uint8_t &h, bool &s)
+{
+  if (ouiKvMk[ouiKvLayer][ouiKvPkSel] && ouiKvTarget(ouiKvPkSel, ouiKvLayer, h, s)) return true;
+  for (int l = 0; l < 2; l++)
+    for (int i = 0; i < OUI_KV_NPK; i++)
+      if (ouiKvMk[l][i] && ouiKvTarget(i, l, h, s)) return true;
+  return false;
+}
+// The SHIFT step's first choice for rule (h, s): its current SHIFT handling, else the usual one
+// (a SHIFT+ rule: released).
+static int ouiKvShPre(uint8_t h, bool s)
+{
+  const uint8_t c = ouiKmRule(h, s, nullptr);
+  int sm = ouiKmIsKey(c) ? ouiKmShf(c) : (s ? C64K_SHIFT_OFF : C64K_SHIFT_KEEP);
+  if (s && sm == C64K_SHIFT_KEEP) sm = C64K_SHIFT_ON;
+  return sm;
+}
+// Swapped, Esc: the rule giving (h, s) target ck (the SHIFT step taken as preselected), or taking
+// it away (back to the default, or NONE when the default is this target too).
+static uint8_t ouiKvGiveCode(uint8_t h, bool s, int ck)
+{
+  if (ouiKmSimple()) return ouiKvTab()[ck].code;
+  const uint8_t code = ouiKvCkTab()[ck].code;
+  if (code == C64K_RESTORE || (ouiKmA2() && a2kIsPlainOnly(code))) return code;
+  return ouiKmMake(code, ouiKvShPre(h, s));
+}
+static uint8_t ouiKvTakeCode(uint8_t h, bool s, int ck)
+{
+  uint8_t df = ouiKmDefault(h, s);
+  if (df == C64K_NONE && s) df = ouiKmLookup(h, false);   // a SHIFT+ rule: as without SHIFT
+  return ouiKvHits(df, ck) ? C64K_UNMAP : C64K_NONE;
+}
+
 // Target ti's name, for the info line.
 static void ouiKvTgtName(int ti, char *o, size_t n)
 {
@@ -3115,6 +3150,7 @@ static void ouiDrawKv()
   const bool effCtrl = a2 && effMx && a2kMode(eff) == A2K_CTRL_ON;
   const bool effShift = effMx && (ouiKmShf(eff) == C64K_SHIFT_ON || ((ouiKmShf(eff) == C64K_SHIFT_KEEP || effCtrl) && sh));
   const bool effSym = zx && effMx && zxkMode(eff) == ZXK_SYM;   // the ZX's +SYMBOL lights SYMBOL SHIFT
+  const int nMk = ouiKvMkScan(false), nDf = rev ? ouiKvMkScan(true) : 0;   // keys marked / marks changed
 
   // The line under the title: what the key types / what is being asked.
   char info[100], k[24], d[28];
@@ -3129,6 +3165,7 @@ static void ouiDrawKv()
     else snprintf(info, sizeof(info), "Caps Lock stays on the keyboard");
   } else {
     ouiKmLabel(hid, sh, k, sizeof(k));
+    if (!rev && m != 6 && nMk > 1) snprintf(k, sizeof(k), "%d keys", nMk);   // the marked keys
     if (eff == C64K_NONE) snprintf(d, sizeof(d), "nothing");
     else ouiKmDescribe(eff, sh, d, sizeof(d));
     if (rev && m == 7) {
@@ -3169,9 +3206,12 @@ static void ouiDrawKv()
     uint16_t bg = OUI_CARD, fg = o ? OUI_ON : OUI_TXT;
     if (!t && p.hid != OUI_KV_SHIFT) { bg = OUI_CARD2; fg = OUI_LBL; }
     if (p.hid == OUI_KV_SHIFT && ouiKvLayer) bg = OUI_MOUNT;
-    if (rev && t && ouiKvHits(ouiKmLookup(h, s), ouiKvCkSel)) bg = OUI_MOUNT;
-    if (ouiKvOnHost() && i == ouiKvPkSel) { bg = OUI_SEL; fg = OUI_TXT; }   // (the line above is green then)
-    else if ((rev ? m == 8 : m != 6) && t && h == ouiKmHid && s == ouiKmShift) { bg = OUI_REBOOT; fg = OUI_TXT; }
+    // Marked (SPACE): forward orange; swapped green, the keys that will press the target.
+    const bool mk = t && ouiKvMk[ouiKvLayer][i];
+    if (rev && t && (m == 6 ? ouiKvHits(ouiKmLookup(h, s), ouiKvCkSel) : mk)) bg = OUI_MOUNT;
+    if (ouiKvOnHost() && i == ouiKvPkSel) { bg = OUI_SEL; fg = mk ? (rev ? OUI_ON : OUI_REBOOT) : OUI_TXT; }   // (the line above is green then)
+    else if (!rev && mk) { bg = OUI_REBOOT; fg = OUI_TXT; }
+    else if ((rev ? m == 8 : m != 6 && !nMk) && t && h == ouiKmHid && s == ouiKmShift) { bg = OUI_REBOOT; fg = OUI_TXT; }
     const char *l = ouiKvLayer && p.slbl ? p.slbl : p.lbl;
     uint32_t sig = ((uint32_t)bg << 16 | fg) ^ (uint32_t)(uintptr_t)l;
     if (!sig) sig = 1;
@@ -3313,20 +3353,77 @@ static void ouiDrawKv()
     }
   }
 
-  if (rev) ouiDrawListFoot(m == 6 ? "Arrows: pick  Enter: choose  Tab: swap  Esc: back"
-                         : m == 7 ? (joy ? "Enter: give / take away  Tab: swap  Esc: back"
-                                         : "Enter: give / take  Shift: layer  Esc: back")
-                                  : "Left/Right: SHIFT   Enter: save   Esc: back");
-  else ouiDrawListFoot(m == 6 ? (joy && !zxj ? "Enter: change  Tab: swap  Esc: back" : "Enter: change  Tab: swap  Shift: layer  Esc: back")
-                     : m == 7 ? "Arrows: pick  Enter: choose  Tab: swap  Esc: back"
-                              : "Left/Right: SHIFT   Enter: save   Esc: back");
+  char ft[64];
+  if (rev && m == 7 && nDf) snprintf(ft, sizeof(ft), "Space: mark  Enter: give/take  Esc: save %d", nDf);
+  else if (!rev && m == 6 && nMk) snprintf(ft, sizeof(ft), "%d marked  Space: mark  Enter: change  Esc: clear", nMk);
+  else if (!rev && m == 7 && nMk) snprintf(ft, sizeof(ft), "Arrows: pick  Enter: give the %d  Esc: done", nMk);
+  else snprintf(ft, sizeof(ft), "%s", rev ? (m == 6 ? "Arrows: pick  Enter: choose  Tab: swap  Esc: back"
+                                           : m == 7 ? (joy ? "Space: mark  Enter: give / take  Esc: back"
+                                                           : "Space: mark  Enter: give/take  Shift: layer")
+                                                    : "Left/Right: SHIFT   Enter: save   Esc: back")
+                                     : m == 6 ? (joy && !zxj ? "Space: mark  Enter: change  Tab: swap  Esc: back"
+                                                             : "Space: mark  Enter: change  Tab: swap  Shift: layer")
+                                     : m == 7 ? "Arrows: pick  Enter: choose  Tab: swap  Esc: back"
+                                              : "Left/Right: SHIFT   Enter: save   Esc: back");
+  ouiDrawListFoot(ft);
 }
 
 static void ouiKmApply(uint8_t code);
+static int  ouiKvCkOf(uint8_t c);
+
+// "N keys saved" after the marked keys changed (fit: the map took them all).
+static void ouiKvMkSaved(int n, bool fit)
+{
+  if (!fit) { ouiRomSetMsg("Too many changed keys (64 at most)", true); return; }
+  const bool ok = ouiKmSave();
+  char m[48];
+  if (ok) snprintf(m, sizeof(m), "%d key%s saved", n, n == 1 ? "" : "s");
+  else    snprintf(m, sizeof(m), "%d key%s changed, but NOT saved (SD)", n, n == 1 ? "" : "s");
+  ouiRomSetMsg(m, !ok);
+}
+
+// Swapped, Esc: the keys newly marked get the target, the ones unmarked lose it.
+static void ouiKvMkCommit()
+{
+  const int n = ouiKvMkScan(true);
+  if (!n) return;
+  bool fit = true;
+  for (int l = 0; l < 2; l++)
+    for (int i = 0; i < OUI_KV_NPK; i++) {
+      uint8_t h; bool s;
+      if (ouiKvMk[l][i] == ouiKvMk0[l][i] || !ouiKvTarget(i, l, h, s)) continue;
+      const uint8_t c = ouiKvMk[l][i] ? ouiKvGiveCode(h, s, ouiKvCkSel) : ouiKvTakeCode(h, s, ouiKvCkSel);
+      if (!ouiKmSet(h, s, c)) fit = false;
+    }
+  memcpy(ouiKvMk0, ouiKvMk, sizeof(ouiKvMk0));
+  ouiKvMkSaved(n, fit);
+}
+
+// Forward, keys marked: rule code goes to every one (a SHIFT+ key takes AS TYPED as +SHIFT, as
+// its own SHIFT step would), and the page stays on the target picture until Esc.
+static bool ouiKvMkApply(uint8_t code)
+{
+  const int n = ouiKvRev ? 0 : ouiKvMkScan(false);
+  if (!n) return false;
+  bool fit = true;
+  for (int l = 0; l < 2; l++)
+    for (int i = 0; i < OUI_KV_NPK; i++) {
+      uint8_t h; bool s;
+      if (!ouiKvMk[l][i] || !ouiKvTarget(i, l, h, s)) continue;
+      uint8_t c = code;
+      if (s && ouiKmIsKey(c) && ouiKmShf(c) == C64K_SHIFT_KEEP) c = ouiKmMake(ouiKmIdx(c), C64K_SHIFT_ON);
+      if (!ouiKmSet(h, s, c)) fit = false;
+    }
+  if (ouiCfgMode == 8) ouiKvCkSel = ouiKvCkOf(code);   // back on the key given
+  ouiCfgMode = 7; optionsUiDirty = true;
+  ouiKvMkSaved(n, fit);
+  return true;
+}
 
 static void ouiKvOpen()
 {
   ouiKvLayer = false; ouiKvRev = false; ouiKvNavX = -1; ouiRomMsg[0] = 0;
+  ouiKvMkClear();
   ouiCfgGoto(6, 0);
 }
 
@@ -3356,10 +3453,7 @@ static void ouiKvGive(int ck)
   if (code == C64K_RESTORE) { ouiKmApply(C64K_RESTORE); return; }
   if (ouiKmA2() && a2kIsPlainOnly(code)) { ouiKmApply(code); return; }   // CAPS LOCK / the apple keys: no SHIFT step
   ouiKmKey = code;
-  // Preselect the key's current SHIFT handling, else the usual one (a SHIFT+ rule: released).
-  const uint8_t c = ouiKmRule(ouiKmHid, ouiKmShift, nullptr);
-  int sm = ouiKmIsKey(c) ? ouiKmShf(c) : (ouiKmShift ? C64K_SHIFT_OFF : C64K_SHIFT_KEEP);
-  if (ouiKmShift && sm == C64K_SHIFT_KEEP) sm = C64K_SHIFT_ON;
+  const int sm = ouiKvShPre(ouiKmHid, ouiKmShift);
   ouiKvShSel = ouiKmShift ? sm - 1 : sm;
   ouiCfgMode = 8; optionsUiDirty = true;
 }
@@ -3382,19 +3476,22 @@ static void ouiKvEnter()
   if (ouiKvRev) {
     // Swapped: mode 6 the target is picked, mode 7 the key gets it - or, if it has it, loses it
     // (back to its default, or NONE when the default is this target too).
-    if (ouiCfgMode == 6) { ouiRomMsg[0] = 0; ouiCfgMode = 7; optionsUiDirty = true; return; }
+    // The keys that press it start marked (SPACE changes them, Esc saves).
+    if (ouiCfgMode == 6) { ouiRomMsg[0] = 0; ouiKvMkHits(); ouiCfgMode = 7; optionsUiDirty = true; return; }
     if (!ouiKvTakeHost()) return;
     if (ouiKvHits(ouiKmLookup(ouiKmHid, ouiKmShift), ouiKvCkSel)) {
-      uint8_t df = ouiKmDefault(ouiKmHid, ouiKmShift);
-      if (df == C64K_NONE && ouiKmShift) df = ouiKmLookup(ouiKmHid, false);   // a SHIFT+ rule: as without SHIFT
-      ouiKmApply(ouiKvHits(df, ouiKvCkSel) ? C64K_UNMAP : C64K_NONE);
+      ouiKmApply(ouiKvTakeCode(ouiKmHid, ouiKmShift, ouiKvCkSel));
       return;
     }
     ouiKvGive(ouiKvCkSel);
     return;
   }
   if (ouiCfgMode == 6) {
-    if (!ouiKvTakeHost()) return;
+    // Keys marked: they all get the target (shown: the marked one under the cursor, else the
+    // first). Enter on Shift still switches the layer.
+    const bool lay = kOuiKvPk[ouiKvPkSel].hid == OUI_KV_SHIFT && !ouiKmJoyShift();
+    if (!lay && ouiKvMkFirst(ouiKmHid, ouiKmShift)) ouiRomMsg[0] = 0;
+    else if (!ouiKvTakeHost()) return;
     ouiKvCkSel = ouiKvCkOf(ouiKmLookup(ouiKmHid, ouiKmShift));
     ouiCfgMode = 7; optionsUiDirty = true;
     return;
@@ -3430,6 +3527,7 @@ static void ouiKvSwap()
   }
   ouiKvRev = !ouiKvRev;
   ouiKvNavX = -1; ouiRomMsg[0] = 0;
+  ouiKvMkClear();
   ouiCfgMode = 6; optionsUiDirty = true;
 }
 
@@ -3460,7 +3558,13 @@ static bool ouiKvBack()
     if (!ouiKvRev) ouiKvCkSel = ouiKvCkOf(ouiKmKey);
     ouiCfgMode = 7; optionsUiDirty = true; return true;
   }
-  if (ouiCfgMode == 7) { ouiCfgMode = 6; ouiRomMsg[0] = 0; optionsUiDirty = true; return true; }
+  if (ouiCfgMode == 7) {
+    ouiRomMsg[0] = 0;
+    if (ouiKvRev) ouiKvMkCommit();   // swapped: the marks changed are saved
+    ouiKvMkClear();
+    ouiCfgMode = 6; optionsUiDirty = true; return true;
+  }
+  if (!ouiKvRev && ouiKvMkScan(false)) { ouiKvMkClear(); ouiRomMsg[0] = 0; optionsUiDirty = true; return true; }   // forward: unmark all
   return false;
 }
 
@@ -3469,6 +3573,14 @@ static bool ouiKvBack()
 static bool ouiKvCapture(uint8_t hid, bool shift)
 {
   if (hid == 0x2B) { ouiKvSwap(); return true; }   // TAB: swap the direction
+  if (hid == 0x2C) {   // SPACE: mark / unmark the key under the cursor
+    uint8_t h; bool s;
+    if (ouiKvOnHost() && ouiKvTarget(ouiKvPkSel, ouiKvLayer, h, s)) {
+      ouiKvMkSet(h, s, !ouiKvMk[ouiKvLayer][ouiKvPkSel], false);
+      ouiRomMsg[0] = 0; optionsUiDirty = true;
+    }
+    return true;
+  }
   if (!ouiKvOnHost()) return false;
   // SHIFT pressed on its own (C64K_HID_SHIFT) flips the PicoCalc picture to its SHIFT+ layer; on
   // the joystick page, where SHIFT is a key to map, it goes to the Shift key.
@@ -3576,8 +3688,17 @@ static void ouiCfgClose()
 // Set the rule being edited (C64K_NONE = back to the default), save, and go back to the key list.
 static void ouiKmApply(uint8_t code)
 {
+#if OUI_KV
+  if (ouiCfgKv() && ouiKvMkApply(code)) return;   // forward, keys marked: all of them
+#endif
   const bool fit = ouiKmSet(ouiKmHid, ouiKmShift, code);
-  if (ouiCfgKv()) { ouiCfgMode = 6; optionsUiDirty = true; }   // back on the picture
+  if (ouiCfgKv()) {   // back on the picture; swapped, on the keys (until Esc), the key's mark as it is now
+    ouiCfgMode = 6;
+#if OUI_KV
+    if (ouiKvRev) { ouiCfgMode = 7; ouiKvMkSet(ouiKmHid, ouiKmShift, ouiKvHits(ouiKmLookup(ouiKmHid, ouiKmShift), ouiKvCkSel), true); }
+#endif
+    optionsUiDirty = true;
+  }
   else {
     // Back on the key's row; with "changed only" a key put back to its default leaves the list.
     int r = ouiKmRowOf(ouiKmHid, ouiKmShift);
@@ -3788,7 +3909,7 @@ static void ouiSnapRescan(int sel)
   ouiRomRedraw();
 }
 
-// "/emu8-snapshot/c64/0007-GIANA.snp" -> num = "0007", name = "GIANA"
+// "/emu8/c64/snapshot/0007-GIANA.snp" -> num = "0007", name = "GIANA"
 static void ouiSnapName(int idx, char *num, size_t nn, char *name, size_t nm)
 {
   const std::string &e = ouiRomFiles[idx];

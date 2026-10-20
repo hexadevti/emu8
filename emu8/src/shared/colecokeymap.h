@@ -26,7 +26,7 @@ static inline bool colKIsKeypad(uint8_t c) { return c >= COLK_KEY0 && c < COLK_C
 // `shifted`, a SHIFT+ rule wins, else it is the plain key's (Shift-8 = '*' as printed on the key).
 // CTRL / ALT are looked up as C64K_HID_CTRL / C64K_HID_ALT (c64keymap.h), unshifted, like the C64.
 uint8_t colecoKeymapLookup(uint8_t hid, bool shifted);
-// (Re)read the overrides from /coleco/keymap.txt (or /colecokeymap.txt). Missing file = defaults only.
+// (Re)read the overrides from /emu8/coleco/keymap.txt (or /colecokeymap.txt). Missing file = defaults only.
 void    colecoKeymapLoad();
 
 // ---- for the KEYBOARD page (optionsui.cpp); the host keys and their names are the C64 page's ----
@@ -44,5 +44,5 @@ uint8_t colecoKeymapDefault(uint8_t hid, bool shifted);
 bool    colecoKeymapSet(uint8_t hid, bool shifted, uint8_t code);
 void    colecoKeymapResetAll();
 int     colecoKeymapChangedCount();
-// Write the overrides to /coleco/keymap.txt. False if the card could not be written.
+// Write the overrides to /emu8/coleco/keymap.txt. False if the card could not be written.
 bool    colecoKeymapSave();

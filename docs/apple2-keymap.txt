@@ -2,7 +2,7 @@
 #
 # (The Apple IIe has its own file and default: docs/apple2e-keymap.txt.)
 #
-# Copy this file to the SD card as /apple2/keymap.txt (or /apple2keymap.txt) and edit it to choose
+# Copy this file to the SD card as /emu8/apple2/keymap.txt (or /apple2keymap.txt) and edit it to choose
 # which Apple key each host key presses. It is read when the Apple boots. Every line below is the
 # BUILT-IN DEFAULT, so this file as shipped changes nothing; only lines that differ from the default
 # count (up to 64 of them). Deleting a line does not unmap the key, it just leaves the default; use
@@ -11,7 +11,7 @@
 #
 # The Apple menu edits it too: CONFIG > KEYBOARD (on the PicoCalc a picture of its keyboard over the
 # Apple II+ keyboard; elsewhere a list). A change there is live at once and rewrites
-# /apple2/keymap.txt with only the changed keys.
+# /emu8/apple2/keymap.txt with only the changed keys.
 #
 # It applies to every keyboard that reaches the Apple through the HID path: the PicoCalc's built-in
 # keyboard, a USB keyboard, and the PC keyboard in the desktop build.

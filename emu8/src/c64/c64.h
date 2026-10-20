@@ -154,7 +154,7 @@ void kbSetJoystickPort(uint8_t port, uint8_t mask);   // route joystick to port 
 // ---- Snapshots (c64_snapshot.cpp; each part lives next to the file-static state it moves) ----
 bool cpuWaitParked(uint32_t ms);      // (c64_cpu.cpp) wait for cpuLoop to idle in its paused spin
 void cpuSnapshot(SnapIO &io);         // (c64_cpu.cpp) registers + cpuLoop's loop state, pacer reset
-void ciaSnapshot(SnapIO &io);         // (c64_cia.cpp) both CIAs
+void ciaSnapshot(SnapIO &io, uint16_t ver);   // (c64_cia.cpp) both CIAs; ver = snapshot format
 void vicSnapshot(SnapIO &io);         // (c64_vic.cpp) VIC registers + raster state, records dropped
 
 } // namespace c64

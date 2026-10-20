@@ -2,22 +2,20 @@
 // keyboard, the desktop build's PC keyboard: everything that reaches usbKeyboardReport()).
 //
 // A built-in default map, plus overrides read from a text file on the SD card when the Apple boots:
-// /apple2/joymap.txt (or /apple2joymap.txt at the root). One rule per line, '#' starts a comment:
+// /emu8/apple2/joymap.txt (or /apple2joymap.txt at the root). One rule per line, '#' starts a comment:
 //
 //     <host key> = <joystick action>
 //
 //     W = UP                       # WASD steers
-//     Q = UP+LEFT                  # a diagonal on one key
 //     CTRL = BUTTON1               # Ctrl is button 1
 //     SPACE = NONE                 # Space only types
 //
 // Host keys are named as in the Apple keyboard map (apple2keymap.cpp), plus SHIFT (either one). The
-// actions are UP DOWN LEFT RIGHT, the diagonals UP+LEFT UP+RIGHT DOWN+LEFT DOWN+RIGHT, BUTTON0
-// (open-apple, PB0), BUTTON1 (solid-apple, PB1), or NONE. Any number of keys may do the same thing.
+// actions are UP DOWN LEFT RIGHT, BUTTON0 (open-apple, PB0), BUTTON1 (solid-apple, PB1), or NONE. Any number of keys may do the same thing.
 // The stick is read where the Apple options say (JOYSTICK = JOY / BOTH); the buttons always are.
 // The full default map is in docs/apple2-joymap.txt.
 //
-// The default: the arrows steer, Space and Left Alt / F5 are button 0, Right Alt / F4 button 1.
+// The default: the arrows steer; the PicoCalc's third row gives the buttons: ] button 0, [ button 1.
 
 #include "../../emu.h"
 
@@ -32,16 +30,13 @@ struct JoyRule { uint8_t hid, code; };
 // HID usage codes (the standard USB HID keyboard page), numeric so every board's header works.
 static const JoyRule kDefault[] = {
   {0x52, A2J_UP}, {0x51, A2J_DOWN}, {0x50, A2J_LEFT}, {0x4F, A2J_RIGHT},   // arrows
-  {0x2C, A2J_BTN0},                                                       // Space
-  {C64K_HID_ALT, A2J_BTN0}, {A2K_HID_RALT, A2J_BTN1},                     // the two apple keys
-  {0x3E, A2J_BTN0}, {0x3D, A2J_BTN1},                                     // F5, F4
+  {0x30, A2J_BTN0}, {0x2F, A2J_BTN1},                                     // ]  [
 };
 
-// The picker's order: the stick clockwise from UP, then the buttons.
+// The picker's order: the stick (UP RIGHT DOWN LEFT), then the buttons.
 static const struct { uint8_t code; const char *name; } kActions[] = {
-  {A2J_UP, "UP"}, {A2J_UP | A2J_RIGHT, "UP+RIGHT"}, {A2J_RIGHT, "RIGHT"},
-  {A2J_DOWN | A2J_RIGHT, "DOWN+RIGHT"}, {A2J_DOWN, "DOWN"}, {A2J_DOWN | A2J_LEFT, "DOWN+LEFT"},
-  {A2J_LEFT, "LEFT"}, {A2J_UP | A2J_LEFT, "UP+LEFT"}, {A2J_BTN0, "BUTTON0"}, {A2J_BTN1, "BUTTON1"},
+  {A2J_UP, "UP"}, {A2J_RIGHT, "RIGHT"}, {A2J_DOWN, "DOWN"}, {A2J_LEFT, "LEFT"},
+  {A2J_BTN0, "BUTTON0"}, {A2J_BTN1, "BUTTON1"},
 };
 #define JOY_NACT ((int)(sizeof(kActions) / sizeof(kActions[0])))
 
@@ -89,22 +84,13 @@ const char *apple2JoymapActionName(uint8_t code)
   return "?";
 }
 
-// Action name -> code, A2J_UNMAP for NONE, A2J_NONE when unknown. LEFT+UP is UP+LEFT.
+// Action name -> code, A2J_UNMAP for NONE, A2J_NONE when unknown.
 static uint8_t joyAction(const char *s)
 {
   if (!strcmp(s, "NONE")) return A2J_UNMAP;
   if (!strcmp(s, "PB0") || !strcmp(s, "BUTTON0") || !strcmp(s, "OPEN-APPLE"))  return A2J_BTN0;
   if (!strcmp(s, "PB1") || !strcmp(s, "BUTTON1") || !strcmp(s, "SOLID-APPLE")) return A2J_BTN1;
   for (auto &a : kActions) if (!strcmp(s, a.name)) return a.code;
-  if (const char *p = strchr(s, '+')) {
-    char a[12];
-    const size_t n = (size_t)(p - s);
-    if (n >= sizeof(a)) return A2J_NONE;
-    memcpy(a, s, n); a[n] = 0;
-    uint8_t x = joyAction(a), y = joyAction(p + 1);
-    if (!a2jIsAction(x) || !a2jIsAction(y) || ((x | y) & ~A2J_DIRS)) return A2J_NONE;   // directions only
-    for (auto &e : kActions) if (e.code == (x | y)) return e.code;
-  }
   return A2J_NONE;
 }
 
@@ -141,7 +127,7 @@ static void parseLine(char *s, int line)
 void apple2JoymapLoad()
 {
   kOverCount = 0;
-  static const char *const kPaths[] = { "/apple2/joymap.txt", "/apple2joymap.txt" };
+  static const char *const kPaths[] = { "/emu8/apple2/joymap.txt", "/apple2/joymap.txt", "/apple2joymap.txt" };
   for (const char *path : kPaths) {
     File f;
     try { f = FSTYPE.open(path, FILE_READ); }
@@ -201,12 +187,13 @@ int  apple2JoymapChangedCount() { return kOverCount; }
 
 bool apple2JoymapSave()
 {
-  static const char *const kPath = "/apple2/joymap.txt";
+  static const char *const kPath = "/emu8/apple2/joymap.txt";
   // Timed lock, not busTake(): this runs in the render task (the menu).
   if (gBusLock && xSemaphoreTake(gBusLock, pdMS_TO_TICKS(5000)) != pdTRUE) return false;
   bool ok = false;
   try {
-    if (!FSTYPE.exists("/apple2")) FSTYPE.mkdir("/apple2");
+    if (!FSTYPE.exists("/emu8")) FSTYPE.mkdir("/emu8");
+    if (!FSTYPE.exists("/emu8/apple2")) FSTYPE.mkdir("/emu8/apple2");
     if (FSTYPE.exists(kPath)) FSTYPE.remove(kPath);     // FILE_WRITE appends on arduino-pico
     File f = FSTYPE.open(kPath, FILE_WRITE);
     if (f) {

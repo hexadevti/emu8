@@ -148,7 +148,7 @@ to some components).
   reads `N+` and the list stops there instead of coming up empty.
 - **Snapshots (save states) on every system** — `Ctrl`+`Shift`+`F5` (the **SNAP** button on touch
   boards) opens the snapshot page: **SAVE** (`S`), **LOAD** (`L`), **DELETE** (`D`). Each snapshot is one
-  file, `<SNAPSHOTS folder>/<system>/NNNN-<name>.snp` (default folder `/emu8-snapshot`), listed newest first with
+  file, `<SNAPSHOTS folder>/<emulator>/snapshot/NNNN-<name>.snp` (default folder `/emu8`, so `/emu8/c64/snapshot/`), listed newest first with
   a half-size thumbnail of the screen. A snapshot also stores the settings and the mounted disk / cartridge;
   if they differ from the running ones, loading it reboots into them and then restores the state. A snapshot
   made for a different cartridge or machine model is refused and the running machine is left untouched.
@@ -162,7 +162,7 @@ to some components).
   empty, idle machine; disks and tapes are ejected while the program keeps running.
 - **General settings** (the **SETUP** button on the system menu): **ROM FOLDER** (where system ROMs are
   read from, default `/roms`), **APPS FOLDER** (where every file browser starts, default `/`),
-  **SNAPSHOTS** (where snapshots are kept, default `/emu8-snapshot`), **RESET** (erase all saved settings
+  **SNAPSHOTS** (where snapshots are kept, default `/emu8`), **RESET** (erase all saved settings
   and ROM picks, then reboot) and a **HELP** page.
 - **HELP / CONTROLS** page in every system's settings: the global keys, the menu keys and that system's
   own key mapping.
@@ -190,7 +190,7 @@ to some components).
 - **Remappable keyboard and joystick keys** — system menu → **CONFIG → KEYBOARD / JOYSTICK** (on the
   PicoCalc a picture of the II+ or IIe keyboard, and of the Apple joystick). The IIe keyboard adds
   DELETE, TAB, the four arrows, CAPS LOCK and the open-/solid-apple keys (Alt / right Alt). Saved to
-  `/apple2/keymap.txt` (II+), `/apple2/keymap-iie.txt` (IIe) and `/apple2/joymap.txt`; to edit by hand
+  `/emu8/apple2/keymap.txt` (II+), `/emu8/apple2/keymap-iie.txt` (IIe) and `/emu8/apple2/joymap.txt`; to edit by hand
   start from [`docs/apple2-keymap.txt`](docs/apple2-keymap.txt),
   [`docs/apple2e-keymap.txt`](docs/apple2e-keymap.txt) and [`docs/apple2-joymap.txt`](docs/apple2-joymap.txt).
 - Built-in **6502 debugger** (step / breakpoint / stack trace). System ROMs load from `/roms/` on the SD card (see [ROM sources](#rom-sources)) —
@@ -214,7 +214,7 @@ to some components).
   switches to the Shift layer: F6–F9, Brk, Home, End, PgUp/PgDn, `!@#`…). The C64 picture lights the key
   it presses, and SHIFT too when the C64's SHIFT is held; Enter or Tab moves to that picture to pick the
   C64 key (or DEFAULT / NONE; Tab goes back), then Enter picks its SHIFT. Changes apply at once and are saved to
-  `/c64/keymap.txt`. You can also edit that file by hand — start from
+  `/emu8/c64/keymap.txt`. You can also edit that file by hand — start from
   [`docs/c64-keymap.txt`](docs/c64-keymap.txt) (the default, with the syntax); it is read when the C64 boots.
   On the C64 the menu's CONFIG card also holds ROMS and HELP.
 
@@ -230,7 +230,7 @@ to some components).
   Start / Select / A / B. To change a key, open the system menu → **CONFIG → KEYBOARD**; on the PicoCalc
   it shows its keyboard over an NES controller: pick the key, then the button on the controller (or
   DEFAULT / NONE). Other boards show it as a list. Changes apply at once and are saved to
-  `/nes/keymap.txt`; to edit it by hand start from [`docs/nes-keymap.txt`](docs/nes-keymap.txt).
+  `/emu8/nes/keymap.txt`; to edit it by hand start from [`docs/nes-keymap.txt`](docs/nes-keymap.txt).
 
 ### Atari 2600
 
@@ -262,7 +262,7 @@ to some components).
   **CONFIG → JOYSTICK** does the same for the joystick in port 1 (drawn as a black MSX stick with an
   orange top: TRIG A / TRIG B), used while **JOYSTICK** is on; the default is the arrows plus Space
   (and, on the PicoCalc, either SHIFT) = TRIG A. Other boards show both as lists. Changes apply at once
-  and are saved to `/msx/keymap.txt` / `/msx/joymap.txt`; to edit them by hand start from
+  and are saved to `/emu8/msx/keymap.txt` / `/emu8/msx/joymap.txt`; to edit them by hand start from
   [`docs/msx-keymap.txt`](docs/msx-keymap.txt) and [`docs/msx-joymap.txt`](docs/msx-joymap.txt).
 
 ### Sega Master System
@@ -277,7 +277,7 @@ to some components).
   `F4` / `F5` = 1 / 2. To change a key, open the system menu → **CONFIG → KEYBOARD**; on the PicoCalc
   it shows its keyboard over an SMS control pad: pick the key, then the button on the pad (or
   DEFAULT / NONE). Other boards show it as a list. Changes apply at once and are saved to
-  `/sms/keymap.txt`; to edit it by hand start from [`docs/sms-keymap.txt`](docs/sms-keymap.txt).
+  `/emu8/sms/keymap.txt`; to edit it by hand start from [`docs/sms-keymap.txt`](docs/sms-keymap.txt).
 
 ### ZX Spectrum 48K
 
@@ -298,7 +298,7 @@ to some components).
   DEFAULT / NONE), then AS TYPED / +CAPS / -CAPS / +SYMBOL. **CONFIG → JOYSTICK** does the same for the
   Kempston stick (drawn as a Cheetah 125+: trigger and both base buttons = FIRE), used while
   **JOYSTICK** is on; a key on the stick does not type. Other boards show both as lists. Changes apply
-  at once and are saved to `/zx/keymap.txt` / `/zx/joymap.txt`; to edit them by hand start from
+  at once and are saved to `/emu8/zx/keymap.txt` / `/emu8/zx/joymap.txt`; to edit them by hand start from
   [`docs/zx-keymap.txt`](docs/zx-keymap.txt) and [`docs/zx-joymap.txt`](docs/zx-joymap.txt).
 
 ### ColecoVision
@@ -312,7 +312,7 @@ to some components).
   types them). To change a key, open the system menu → **CONFIG → KEYBOARD**; on the PicoCalc it
   shows its keyboard over a ColecoVision controller (stick, side buttons, keypad): pick the key, then
   the button on the controller (or DEFAULT / NONE). Other boards show it as a list. Changes apply at
-  once and are saved to `/coleco/keymap.txt`; to edit it by hand start from
+  once and are saved to `/emu8/coleco/keymap.txt`; to edit it by hand start from
   [`docs/coleco-keymap.txt`](docs/coleco-keymap.txt).
 
 ### PC-XT *(in development)*
@@ -545,12 +545,12 @@ on the device). Full setup, toolchain and status notes live in
    so downloads are copied there as is. The settings menu's ROMS page can point any of them at another file, or at none.
 3. Copy your images to the card root, mixing systems freely:
    - Apple: `.dsk` / `.do` / `.po` / `.hdv` / `.2mg`
-   - C64: `.prg` / `.d64` / `.crt` (optional keyboard map: `/c64/keymap.txt`, from [`docs/c64-keymap.txt`](docs/c64-keymap.txt))
-   - NES: `.nes` (optional keyboard map: `/nes/keymap.txt`, from [`docs/nes-keymap.txt`](docs/nes-keymap.txt))
+   - C64: `.prg` / `.d64` / `.crt` (optional keyboard map: `/emu8/c64/keymap.txt`, from [`docs/c64-keymap.txt`](docs/c64-keymap.txt))
+   - NES: `.nes` (optional keyboard map: `/emu8/nes/keymap.txt`, from [`docs/nes-keymap.txt`](docs/nes-keymap.txt))
    - Atari 2600: `.a26` / `.bin`
-   - MSX1: `.rom` / `.mx1` / `.dsk` (plus `/roms/hotbit12.rom`, and `/roms/hb3600_disk.rom` for disks; optional maps: `/msx/keymap.txt` / `/msx/joymap.txt`, from [`docs/msx-keymap.txt`](docs/msx-keymap.txt) / [`docs/msx-joymap.txt`](docs/msx-joymap.txt))
+   - MSX1: `.rom` / `.mx1` / `.dsk` (plus `/roms/hotbit12.rom`, and `/roms/hb3600_disk.rom` for disks; optional maps: `/emu8/msx/keymap.txt` / `/emu8/msx/joymap.txt`, from [`docs/msx-keymap.txt`](docs/msx-keymap.txt) / [`docs/msx-joymap.txt`](docs/msx-joymap.txt))
    - Sega Master System: `.sms` / `.bin`
-   - ZX Spectrum 48K: `.sna` / `.z80` / `.tap` / `.tzx` (plus the ROM at `/roms/48.rom`; optional maps: `/zx/keymap.txt` / `/zx/joymap.txt`, from [`docs/zx-keymap.txt`](docs/zx-keymap.txt) / [`docs/zx-joymap.txt`](docs/zx-joymap.txt))
+   - ZX Spectrum 48K: `.sna` / `.z80` / `.tap` / `.tzx` (plus the ROM at `/roms/48.rom`; optional maps: `/emu8/zx/keymap.txt` / `/emu8/zx/joymap.txt`, from [`docs/zx-keymap.txt`](docs/zx-keymap.txt) / [`docs/zx-joymap.txt`](docs/zx-joymap.txt))
    - PC-XT: `.img` / `.ima` / `.dsk` / `.vhd` / `.hdd` (plus the BIOS at `/roms/pcxt_bios.bin`)
 4. Insert the card, power on, pick a platform on the splash, then choose an image from its on-screen
    file browser.

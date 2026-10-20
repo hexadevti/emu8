@@ -2,7 +2,7 @@
 // PicoCalc keyboard, the desktop build's PC keyboard: everything that reaches usbKeyboardReport()).
 //
 // A built-in default map, plus overrides read from a text file on the SD card when the Spectrum
-// boots: /zx/joymap.txt (or /zxjoymap.txt at the root). One rule per line, '#' starts a comment:
+// boots: /emu8/zx/joymap.txt (or /zxjoymap.txt at the root). One rule per line, '#' starts a comment:
 //
 //     <host key> = <joystick action>
 //
@@ -12,12 +12,12 @@
 //     SPACE = NONE                 # Space types again
 //
 // Host keys are named as in the C64 keyboard map (docs/c64-keymap.txt). The actions are UP DOWN
-// LEFT RIGHT, the diagonals UP+LEFT UP+RIGHT DOWN+LEFT DOWN+RIGHT, FIRE, or NONE. Any number of keys
+// LEFT RIGHT, FIRE, or NONE. Any number of keys
 // may pull the same line. While JOYSTICK is on a key with a joystick rule only moves the stick and
 // does not type; the others type through the keyboard map (zxkeymap.cpp). The full default map is
 // in docs/zx-joymap.txt.
 //
-// The default: the arrows steer and Space fires.
+// The default: the arrows steer and ] (the PicoCalc's third row) fires.
 
 #include "../../emu.h"
 
@@ -31,14 +31,13 @@ struct JoyRule { uint8_t hid, code; };
 // HID usage codes (the standard USB HID keyboard page), numeric so every board's header works.
 static const JoyRule kDefault[] = {
   {0x52, ZXJ_UP}, {0x51, ZXJ_DOWN}, {0x50, ZXJ_LEFT}, {0x4F, ZXJ_RIGHT},   // arrows
-  {0x2C, ZXJ_FIRE},                                                        // Space
+  {0x30, ZXJ_FIRE},                                                        // ]
 };
 
-// The picker's order: the stick clockwise from UP, then the button.
+// The picker's order: the stick (UP RIGHT DOWN LEFT), then the button.
 static const struct { uint8_t code; const char *name; } kActions[] = {
-  {ZXJ_UP, "UP"}, {ZXJ_UP | ZXJ_RIGHT, "UP+RIGHT"}, {ZXJ_RIGHT, "RIGHT"},
-  {ZXJ_DOWN | ZXJ_RIGHT, "DOWN+RIGHT"}, {ZXJ_DOWN, "DOWN"}, {ZXJ_DOWN | ZXJ_LEFT, "DOWN+LEFT"},
-  {ZXJ_LEFT, "LEFT"}, {ZXJ_UP | ZXJ_LEFT, "UP+LEFT"}, {ZXJ_FIRE, "FIRE"},
+  {ZXJ_UP, "UP"}, {ZXJ_RIGHT, "RIGHT"}, {ZXJ_DOWN, "DOWN"}, {ZXJ_LEFT, "LEFT"},
+  {ZXJ_FIRE, "FIRE"},
 };
 #define JOY_NACT ((int)(sizeof(kActions) / sizeof(kActions[0])))
 
@@ -71,20 +70,11 @@ const char *zxJoymapActionName(uint8_t code)
   return "?";
 }
 
-// Action name -> code, ZXJ_UNMAP for NONE, ZXJ_NONE when unknown. LEFT+UP is UP+LEFT.
+// Action name -> code, ZXJ_UNMAP for NONE, ZXJ_NONE when unknown.
 static uint8_t joyAction(const char *s)
 {
   if (!strcmp(s, "NONE")) return ZXJ_UNMAP;
   for (auto &a : kActions) if (!strcmp(s, a.name)) return a.code;
-  if (const char *p = strchr(s, '+')) {
-    char a[12];
-    const size_t n = (size_t)(p - s);
-    if (n >= sizeof(a)) return ZXJ_NONE;
-    memcpy(a, s, n); a[n] = 0;
-    uint8_t x = joyAction(a), y = joyAction(p + 1);
-    if (!zxjIsAction(x) || !zxjIsAction(y) || ((x | y) & ~0x0F)) return ZXJ_NONE;   // directions only
-    for (auto &e : kActions) if (e.code == (x | y)) return e.code;
-  }
   return ZXJ_NONE;
 }
 
@@ -121,7 +111,7 @@ static void parseLine(char *s, int line)
 void zxJoymapLoad()
 {
   kOverCount = 0;
-  static const char *const kPaths[] = { "/zx/joymap.txt", "/zxjoymap.txt" };
+  static const char *const kPaths[] = { "/emu8/zx/joymap.txt", "/zx/joymap.txt", "/zxjoymap.txt" };
   for (const char *path : kPaths) {
     File f;
     try { f = FSTYPE.open(path, FILE_READ); }
@@ -181,12 +171,13 @@ int  zxJoymapChangedCount() { return kOverCount; }
 
 bool zxJoymapSave()
 {
-  static const char *const kPath = "/zx/joymap.txt";
+  static const char *const kPath = "/emu8/zx/joymap.txt";
   // Timed lock, not busTake(): this runs in the render task (the menu).
   if (gBusLock && xSemaphoreTake(gBusLock, pdMS_TO_TICKS(5000)) != pdTRUE) return false;
   bool ok = false;
   try {
-    if (!FSTYPE.exists("/zx")) FSTYPE.mkdir("/zx");
+    if (!FSTYPE.exists("/emu8")) FSTYPE.mkdir("/emu8");
+    if (!FSTYPE.exists("/emu8/zx")) FSTYPE.mkdir("/emu8/zx");
     if (FSTYPE.exists(kPath)) FSTYPE.remove(kPath);     // FILE_WRITE appends on arduino-pico
     File f = FSTYPE.open(kPath, FILE_WRITE);
     if (f) {

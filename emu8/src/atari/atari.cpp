@@ -43,7 +43,7 @@ void atariSetup() {
   else printLog("Atari: no heap for frame snapshot; rendering live buffer");
 
 #if BOARD_INPUT_USB
-  atariKeymapLoad();                 // host key -> stick / switch overrides (/atari/keymap.txt)
+  atariKeymapLoad();                 // host key -> stick / switch overrides (/emu8/atari/keymap.txt)
 #endif
   atari::tiaReset();
   atari::riotReset();

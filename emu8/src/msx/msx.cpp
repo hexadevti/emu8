@@ -263,8 +263,8 @@ void msxSetup() {
   msxScratch = (uint16_t*)malloc(256 * 8 * sizeof(uint16_t));
 #endif
 #if BOARD_INPUT_USB
-  msxKeymapLoad();                                 // host key -> MSX key overrides (/msx/keymap.txt)
-  msxJoymapLoad();                                 // host key -> joystick overrides (/msx/joymap.txt)
+  msxKeymapLoad();                                 // host key -> MSX key overrides (/emu8/msx/keymap.txt)
+  msxJoymapLoad();                                 // host key -> joystick overrides (/emu8/msx/joymap.txt)
 #endif
 
 #if BOARD_HAS_MSX2

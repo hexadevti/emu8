@@ -1,8 +1,8 @@
 # emu8 - Apple IIe keyboard map
 #
-# Copy this file to the SD card as /apple2/keymap-iie.txt (or /apple2keymap-iie.txt) and edit it to
+# Copy this file to the SD card as /emu8/apple2/keymap-iie.txt (or /apple2keymap-iie.txt) and edit it to
 # choose which IIe key each host key presses. It is read when the IIe boots; the II+ has its own file
-# (/apple2/keymap.txt, docs/apple2-keymap.txt) because its default is different. Every line below is
+# (/emu8/apple2/keymap.txt, docs/apple2-keymap.txt) because its default is different. Every line below is
 # the BUILT-IN DEFAULT, so this file as shipped changes nothing; only lines that differ from the
 # default count (up to 64 of them). Deleting a line does not unmap the key, it just leaves the
 # default; use "= NONE" to make a key do nothing. Errors are reported in the log
@@ -10,7 +10,7 @@
 #
 # The Apple menu edits it too: CONFIG > KEYBOARD (on the PicoCalc a picture of its keyboard over the
 # IIe keyboard; elsewhere a list). A change there is live at once and rewrites
-# /apple2/keymap-iie.txt with only the changed keys.
+# /emu8/apple2/keymap-iie.txt with only the changed keys.
 #
 # FORMAT, HOST KEYS: as docs/apple2-keymap.txt.
 #

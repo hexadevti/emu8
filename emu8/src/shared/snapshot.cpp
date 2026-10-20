@@ -1,6 +1,6 @@
 // snapshot.cpp - save states on the SD card (Ctrl-Shift-F5; see snapshot.h for the core side).
 //
-// Files: <snapBaseDir()>/<system>/NNNN-<name>.snp, NNNN counting up from 0001 per system and <name>
+// Files: <snapBaseDir()>/<emulator>/snapshot/NNNN-<name>.snp (snapDir()), NNNN counting up from 0001 per system and <name>
 // the program / cartridge / disk that was running, so the list sorts newest first by name alone and
 // still says what each one is. The page that lists them is a mode of the settings window
 // (optionsui.cpp); this file does the files.
@@ -63,12 +63,29 @@ const char *snapSystemName()
   }
 }
 
+// The running system's snapshot folder, below the base: inside the emulator's own folder, next to
+// its key / joystick maps (/emu8/c64/keymap.txt). The IIe gets its own, as with keymap-iie.txt.
+static const char *snapSubDir()
+{
+  switch (currentPlatform) {
+    case PLATFORM_APPLE2: return AppleIIe ? "apple2/snapshot-iie" : "apple2/snapshot";
+    case PLATFORM_C64:    return "c64/snapshot";
+    case PLATFORM_NES:    return "nes/snapshot";
+    case PLATFORM_ATARI:  return "atari/snapshot";
+    case PLATFORM_MSX:    return "msx/snapshot";
+    case PLATFORM_SMS:    return "sms/snapshot";
+    case PLATFORM_COLECO: return "coleco/snapshot";
+    case PLATFORM_ZX:     return "zx/snapshot";
+    case PLATFORM_PCXT:   return "pcxt/snapshot";
+    default:              return "none";
+  }
+}
+
 String snapDir()
 {
-  const char *sys = snapSystemName();
   String d = snapBaseDir();
   if (d != "/") d += "/";
-  d += sys ? sys : "none";
+  d += snapSubDir();
   return d;
 }
 
@@ -240,6 +257,16 @@ static String snapThumbFile()
   return d + "thumb.tmp";
 }
 
+// Create <dir> and every folder above it (/emu8/c64/snapshot is three deep).
+static void snapMkdirs(const String &dir)
+{
+  for (int i = 1; i <= (int)dir.length(); i++)
+    if (i == (int)dir.length() || dir[i] == '/') {
+      const String part = dir.substring(0, i);
+      if (!FSTYPE.exists(part.c_str())) FSTYPE.mkdir(part.c_str());
+    }
+}
+
 void snapGrabScreen()
 {
   snapThumbOk = false;
@@ -250,7 +277,7 @@ void snapGrabScreen()
   uint16_t *out = rows + 2 * 320;
   if (!snapLock()) { free(rows); return; }
   const String base = snapBaseDir(), path = snapThumbFile();
-  if (base != "/" && !FSTYPE.exists(base.c_str())) FSTYPE.mkdir(base.c_str());
+  if (base != "/") snapMkdirs(base);
   if (FSTYPE.exists(path.c_str())) FSTYPE.remove(path.c_str());
   File f = FSTYPE.open(path.c_str(), FILE_WRITE);
   bool ok = (bool)f;
@@ -386,8 +413,7 @@ bool snapSave(int newest, const char *media, String &saved, const char *&err)
   if (!snapLock()) { err = "SD card busy - try again"; return false; }
 
   const String base = snapBaseDir();
-  if (base != "/" && !FSTYPE.exists(base.c_str())) FSTYPE.mkdir(base.c_str());
-  if (!FSTYPE.exists(dir.c_str())) FSTYPE.mkdir(dir.c_str());
+  snapMkdirs(dir);
   File f = FSTYPE.open(path.c_str(), FILE_WRITE);
   if (!f) { snapUnlock(); err = "Cannot create the file"; return false; }
 

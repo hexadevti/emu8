@@ -126,7 +126,7 @@ void colecoSetup() {
 
   loadBiosFromSD();
 #if BOARD_INPUT_USB
-  colecoKeymapLoad();                                    // host key -> controller overrides (/coleco/keymap.txt)
+  colecoKeymapLoad();                                    // host key -> controller overrides (/emu8/coleco/keymap.txt)
 #endif
   coleco::machineWire();
   coleco::machineReset();

@@ -1,6 +1,6 @@
 # emu8 - ColecoVision keyboard map
 #
-# Copy this file to the SD card as /coleco/keymap.txt (or /colecokeymap.txt) and edit it to remap
+# Copy this file to the SD card as /emu8/coleco/keymap.txt (or /colecokeymap.txt) and edit it to remap
 # keys. It is read when the ColecoVision boots. Every line below is the BUILT-IN DEFAULT, so this
 # file as shipped changes nothing; only lines that differ from the default count (up to 64 of them).
 # Deleting a line does not unmap the key, it just leaves the default; use "= NONE" to make a key do
@@ -8,7 +8,7 @@
 #
 # The Coleco menu edits it too: CONFIG > KEYBOARD (on the PicoCalc a picture of its keyboard over a
 # ColecoVision hand controller; elsewhere a list). A change there is live at once and rewrites
-# /coleco/keymap.txt with only the changed keys.
+# /emu8/coleco/keymap.txt with only the changed keys.
 #
 # Applies to every keyboard that reaches the ColecoVision through the HID path: the PicoCalc's
 # built-in keyboard, a USB keyboard (JC4827W543 / JC1060P470), and the PC keyboard in the desktop
@@ -47,11 +47,8 @@ LEFT = LEFT
 RIGHT = RIGHT
 
 # ---- the side buttons ----
-SPACE = LFIRE
-Z = LFIRE
-F4 = LFIRE
-X = RFIRE
-F5 = RFIRE
+LBRACKET = LFIRE
+RBRACKET = RFIRE
 
 # ---- the keypad ----
 1 = 1

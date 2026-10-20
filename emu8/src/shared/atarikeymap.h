@@ -21,14 +21,14 @@ static inline bool atariKIsAction(uint8_t c) { return c && c < 0x80; }
 // The mask host key `hid` presses (ATARIK_NONE / ATARIK_UNMAP: none); overrides before the default.
 // CTRL / ALT are looked up as C64K_HID_CTRL / C64K_HID_ALT (c64keymap.h), like the C64.
 uint8_t atariKeymapLookup(uint8_t hid);
-// (Re)read the overrides from /atari/keymap.txt (or /atarikeymap.txt). Missing file = defaults only.
+// (Re)read the overrides from /emu8/atari/keymap.txt (or /atarikeymap.txt). Missing file = defaults only.
 void    atariKeymapLoad();
 
 // ---- for the KEYBOARD page (optionsui.cpp); the host keys and their names are the C64 page's ----
-// The picker: the eight directions (clockwise from UP), then FIRE, SELECT, RESET.
+// The picker: the four directions (UP RIGHT DOWN LEFT), then FIRE, SELECT, RESET.
 int     atariKeymapActionCount();
 uint8_t atariKeymapActionAt(int i);
-const char *atariKeymapActionName(uint8_t code);            // "UP", "UP+LEFT", "FIRE", "RESET"
+const char *atariKeymapActionName(uint8_t code);            // "UP", "LEFT", "FIRE", "RESET"
 // The rule as text: "FIRE", "NONE", "-" (no rule).
 void    atariKeymapDescribe(uint8_t code, char *out, size_t n);
 // The rule for `hid`: `over` true when it comes from the overrides.
@@ -38,5 +38,5 @@ uint8_t atariKeymapDefault(uint8_t hid);
 bool    atariKeymapSet(uint8_t hid, uint8_t code);
 void    atariKeymapResetAll();
 int     atariKeymapChangedCount();
-// Write the overrides to /atari/keymap.txt. False if the card could not be written.
+// Write the overrides to /emu8/atari/keymap.txt. False if the card could not be written.
 bool    atariKeymapSave();

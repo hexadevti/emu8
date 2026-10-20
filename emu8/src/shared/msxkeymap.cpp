@@ -2,7 +2,7 @@
 // desktop build's PC keyboard: everything that reaches usbKeyboardReport()).
 //
 // A built-in default map, plus overrides read from a text file on the SD card when the MSX boots:
-// /msx/keymap.txt (or /msxkeymap.txt at the root). One rule per line, '#' starts a comment:
+// /emu8/msx/keymap.txt (or /msxkeymap.txt at the root). One rule per line, '#' starts a comment:
 //
 //     <host key> = <MSX key> [+SHIFT | -SHIFT]
 //
@@ -204,7 +204,7 @@ static void parseLine(char *s, int line)
 void msxKeymapLoad()
 {
   kOverCount = 0;
-  static const char *const kPaths[] = { "/msx/keymap.txt", "/msxkeymap.txt" };
+  static const char *const kPaths[] = { "/emu8/msx/keymap.txt", "/msx/keymap.txt", "/msxkeymap.txt" };
   for (const char *path : kPaths) {
     File f;
     try { f = FSTYPE.open(path, FILE_READ); }
@@ -289,12 +289,13 @@ int  msxKeymapChangedCount() { return kOverCount; }
 
 bool msxKeymapSave()
 {
-  static const char *const kPath = "/msx/keymap.txt";
+  static const char *const kPath = "/emu8/msx/keymap.txt";
   // Timed lock, not busTake(): this runs in the render task (the menu).
   if (gBusLock && xSemaphoreTake(gBusLock, pdMS_TO_TICKS(5000)) != pdTRUE) return false;
   bool ok = false;
   try {
-    if (!FSTYPE.exists("/msx")) FSTYPE.mkdir("/msx");
+    if (!FSTYPE.exists("/emu8")) FSTYPE.mkdir("/emu8");
+    if (!FSTYPE.exists("/emu8/msx")) FSTYPE.mkdir("/emu8/msx");
     if (FSTYPE.exists(kPath)) FSTYPE.remove(kPath);     // FILE_WRITE appends on arduino-pico
     File f = FSTYPE.open(kPath, FILE_WRITE);
     if (f) {

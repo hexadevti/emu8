@@ -1,6 +1,6 @@
 # emu8 - MSX1 keyboard map
 #
-# Copy this file to the SD card as /msx/keymap.txt (or /msxkeymap.txt) and edit it to remap keys.
+# Copy this file to the SD card as /emu8/msx/keymap.txt (or /msxkeymap.txt) and edit it to remap keys.
 # It is read when the MSX boots. Every line below is the BUILT-IN DEFAULT, so this file as shipped
 # changes nothing; only lines that differ from the default count (up to 64 of them). Deleting a
 # line does not unmap the key, it just leaves the default; use "= NONE" to make a key do nothing.
@@ -8,7 +8,7 @@
 #
 # The MSX menu edits it too: CONFIG > KEYBOARD (on the PicoCalc a picture of an MSX1 keyboard,
 # Philips VG-8020 style; elsewhere a list). A change there is live at once and rewrites
-# /msx/keymap.txt with only the changed keys.
+# /emu8/msx/keymap.txt with only the changed keys.
 #
 # Applies to every keyboard that types into the MSX through the HID path: the PicoCalc's built-in
 # keyboard, a USB keyboard (JC4827W543 / JC1060P470), and the PC keyboard in the desktop build.

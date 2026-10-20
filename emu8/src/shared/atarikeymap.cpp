@@ -3,23 +3,21 @@
 // reaches usbKeyboardReport()).
 //
 // A built-in default map, plus overrides read from a text file on the SD card when the Atari boots:
-// /atari/keymap.txt (or /atarikeymap.txt at the root). One rule per line, '#' starts a comment:
+// /emu8/atari/keymap.txt (or /atarikeymap.txt at the root). One rule per line, '#' starts a comment:
 //
 //     <host key> = <action>
 //
 //     W = UP                       # WASD steers
-//     Q = UP+LEFT                  # a diagonal on one key
 //     CTRL = FIRE                  # Ctrl fires too
 //     F1 = RESET                   # the console's RESET switch
 //     X = NONE                     # X does nothing
 //
 // Host keys are named as in the C64 map (c64keymap.cpp, docs/c64-keymap.txt); the actions are
-// UP DOWN LEFT RIGHT, the diagonals UP+LEFT UP+RIGHT DOWN+LEFT DOWN+RIGHT, FIRE, SELECT, RESET, or
-// NONE. Any number of keys may press the same one. The Atari has no SHIFT: a key is the same with
+// UP DOWN LEFT RIGHT, FIRE, SELECT, RESET, or NONE. Any number of keys may press the same one. The Atari has no SHIFT: a key is the same with
 // or without it. The full default map is in docs/atari-keymap.txt.
 //
-// The default: the arrows steer, Space / X fire, Tab / Enter are SELECT / RESET; on the PicoCalc
-// also F5 = FIRE, F4 = SELECT, F3 (sent as F12) = RESET.
+// The default: the arrows steer; the PicoCalc's third row gives the buttons: ] FIRE, ` SELECT,
+// / RESET.
 
 #include "../../emu.h"
 
@@ -33,19 +31,13 @@ struct AtariRule { uint8_t hid, code; };
 // HID usage codes (the standard USB HID keyboard page), numeric so every board's header works.
 static const AtariRule kDefault[] = {
   {0x52, ATARIK_UP}, {0x51, ATARIK_DOWN}, {0x50, ATARIK_LEFT}, {0x4F, ATARIK_RIGHT},   // arrows
-  {0x2C, ATARIK_FIRE}, {0x1B, ATARIK_FIRE},                                          // Space  X
-  {0x2B, ATARIK_SELECT}, {0x28, ATARIK_RESET},                                       // Tab  Enter
-#if UI_PICOCALC
-  // the function row: the PicoCalc's bare F3 arrives as F12 (input_picocalc.cpp)
-  {0x3E, ATARIK_FIRE}, {0x3D, ATARIK_SELECT}, {0x45, ATARIK_RESET},                  // F5  F4  F12 (= F3)
-#endif
+  {0x30, ATARIK_FIRE}, {0x35, ATARIK_SELECT}, {0x38, ATARIK_RESET},                  // ]  `  /
 };
 
-// The picker's order: the stick clockwise from UP, then FIRE and the console switches.
+// The picker's order: the stick (UP RIGHT DOWN LEFT), then FIRE and the console switches.
 static const struct { uint8_t code; const char *name; } kActions[] = {
-  {ATARIK_UP, "UP"}, {ATARIK_UP | ATARIK_RIGHT, "UP+RIGHT"}, {ATARIK_RIGHT, "RIGHT"},
-  {ATARIK_DOWN | ATARIK_RIGHT, "DOWN+RIGHT"}, {ATARIK_DOWN, "DOWN"}, {ATARIK_DOWN | ATARIK_LEFT, "DOWN+LEFT"},
-  {ATARIK_LEFT, "LEFT"}, {ATARIK_UP | ATARIK_LEFT, "UP+LEFT"}, {ATARIK_FIRE, "FIRE"},
+  {ATARIK_UP, "UP"}, {ATARIK_RIGHT, "RIGHT"}, {ATARIK_DOWN, "DOWN"}, {ATARIK_LEFT, "LEFT"},
+  {ATARIK_FIRE, "FIRE"},
   {ATARIK_SELECT, "SELECT"}, {ATARIK_RESET, "RESET"},
 };
 #define ATARI_NACT ((int)(sizeof(kActions) / sizeof(kActions[0])))
@@ -79,20 +71,11 @@ const char *atariKeymapActionName(uint8_t code)
   return "?";
 }
 
-// Action name -> code, ATARIK_UNMAP for NONE, ATARIK_NONE when unknown. LEFT+UP is UP+LEFT.
+// Action name -> code, ATARIK_UNMAP for NONE, ATARIK_NONE when unknown.
 static uint8_t atariAction(const char *s)
 {
   if (!strcmp(s, "NONE")) return ATARIK_UNMAP;
   for (auto &a : kActions) if (!strcmp(s, a.name)) return a.code;
-  if (const char *p = strchr(s, '+')) {
-    char a[12];
-    const size_t n = (size_t)(p - s);
-    if (n >= sizeof(a)) return ATARIK_NONE;
-    memcpy(a, s, n); a[n] = 0;
-    uint8_t x = atariAction(a), y = atariAction(p + 1);
-    if (!atariKIsAction(x) || !atariKIsAction(y) || ((x | y) & ~ATARIK_DIRS)) return ATARIK_NONE;   // directions only
-    for (auto &e : kActions) if (e.code == (x | y)) return e.code;
-  }
   return ATARIK_NONE;
 }
 
@@ -129,7 +112,7 @@ static void parseLine(char *s, int line)
 void atariKeymapLoad()
 {
   kOverCount = 0;
-  static const char *const kPaths[] = { "/atari/keymap.txt", "/atarikeymap.txt" };
+  static const char *const kPaths[] = { "/emu8/atari/keymap.txt", "/atari/keymap.txt", "/atarikeymap.txt" };
   for (const char *path : kPaths) {
     File f;
     try { f = FSTYPE.open(path, FILE_READ); }
@@ -189,12 +172,13 @@ int  atariKeymapChangedCount() { return kOverCount; }
 
 bool atariKeymapSave()
 {
-  static const char *const kPath = "/atari/keymap.txt";
+  static const char *const kPath = "/emu8/atari/keymap.txt";
   // Timed lock, not busTake(): this runs in the render task (the menu).
   if (gBusLock && xSemaphoreTake(gBusLock, pdMS_TO_TICKS(5000)) != pdTRUE) return false;
   bool ok = false;
   try {
-    if (!FSTYPE.exists("/atari")) FSTYPE.mkdir("/atari");
+    if (!FSTYPE.exists("/emu8")) FSTYPE.mkdir("/emu8");
+    if (!FSTYPE.exists("/emu8/atari")) FSTYPE.mkdir("/emu8/atari");
     if (FSTYPE.exists(kPath)) FSTYPE.remove(kPath);     // FILE_WRITE appends on arduino-pico
     File f = FSTYPE.open(kPath, FILE_WRITE);
     if (f) {

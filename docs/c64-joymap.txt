@@ -1,6 +1,6 @@
 # emu8 - C64 joystick map
 #
-# Copy this file to the SD card as /c64/joymap.txt (or /c64joymap.txt) and edit it to choose which
+# Copy this file to the SD card as /emu8/c64/joymap.txt (or /c64joymap.txt) and edit it to choose which
 # keys steer and fire the C64 joystick. It is read when the C64 boots. Every line below is the
 # BUILT-IN DEFAULT, so this file as shipped changes nothing; only lines that differ from the default
 # count (up to 64 of them). Deleting a line does not unmap the key, it just leaves the default; use
@@ -9,7 +9,7 @@
 #
 # The C64 menu edits it too: CONFIG > JOYSTICK (on the PicoCalc a picture of its keyboard over a
 # joystick: red button 1 = FIRE, 2 = FIRE2, the small 3 = FIRE3; elsewhere a list). A change there
-# is live at once and rewrites /c64/joymap.txt with only the changed keys.
+# is live at once and rewrites /emu8/c64/joymap.txt with only the changed keys.
 #
 # The map is used while JOYSTICK is ON in the C64 menu, on the port JOY PORT selects. It applies to
 # every keyboard that reaches the C64 through the HID path: the PicoCalc's built-in keyboard, a USB
@@ -32,15 +32,13 @@
 #
 # JOYSTICK ACTIONS
 #   UP DOWN LEFT RIGHT
-#   UP+LEFT UP+RIGHT DOWN+LEFT DOWN+RIGHT   a diagonal on one key (LEFT+UP etc. also accepted)
 #   FIRE
 #   FIRE2 FIRE3      a 2/3-button joystick's extra buttons. They sit on the paddle lines (SID POTX /
 #                    POTY read $00 while held, $FF otherwise), so only programs written for such a
 #                    joystick see them. Either port's paddle select reads them.
 #   NONE             the key does not touch the stick
 #
-# PicoCalc notes: the default also has "SHIFT = FIRE" (either Shift, next to the cursor keys), which
-# the other boards do not. The menu keys (Ctrl-F1 ...) are not remapped here.
+# PicoCalc notes: the menu keys (Ctrl-F1 ...) are not remapped here.
 
 # ---- the stick ----
 UP = UP
@@ -48,6 +46,7 @@ DOWN = DOWN
 LEFT = LEFT
 RIGHT = RIGHT
 
-# ---- the button ----
-SPACE = FIRE
-# SHIFT = FIRE   (PicoCalc only)
+# ---- the buttons ----
+RBRACKET = FIRE
+LBRACKET = FIRE2
+EQUAL = FIRE3

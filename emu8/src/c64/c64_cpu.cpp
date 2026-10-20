@@ -29,8 +29,6 @@ namespace c64 {
 #define AD_ZPG  0x0B
 #define AD_ZPGX 0x0C
 #define AD_ZPGY 0x0D
-#define AD_IABX 0x0E
-#define AD_IZPG 0x0F
 
 // SR Flag Modes
 #define FL_NONE 0x00  // ---- ----
@@ -66,62 +64,53 @@ uint32_t cpuCycleCount = 0;
 uint32_t lastCpuCycleCount = 0;
 uint32_t diffCpuCycleCount = 0;
 
-//high nibble SR flags, low nibble address mode
-C64_HOT_DATA const unsigned char flags65c02[] = {
-	//X0               X1                X2                    X3    X4                    X5                X6                X7    X8              X9                 XA                  XB    XC                    XD                XE                XF   
-	  AD_IMP,          AD_INDX,          UNDF,                 UNDF, FL_Z | AD_ZPG,/*e*/   FL_ZN | AD_ZPG,   FL_ZNC | AD_ZPG,  UNDF, AD_IMP,         FL_ZN | AD_IMM,    FL_ZNC | AD_A,      UNDF, FL_Z | AD_ABS,/*e*/   FL_ZN | AD_ABS,   FL_ZNC | AD_ABS,  UNDF, // 0X
-	  AD_REL,          FL_ZN | AD_INDY,  FL_ZN | AD_IZPG/*e*/, UNDF, FL_Z | AD_ZPG,/*e*/   FL_ZN | AD_ZPGX,  FL_ZNC | AD_ZPGX, UNDF, AD_IMP,         FL_ZN | AD_ABSY,   FL_ZN | AD_A,/*e*/  UNDF, FL_Z | AD_ABS,/*e*/   FL_ZN | AD_ABSX,  FL_ZNC | AD_ABSX, UNDF, // 1X
-	  AD_ABS,          FL_ZN | AD_INDX,  UNDF,                 UNDF, FL_Z | AD_ZPG,        FL_ZN | AD_ZPG,   FL_ZNC | AD_ZPG,  UNDF, AD_IMP,         FL_ZN | AD_IMM,    FL_ZNC | AD_A,      UNDF, FL_Z | AD_ABS,        FL_ZN | AD_ABS,   FL_ZNC | AD_ABS,  UNDF, // 2X
-	  AD_REL,          FL_ZN | AD_INDY,  FL_ZN | AD_IZPG/*e*/, UNDF, FL_NVZ | AD_ZPGX/*e*/,FL_ZN | AD_ZPGX,  FL_ZNC | AD_ZPGX, UNDF, AD_IMP,         FL_ZN | AD_ABSY,   FL_ZN | AD_A,/*e*/  UNDF, FL_NVZ | AD_ABSX,/*e*/FL_ZN | AD_ABSX,  FL_ZNC | AD_ABSX, UNDF, // 3X
-	  AD_IMP,          FL_ZN | AD_INDX,  UNDF,                 UNDF, UNDF,                 FL_ZN | AD_ZPG,   FL_ZNC | AD_ZPG,  UNDF, AD_IMP,         FL_ZN | AD_IMM,    FL_ZNC | AD_A,      UNDF, AD_ABS,               FL_ZN | AD_ABS,   FL_ZNC | AD_ABS,  UNDF, // 4X
-	  AD_REL,          FL_ZN | AD_INDY,  FL_ZN | AD_IZPG/*e*/, UNDF, UNDF,                 FL_ZN | AD_ZPGX,  FL_ZNC | AD_ZPGX, UNDF, AD_IMP,         FL_ZN | AD_ABSY,   AD_IMP,/*e*/        UNDF, UNDF,                 FL_ZN | AD_ABSX,  FL_ZNC | AD_ABSX, UNDF, // 5X
-	  AD_IMP,          FL_ALL | AD_INDX, UNDF,                 UNDF, AD_ZPG,/*e*/          FL_ALL | AD_ZPG,  FL_ZNC | AD_ZPG,  UNDF, FL_ZN | AD_IMP, FL_ALL | AD_IMM,   FL_ZNC | AD_A,      UNDF, AD_IND,               FL_ZNC | AD_ABS,  FL_ZNC | AD_ABS,  UNDF, // 6X
-	  AD_REL,          FL_ALL | AD_INDY, FL_ALL | AD_IZPG/*e*/,UNDF, AD_ZPGX,/*e*/         FL_ALL | AD_ZPGX, FL_ZNC | AD_ZPGX, UNDF, AD_IMP,         FL_ALL | AD_ABSY,  FL_ZN | AD_IMP,/*e*/UNDF, AD_IABX,/*e*/         FL_ALL | AD_ABSX, FL_ZNC | AD_ABSX, UNDF, // 7X
-	  AD_REL,/*e*/     AD_INDX,          UNDF,                 UNDF, AD_ZPG,               AD_ZPG,           AD_ZPG,           UNDF, FL_ZN | AD_IMP, FL_Z | AD_IMM/*e*/,FL_ZN | AD_IMP,     UNDF, AD_ABS,               AD_ABS,           AD_ABS,           UNDF, // 8X
-	  AD_REL,          AD_INDY,          AD_IZPG/*e*/,         UNDF, AD_ZPGX,              AD_ZPGX,          AD_ZPGY,          UNDF, FL_ZN | AD_IMP, AD_ABSY,           AD_IMP,             UNDF, AD_ABS,/*e*/          AD_ABSX,          AD_ABSX,/*e*/     UNDF, // 9X
-	  FL_ZN | AD_IMM,  FL_ZN | AD_INDX,  FL_ZN | AD_IMM,       UNDF, FL_ZN | AD_ZPG,       FL_ZN | AD_ZPG,   FL_ZN | AD_ZPG,   UNDF, FL_ZN | AD_IMP, FL_ZN | AD_IMM,    FL_ZN | AD_IMP,     UNDF, FL_ZN | AD_ABS,       FL_ZN | AD_ABS,   FL_ZN | AD_ABS,   UNDF, // AX
-	  AD_REL,          FL_ZN | AD_INDY,  FL_ZN | AD_IZPG/*e*/, UNDF, FL_ZN | AD_ZPGX,      FL_ZN | AD_ZPGX,  FL_ZN | AD_ZPGY,  UNDF, AD_IMP,         FL_ZN | AD_ABSY,   FL_ZN | AD_IMP,     UNDF, FL_ZN | AD_ABSX,      FL_ZN | AD_ABSX,  FL_ZN | AD_ABSY,  UNDF, // BX
-	  FL_ZNC | AD_IMM, FL_ZNC | AD_INDX, UNDF,                 UNDF, FL_ZNC | AD_ZPG,      FL_ZNC | AD_ZPG,  FL_ZN | AD_ZPG,   UNDF, FL_ZN | AD_IMP, FL_ZNC | AD_IMM,   FL_ZN | AD_IMP,     UNDF, FL_ZNC | AD_ABS,      FL_ZNC | AD_ABS,  FL_ZN | AD_ABS,   UNDF, // CX
-	  AD_REL,          FL_ZNC | AD_INDY, FL_ZNC | AD_IZPG/*e*/,UNDF, UNDF,                 FL_ZNC | AD_ZPGX, FL_ZN | AD_ZPGX,  UNDF, AD_IMP,         FL_ZNC | AD_ABSY,  AD_IMP,/*e*/        UNDF, UNDF,                 FL_ZNC | AD_ABSX, FL_ZN | AD_ABSX,  UNDF, // DX
-	  FL_ZNC | AD_IMM, FL_ALL | AD_INDX, UNDF,                 UNDF, FL_ZNC | AD_ZPG,      FL_ALL | AD_ZPG,  FL_ZN | AD_ZPG,   UNDF, FL_ZN | AD_IMP, FL_ALL | AD_IMM,   AD_IMP,             UNDF, FL_ZNC | AD_ABS,      FL_ALL | AD_ABS,  FL_ZN | AD_ABS,   UNDF, // EX
-	  AD_REL,          FL_ALL | AD_INDY, FL_ALL | AD_IZPG/*e*/,UNDF, UNDF,                 FL_ALL | AD_ZPGX, FL_ZN | AD_ZPGX,  UNDF, AD_IMP,         FL_ALL | AD_ABSY,  FL_ZN | AD_IMP,/*e*/UNDF, UNDF,                 FL_ALL | AD_ABSX, FL_ZN | AD_ABSX,  UNDF  // FX
-};
-
+// NMOS 6510: high nibble SR flags, low nibble address mode, for all 256 opcodes. The undocumented
+// opcodes (LAX, SAX, DCP, ISC, SLO, RLA, SRE, RRA, the NOP family...) carry their real address
+// mode so they consume the right number of operand bytes; they set their flags themselves.
+// (This core used to fall back on the 65C02 cases from the Apple II core: BRA, STZ, PHX... ran on
+// opcodes that are NOPs or illegals on the 6510, and every unlisted opcode was one byte long.)
 C64_HOT_DATA const unsigned char flags6502[] = {
-  AD_IMP, AD_INDX, UNDF, UNDF, UNDF, FL_ZN | AD_ZPG, FL_ZNC | AD_ZPG, UNDF, AD_IMP, FL_ZN | AD_IMM, FL_ZNC | AD_A, UNDF, UNDF, FL_ZN | AD_ABS, FL_ZNC | AD_ABS, UNDF,
-  AD_REL, FL_ZN | AD_INDY, UNDF, UNDF, UNDF, FL_ZN | AD_ZPGX, FL_ZNC | AD_ZPGX, UNDF, AD_IMP, FL_ZN | AD_ABSY, UNDF, UNDF, UNDF, FL_ZN | AD_ABSX, FL_ZNC | AD_ABSX, UNDF,
-  AD_ABS, FL_ZN | AD_INDX, UNDF, UNDF, FL_Z | AD_ZPG, FL_ZN | AD_ZPG, FL_ZNC | AD_ZPG, UNDF, AD_IMP, FL_ZN | AD_IMM, FL_ZNC | AD_A, UNDF, FL_Z | AD_ABS, FL_ZN | AD_ABS, FL_ZNC | AD_ABS, UNDF,
-  AD_REL, FL_ZN | AD_INDY, UNDF, UNDF, UNDF, FL_ZN | AD_ZPGX, FL_ZNC | AD_ZPGX, UNDF, AD_IMP, FL_ZN | AD_ABSY, UNDF, UNDF, UNDF, FL_ZN | AD_ABSX, FL_ZNC | AD_ABSX, UNDF,
-  AD_IMP, FL_ZN | AD_INDX, UNDF, UNDF, UNDF, FL_ZN | AD_ZPG, FL_ZNC | AD_ZPG, UNDF, AD_IMP, FL_ZN | AD_IMM, FL_ZNC | AD_A, UNDF, AD_ABS, FL_ZN | AD_ABS, FL_ZNC | AD_ABS, UNDF,
-  AD_REL, FL_ZN | AD_INDY, UNDF, UNDF, UNDF, FL_ZN | AD_ZPGX, FL_ZNC | AD_ZPGX, UNDF, AD_IMP, FL_ZN | AD_ABSY, UNDF, UNDF, UNDF, FL_ZN | AD_ABSX, FL_ZNC | AD_ABSX, UNDF,
-  AD_IMP, FL_ALL | AD_INDX, UNDF, UNDF, UNDF, FL_ALL | AD_ZPG, FL_ZNC | AD_ZPG, UNDF, FL_ZN | AD_IMP, FL_ALL | AD_IMM, FL_ZNC | AD_A, UNDF, AD_IND, FL_ALL | AD_ABS, FL_ZNC | AD_ABS, UNDF,
-  AD_REL, FL_ALL | AD_INDY, UNDF, UNDF, UNDF, FL_ALL | AD_ZPGX, FL_ZNC | AD_ZPGX, UNDF, AD_IMP, FL_ALL | AD_ABSY, UNDF, UNDF, UNDF, FL_ALL | AD_ABSX, FL_ZNC | AD_ABSX, UNDF,
-  UNDF, AD_INDX, UNDF, UNDF, AD_ZPG, AD_ZPG, AD_ZPG, UNDF, FL_ZN | AD_IMP, UNDF, FL_ZN | AD_IMP, UNDF, AD_ABS, AD_ABS, AD_ABS, UNDF,
-  AD_REL, AD_INDY, UNDF, UNDF, AD_ZPGX, AD_ZPGX, AD_ZPGY, UNDF, FL_ZN | AD_IMP, AD_ABSY, AD_IMP, UNDF, UNDF, AD_ABSX, UNDF, UNDF,
-  FL_ZN | AD_IMM, FL_ZN | AD_INDX, FL_ZN | AD_IMM, UNDF, FL_ZN | AD_ZPG, FL_ZN | AD_ZPG, FL_ZN | AD_ZPG, UNDF, FL_ZN | AD_IMP, FL_ZN | AD_IMM, FL_ZN | AD_IMP, UNDF, FL_ZN | AD_ABS, FL_ZN | AD_ABS, FL_ZN | AD_ABS, UNDF,
-  AD_REL, FL_ZN | AD_INDY, UNDF, UNDF, FL_ZN | AD_ZPGX, FL_ZN | AD_ZPGX, FL_ZN | AD_ZPGY, UNDF, AD_IMP, FL_ZN | AD_ABSY, FL_ZN | AD_IMP, UNDF, FL_ZN | AD_ABSX, FL_ZN | AD_ABSX, FL_ZN | AD_ABSY, UNDF,
-  FL_ZNC | AD_IMM, FL_ZNC | AD_INDX, UNDF, UNDF, FL_ZNC | AD_ZPG, FL_ZNC | AD_ZPG, FL_ZN | AD_ZPG, UNDF, FL_ZN | AD_IMP, FL_ZNC | AD_IMM, FL_ZN | AD_IMP, UNDF, FL_ZNC | AD_ABS, FL_ZNC | AD_ABS, FL_ZN | AD_ABS, UNDF,
-  AD_REL, FL_ZNC | AD_INDY, UNDF, UNDF, UNDF, FL_ZNC | AD_ZPGX, FL_ZN | AD_ZPGX, UNDF, AD_IMP, FL_ZNC | AD_ABSY, UNDF, UNDF, UNDF, FL_ZNC | AD_ABSX, FL_ZN | AD_ABSX, UNDF,
-  FL_ZNC | AD_IMM, FL_ALL | AD_INDX, UNDF, UNDF, FL_ZNC | AD_ZPG, FL_ALL | AD_ZPG, FL_ZN | AD_ZPG, UNDF, FL_ZN | AD_IMP, FL_ALL | AD_IMM, AD_IMP, UNDF, FL_ZNC | AD_ABS, FL_ALL | AD_ABS, FL_ZN | AD_ABS, UNDF,
-  AD_REL, FL_ALL | AD_INDY, UNDF, UNDF, UNDF, FL_ALL | AD_ZPGX, FL_ZN | AD_ZPGX, UNDF, AD_IMP, FL_ALL | AD_ABSY, UNDF, UNDF, UNDF, FL_ALL | AD_ABSX, FL_ZN | AD_ABSX, UNDF
+  //X0             X1                X2      X3       X4               X5                X6                X7       X8              X9                XA              XB       XC               XD                XE                XF
+  AD_IMP,          AD_INDX,          AD_IMP, AD_INDX, AD_ZPG,          FL_ZN | AD_ZPG,   FL_ZNC | AD_ZPG,  AD_ZPG,  AD_IMP,         FL_ZN | AD_IMM,   FL_ZNC | AD_A,  AD_IMM,  AD_ABS,          FL_ZN | AD_ABS,   FL_ZNC | AD_ABS,  AD_ABS,  // 0X
+  AD_REL,          FL_ZN | AD_INDY,  AD_IMP, AD_INDY, AD_ZPGX,         FL_ZN | AD_ZPGX,  FL_ZNC | AD_ZPGX, AD_ZPGX, AD_IMP,         FL_ZN | AD_ABSY,  AD_IMP,         AD_ABSY, AD_ABSX,         FL_ZN | AD_ABSX,  FL_ZNC | AD_ABSX, AD_ABSX, // 1X
+  AD_ABS,          FL_ZN | AD_INDX,  AD_IMP, AD_INDX, FL_Z | AD_ZPG,   FL_ZN | AD_ZPG,   FL_ZNC | AD_ZPG,  AD_ZPG,  AD_IMP,         FL_ZN | AD_IMM,   FL_ZNC | AD_A,  AD_IMM,  FL_Z | AD_ABS,   FL_ZN | AD_ABS,   FL_ZNC | AD_ABS,  AD_ABS,  // 2X
+  AD_REL,          FL_ZN | AD_INDY,  AD_IMP, AD_INDY, AD_ZPGX,         FL_ZN | AD_ZPGX,  FL_ZNC | AD_ZPGX, AD_ZPGX, AD_IMP,         FL_ZN | AD_ABSY,  AD_IMP,         AD_ABSY, AD_ABSX,         FL_ZN | AD_ABSX,  FL_ZNC | AD_ABSX, AD_ABSX, // 3X
+  AD_IMP,          FL_ZN | AD_INDX,  AD_IMP, AD_INDX, AD_ZPG,          FL_ZN | AD_ZPG,   FL_ZNC | AD_ZPG,  AD_ZPG,  AD_IMP,         FL_ZN | AD_IMM,   FL_ZNC | AD_A,  AD_IMM,  AD_ABS,          FL_ZN | AD_ABS,   FL_ZNC | AD_ABS,  AD_ABS,  // 4X
+  AD_REL,          FL_ZN | AD_INDY,  AD_IMP, AD_INDY, AD_ZPGX,         FL_ZN | AD_ZPGX,  FL_ZNC | AD_ZPGX, AD_ZPGX, AD_IMP,         FL_ZN | AD_ABSY,  AD_IMP,         AD_ABSY, AD_ABSX,         FL_ZN | AD_ABSX,  FL_ZNC | AD_ABSX, AD_ABSX, // 5X
+  AD_IMP,          AD_INDX,          AD_IMP, AD_INDX, AD_ZPG,          AD_ZPG,           FL_ZNC | AD_ZPG,  AD_ZPG,  FL_ZN | AD_IMP, AD_IMM,           FL_ZNC | AD_A,  AD_IMM,  AD_IND,          AD_ABS,           FL_ZNC | AD_ABS,  AD_ABS,  // 6X
+  AD_REL,          AD_INDY,          AD_IMP, AD_INDY, AD_ZPGX,         AD_ZPGX,          FL_ZNC | AD_ZPGX, AD_ZPGX, AD_IMP,         AD_ABSY,          AD_IMP,         AD_ABSY, AD_ABSX,         AD_ABSX,          FL_ZNC | AD_ABSX, AD_ABSX, // 7X
+  AD_IMM,          AD_INDX,          AD_IMM, AD_INDX, AD_ZPG,          AD_ZPG,           AD_ZPG,           AD_ZPG,  FL_ZN | AD_IMP, AD_IMM,           FL_ZN | AD_IMP, AD_IMM,  AD_ABS,          AD_ABS,           AD_ABS,           AD_ABS,  // 8X
+  AD_REL,          AD_INDY,          AD_IMP, AD_INDY, AD_ZPGX,         AD_ZPGX,          AD_ZPGY,          AD_ZPGY, FL_ZN | AD_IMP, AD_ABSY,          AD_IMP,         AD_ABSY, AD_ABSX,         AD_ABSX,          AD_ABSY,          AD_ABSY, // 9X
+  FL_ZN | AD_IMM,  FL_ZN | AD_INDX,  FL_ZN | AD_IMM, AD_INDX, FL_ZN | AD_ZPG, FL_ZN | AD_ZPG, FL_ZN | AD_ZPG, AD_ZPG, FL_ZN | AD_IMP, FL_ZN | AD_IMM, FL_ZN | AD_IMP, AD_IMM, FL_ZN | AD_ABS, FL_ZN | AD_ABS, FL_ZN | AD_ABS, AD_ABS, // AX
+  AD_REL,          FL_ZN | AD_INDY,  AD_IMP, AD_INDY, FL_ZN | AD_ZPGX, FL_ZN | AD_ZPGX,  FL_ZN | AD_ZPGY,  AD_ZPGY, AD_IMP,         FL_ZN | AD_ABSY,  FL_ZN | AD_IMP, AD_ABSY, FL_ZN | AD_ABSX, FL_ZN | AD_ABSX,  FL_ZN | AD_ABSY,  AD_ABSY, // BX
+  FL_ZNC | AD_IMM, FL_ZNC | AD_INDX, AD_IMM, AD_INDX, FL_ZNC | AD_ZPG, FL_ZNC | AD_ZPG,  FL_ZN | AD_ZPG,   AD_ZPG,  FL_ZN | AD_IMP, FL_ZNC | AD_IMM,  FL_ZN | AD_IMP, AD_IMM,  FL_ZNC | AD_ABS, FL_ZNC | AD_ABS,  FL_ZN | AD_ABS,   AD_ABS,  // CX
+  AD_REL,          FL_ZNC | AD_INDY, AD_IMP, AD_INDY, AD_ZPGX,         FL_ZNC | AD_ZPGX, FL_ZN | AD_ZPGX,  AD_ZPGX, AD_IMP,         FL_ZNC | AD_ABSY, AD_IMP,         AD_ABSY, AD_ABSX,         FL_ZNC | AD_ABSX, FL_ZN | AD_ABSX,  AD_ABSX, // DX
+  FL_ZNC | AD_IMM, AD_INDX,          AD_IMM, AD_INDX, FL_ZNC | AD_ZPG, AD_ZPG,           FL_ZN | AD_ZPG,   AD_ZPG,  FL_ZN | AD_IMP, AD_IMM,           AD_IMP,         AD_IMM,  FL_ZNC | AD_ABS, AD_ABS,           FL_ZN | AD_ABS,   AD_ABS,  // EX
+  AD_REL,          AD_INDY,          AD_IMP, AD_INDY, AD_ZPGX,         AD_ZPGX,          FL_ZN | AD_ZPGX,  AD_ZPGX, AD_IMP,         AD_ABSY,          AD_IMP,         AD_ABSY, AD_ABSX,         AD_ABSX,          FL_ZN | AD_ABSX,  AD_ABSX  // FX
 };
+static_assert(sizeof(flags6502) == 256, "flags6502 needs an entry per opcode");
 
-C64_HOT_DATA const uint8_t cycles[] = {   // uint8_t: every entry is 0..7 7, 6, 1, 0, 0, 3, 5, 0, 3, 2, 2, 0, 0, 4, 6, 0, 
-                       2, 5, 1, 0, 0, 4, 6, 0, 2, 4, 0, 0, 0, 4, 7, 0, 
-                       6, 6, 1, 0, 3, 3, 5, 0, 4, 2, 2, 0, 4, 4, 6, 0, 
-                       2, 5, 1, 0, 0, 4, 6, 0, 2, 4, 0, 0, 0, 4, 7, 0, 
-                       6, 6, 1, 0, 0, 3, 5, 0, 3, 2, 2, 0, 3, 4, 6, 0, 
-                       2, 5, 1, 0, 0, 4, 6, 0, 2, 4, 0, 0, 0, 4, 7, 0, 
-                       6, 6, 1, 0, 0, 3, 5, 0, 4, 2, 2, 0, 5, 4, 6, 0, 
-                       2, 5, 1, 0, 0, 4, 6, 0, 2, 4, 0, 0, 0, 4, 7, 0, 
-                       0, 6, 0, 0, 3, 3, 3, 0, 2, 0, 2, 0, 4, 4, 4, 0, 
-                       2, 6, 1, 0, 4, 4, 4, 0, 2, 5, 2, 0, 0, 5, 0, 0, 
-                       2, 6, 2, 0, 3, 3, 3, 0, 2, 2, 2, 0, 4, 4, 4, 0, 
-                       2, 5, 1, 0, 4, 4, 4, 0, 2, 4, 2, 0, 4, 4, 4, 0, 
-                       2, 6, 0, 0, 3, 3, 5, 0, 2, 2, 2, 0, 4, 4, 6, 0, 
-                       2, 5, 1, 0, 0, 4, 6, 0, 2, 4, 0, 0, 0, 4, 7, 0, 
-                       2, 6, 0, 0, 3, 3, 5, 0, 2, 2, 2, 0, 4, 4, 6, 0, 
-                       2, 5, 1, 0, 0, 4, 6, 0, 2, 4, 0, 0, 0, 4, 7, 0 };
+// NMOS base cycle counts (0 = KIL, which jams the CPU). A page crossed by an indexed read and a
+// taken branch add their cycles in cpuLoop. (The first row used to sit inside the comment on
+// this line, so every opcode was charged the cycles of opcode+16 and $Fx read past the table.)
+C64_HOT_DATA const uint8_t cycles[] = {
+  7, 6, 0, 8, 3, 3, 5, 5, 3, 2, 2, 2, 4, 4, 6, 6,   // 0X
+  2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7,   // 1X
+  6, 6, 0, 8, 3, 3, 5, 5, 4, 2, 2, 2, 4, 4, 6, 6,   // 2X
+  2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7,   // 3X
+  6, 6, 0, 8, 3, 3, 5, 5, 3, 2, 2, 2, 3, 4, 6, 6,   // 4X
+  2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7,   // 5X
+  6, 6, 0, 8, 3, 3, 5, 5, 4, 2, 2, 2, 5, 4, 6, 6,   // 6X
+  2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7,   // 7X
+  2, 6, 2, 6, 3, 3, 3, 3, 2, 2, 2, 2, 4, 4, 4, 4,   // 8X
+  2, 6, 0, 6, 4, 4, 4, 4, 2, 5, 2, 5, 5, 5, 5, 5,   // 9X
+  2, 6, 2, 6, 3, 3, 3, 3, 2, 2, 2, 2, 4, 4, 4, 4,   // AX
+  2, 5, 0, 5, 4, 4, 4, 4, 2, 4, 2, 4, 4, 4, 4, 4,   // BX
+  2, 6, 2, 8, 3, 3, 5, 5, 2, 2, 2, 2, 4, 4, 6, 6,   // CX
+  2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7,   // DX
+  2, 6, 2, 8, 3, 3, 5, 5, 2, 2, 2, 2, 4, 4, 6, 6,   // EX
+  2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7 }; // FX
+static_assert(sizeof(cycles) == 256, "cycles needs an entry per opcode");
 
 // CPU registers
 unsigned short PC;
@@ -204,6 +193,74 @@ C64_HOT unsigned char pull8() {
   return read8(STP_BASE + (++STP));
 }
 
+// ---- NMOS ALU helpers (ADC/SBC with the 6502's decimal-mode flag behaviour, compares, and the
+// read-modify-write store used by the undocumented opcodes as well as ASL/ROL/LSR/ROR/INC/DEC) ----
+static inline void setNZ(uint8_t v) { SR = (SR & 0x7D) | (v & 0x80) | (v ? 0 : SR_ZERO); }
+
+static inline void cmpReg(uint8_t r, uint8_t v) {
+  SR = (SR & ~SR_CARRY) | (r >= v ? SR_CARRY : 0);
+  setNZ((uint8_t)(r - v));
+}
+
+static inline void doADC(uint8_t v) {
+  unsigned c = SR & SR_CARRY;
+  SR &= ~(SR_NEG | SR_OVER | SR_ZERO | SR_CARRY);
+  if (SR & SR_DEC) {
+    // NMOS decimal: Z from the binary sum, N and V from the half-adjusted high nibble.
+    unsigned lo = (A & 0x0F) + (v & 0x0F) + c;
+    if (lo > 9) lo += 6;
+    unsigned hi = (A >> 4) + (v >> 4) + (lo > 0x0F ? 1 : 0);
+    if (((A + v + c) & 0xFF) == 0) SR |= SR_ZERO;
+    if (hi & 0x08) SR |= SR_NEG;
+    if (~(A ^ v) & (A ^ (hi << 4)) & 0x80) SR |= SR_OVER;
+    if (hi > 9) hi += 6;
+    if (hi > 0x0F) SR |= SR_CARRY;
+    A = (uint8_t)((hi << 4) | (lo & 0x0F));
+  } else {
+    unsigned r = A + v + c;
+    if (r > 0xFF) SR |= SR_CARRY;
+    if (~(A ^ v) & (A ^ r) & 0x80) SR |= SR_OVER;
+    A = (uint8_t)r;
+    if (A == 0) SR |= SR_ZERO;
+    SR |= A & 0x80;
+  }
+}
+
+static inline void doSBC(uint8_t v) {
+  unsigned borrow = (SR & SR_CARRY) ? 0 : 1;
+  unsigned r = (unsigned)A - v - borrow;          // NMOS: all flags come from the binary result
+  SR &= ~(SR_NEG | SR_OVER | SR_ZERO | SR_CARRY);
+  if (r < 0x100) SR |= SR_CARRY;
+  if ((A ^ v) & (A ^ r) & 0x80) SR |= SR_OVER;
+  if ((r & 0xFF) == 0) SR |= SR_ZERO;
+  SR |= r & 0x80;
+  if (SR & SR_DEC) {
+    unsigned t = (A & 0x0F) - (v & 0x0F) - borrow;
+    if (t & 0x10) t = ((t - 6) & 0x0F) | ((A & 0xF0) - (v & 0xF0) - 0x10);
+    else          t = (t & 0x0F) | ((A & 0xF0) - (v & 0xF0));
+    if (t & 0x100) t -= 0x60;
+    A = (uint8_t)t;
+  } else {
+    A = (uint8_t)r;
+  }
+}
+
+// Read-modify-write store. The 6510 writes the unmodified value back first, then the new one;
+// only I/O can tell, but there it matters: INC/ASL/LSR $D019 acknowledges the VIC interrupt
+// with that first write, since the new value no longer has the pending bits.
+static inline void rmwWrite(unsigned short addr, uint8_t oldv, uint8_t newv) {
+  if ((addr & 0xF000) == 0xD000) write8(addr, oldv);
+  write8(addr, newv);
+}
+
+// SHA/SHX/SHY/TAS: store v AND (high byte of the unindexed address + 1); when indexing crossed a
+// page, that value also replaces the high byte of the target address.
+static inline void shStore(unsigned short base, unsigned short addr, uint8_t v) {
+  uint8_t val = v & (uint8_t)((base >> 8) + 1);
+  if ((base ^ addr) & 0xFF00) addr = (unsigned short)((addr & 0x00FF) | (val << 8));
+  write8(addr, val);
+}
+
 // Virtual-disk KERNAL LOAD trap. The KERNAL LOAD vector $FFD5 JMPs to $F49E; when the
 // CPU reaches $F49E with device 8 selected and a .d64 mounted, we service the load here
 // natively (read the directory + sector chain straight off the SD image) and RTS back to
@@ -266,7 +323,10 @@ static void perfSample() {
 }
 
 static bool c64LoadTrap() {
-  if (read8(0xBA) != 8) return false;        // not device 8 -> let the ROM handle it
+  // Device 8, or device 1 (tape: a bare LOAD / LOAD"NAME") while a disk is mounted -- there is
+  // no tape drive, so that loads from the disk the way LOAD"*",8 / LOAD"NAME",8 would.
+  uint8_t dev = read8(0xBA);
+  if (dev != 8 && dev != 1) return false;    // other devices -> let the ROM handle it
   if (!::c64DiskMounted()) return false;     // nothing mounted -> ROM ("device not present")
   // Only when $F49E really is the KERNAL: a game running with the KERNAL banked out ($01=$35) or
   // an Ultimax cart has its own code there, and $BA keeps its 8 after any disk load.
@@ -412,15 +472,18 @@ C64_HOT void cpuLoop() {
     // games). Apply the 6502's 1-instruction interrupt-disable delay: recognise the IRQ using
     // the I-flag value from BEFORE the current instruction, so CLI/SEI/PLP/RTI take effect one
     // instruction later (getting this wrong corrupts the KERNAL boot: banner/$E386 hang).
-    if (!(irqShadowSR & SR_INT) && (cia1IRQPending() || vicIRQPending())) cpuIRQ();
+    // Cycles this step costs beyond cycles[opcode]: a 7-cycle interrupt entry, a page crossed
+    // by an indexed read, a taken branch.
+    uint8_t extraCyc = 0;
+    if (!(irqShadowSR & SR_INT) && (cia1IRQPending() || vicIRQPending())) { cpuIRQ(); extraCyc += 7; }
     irqShadowSR = SR;
 
     // NMI (CIA2 timers / RESTORE) is edge-triggered and NOT masked by the I flag.
     bool nmiNow = cia2NMIPending();
-    if (nmiNow && !nmiPrev) cpuNMI();
+    if (nmiNow && !nmiPrev) { cpuNMI(); extraCyc += 7; }
     nmiPrev = nmiNow;
     // RESTORE is not in the matrix: it pulls NMI through a one-shot, so a press is one NMI.
-    if (c64RestoreReq) { c64RestoreReq = false; cpuNMI(); }
+    if (c64RestoreReq) { c64RestoreReq = false; cpuNMI(); extraCyc += 7; }
 
     // Virtual disk: intercept the KERNAL LOAD entry before it runs the (absent) IEC code.
     if (PC == 0xF49E && c64LoadTrap()) continue;
@@ -475,9 +538,11 @@ C64_HOT void cpuLoop() {
       lastCpuCycleCount = cpuCycleCount;
 #endif
     }
-    opflags = mos65c02 ? flags65c02[opcode] : flags6502[opcode];
+    opflags = flags6502[opcode];
 
-    // Addressing modes
+    // Addressing modes. baseAddr is the address before indexing; an indexed read that crosses
+    // a page costs one more cycle (the stores and read-modify-writes always pay it, in cycles[]).
+    unsigned short baseAddr = 0;
     switch (opflags & 0x0F) {
       case AD_IMP:
       case AD_A: argument_addr = 0xFFFF; break;
@@ -486,25 +551,23 @@ C64_HOT void cpuLoop() {
         PC += 2;
         break;
       case AD_ABSX:
-        argument_addr = read16(PC) + (unsigned short)X;
+        baseAddr = read16(PC);
+        argument_addr = baseAddr + (unsigned short)X;
         PC += 2;
+        if (cycles[opcode] == 4 && ((baseAddr ^ argument_addr) & 0xFF00)) extraCyc++;
         break;
-      case AD_IABX:
-		    argument_addr = read16(PC) + (unsigned short)X;
-		    value16 = (argument_addr + 1 & 0xFF00) | ((argument_addr + 1) & 0x00FF);
-		    argument_addr = (unsigned short)read8(argument_addr) | ((unsigned short)read8(value16) << 8);
-		    PC += 2;
-		    break;
       case AD_ABSY:
-        argument_addr = read16(PC) + (unsigned short)Y;
+        baseAddr = read16(PC);
+        argument_addr = baseAddr + (unsigned short)Y;
         PC += 2;
+        if (cycles[opcode] == 4 && ((baseAddr ^ argument_addr) & 0xFF00)) extraCyc++;
         break;
       case AD_IMM:
         argument_addr = PC++;
         break;
-      case AD_IND:
+      case AD_IND:   // JMP ($xxFF) takes the high byte from $xx00: the NMOS page-wrap bug
 		    argument_addr = read16(PC);
-		    value16 = (argument_addr + 1 & 0xFF00) | ((argument_addr + 1) & 0x00FF);
+		    value16 = (argument_addr & 0xFF00) | ((argument_addr + 1) & 0x00FF);
 		    argument_addr = (unsigned short)read8(argument_addr) | ((unsigned short)read8(value16) << 8);
 		    PC += 2;
 		    break;
@@ -516,8 +579,9 @@ C64_HOT void cpuLoop() {
       case AD_INDY:
         argument_addr = (unsigned short)read8(PC++);
         value16 = (argument_addr & 0xFF00) | ((argument_addr + 1) & 0x00FF);  // Page wrap
-        argument_addr = (unsigned short)read8(argument_addr) | ((unsigned short)read8(value16) << 8);
-        argument_addr += Y;
+        baseAddr = (unsigned short)read8(argument_addr) | ((unsigned short)read8(value16) << 8);
+        argument_addr = baseAddr + Y;
+        if (cycles[opcode] == 5 && ((baseAddr ^ argument_addr) & 0xFF00)) extraCyc++;
         break;
       case AD_REL:
         argument_addr = (unsigned short)read8(PC++);
@@ -526,11 +590,6 @@ C64_HOT void cpuLoop() {
       case AD_ZPG:
         argument_addr = (unsigned short)read8(PC++);
         break;
-      case AD_IZPG:
-		    argument_addr = (unsigned short)read8(PC++);
-		    value16 = (argument_addr + 1 & 0xFF00) | ((argument_addr + 1) & 0x00FF);
-		    argument_addr = (unsigned short)read8(argument_addr) | ((unsigned short)read8(value16) << 8);
-		    break;
       case AD_ZPGX:
         argument_addr = ((unsigned short)read8(PC++) + (unsigned short)X) & 0xFF;
         break;
@@ -539,8 +598,10 @@ C64_HOT void cpuLoop() {
         break;
     }
 
-    // printCPUStatus();
-    
+    // A taken branch costs one cycle more, two when it lands on another page.
+#define C64_BRANCH(cond) \
+    if (cond) { unsigned short t = PC + argument_addr; extraCyc += ((t ^ PC) & 0xFF00) ? 2 : 1; PC = t; }
+
     //opcodes
     switch (opcode) {
       //ADC
@@ -552,63 +613,7 @@ C64_HOT void cpuLoop() {
       case 0x79:
       case 0x61:
       case 0x71:
-      case 0x72: //e
-        value16 = (unsigned short)read8(argument_addr);
-        if (SR & SR_DEC) { // Decimal
-          result = (unsigned short)(A & 0x0F) + (unsigned short)(value16 & 0x0f) + (SR & 0x01 > 0);
-          if (result > 0x09)
-            result += 0x06;
-          if (result <= 0x0F)
-            result = (unsigned short)(result & 0x0F) + (unsigned short)(A & 0xF0) + (unsigned short)(value16 & 0xF0);
-          else
-            result = (unsigned short)(result & 0x0F) + (unsigned short)(A & 0xF0) + (unsigned short)(value16 & 0xF0) + 0x10;
-
-          if (result == 0) // Zero Flag
-            SR |= 0x02;
-          else
-            SR &= 0xfd;
-
-          //if ((((A ^ result) & 0x80) > 0) && !(((A ^ result) & 0x80) > 0)) // Overflow
-          if (((A ^ result) & 0x80) > 0)
-            SR |= 0x40;
-          else
-            SR &= 0xbf;
-
-          if ((result & 0x1F0) > 0x90)
-            result += 0x60;
-
-          if ((result & 0xFF0) > 0xF0) // Carry
-            SR |= 0x01;
-          else
-            SR &= 0xfe;
-        }
-        else
-        { // Binary
-          result = (unsigned short)A + value16 + (unsigned short)(SR & SR_CARRY);
-          if (!(((A ^ value16) & 0x80) > 0))
-            SR |= 0x40;
-          else
-            SR &= 0xbf;
-
-          if (result >= 0x100)
-          {
-            SR |= 0x01;
-            if (result >= 0x180)
-              SR &= 0xbf;
-          }
-          else
-          {
-            SR &= 0xfe;
-            if (result < 0x80)
-              SR &= 0xbf;
-          }
-        }
-        setflags();
-        A = result & 0xFF;
-        if ((A & 0x80) == 0x80) // Negative
-          SR |= 0x80;
-        else
-          SR &= 0x7f;
+        doADC(read8(argument_addr));
     		break;
 		    //AND
       case 0x29:
@@ -619,7 +624,6 @@ C64_HOT void cpuLoop() {
       case 0x39:
       case 0x21:
       case 0x31:
-      case 0x32: //e
         result = A & read8(argument_addr);
         A = result & 0xFF;
         setflags();
@@ -639,30 +643,27 @@ C64_HOT void cpuLoop() {
         value16 = read8(argument_addr);
         result = value16 << 1;
         setflags();
-        write8(argument_addr, result & 0xFF);
+        rmwWrite(argument_addr, value16, result & 0xFF);
         break;
       //BCC
-      case 0x90:
-        if (!(SR & SR_CARRY)) PC += argument_addr;
-        break;
+      case 0x90: C64_BRANCH(!(SR & SR_CARRY)); break;
       //BCS
-      case 0xB0:
-        if ((SR & SR_CARRY)) PC += argument_addr;
-        break;
+      case 0xB0: C64_BRANCH(SR & SR_CARRY); break;
       //BEQ
-      case 0xF0:
-		if ((SR & SR_ZERO))
-			PC += argument_addr;
-		break;
+      case 0xF0: C64_BRANCH(SR & SR_ZERO); break;
       //BNE
-      case 0xD0:
-        if (!(SR & SR_ZERO)) PC += argument_addr;
-        break;
+      case 0xD0: C64_BRANCH(!(SR & SR_ZERO)); break;
+      //BMI
+      case 0x30: C64_BRANCH(SR & SR_NEG); break;
+      //BPL
+      case 0x10: C64_BRANCH(!(SR & SR_NEG)); break;
+      //BVC
+      case 0x50: C64_BRANCH(!(SR & SR_OVER)); break;
+      //BVS
+      case 0x70: C64_BRANCH(SR & SR_OVER); break;
       //BIT
       case 0x24:
       case 0x2C:
-      case 0x34: //e
-      case 0x3C: //e
         value8 = read8(argument_addr);
         result = A & value8;
         setflags();
@@ -672,44 +673,13 @@ C64_HOT void cpuLoop() {
         else
           SR &= 0xfd;
         break;
-      //BMI
-      case 0x89: //e
-        value8 = read8(argument_addr);
-        result = A & value8;
-        if (result == 0) // Zero Flag
-          SR |= 0x02;
-        else
-          SR &= 0xfd;
-        break;
-		//BMI
-      case 0x30:
-        if ((SR & SR_NEG)) PC += argument_addr;
-        break;
-      //BPL
-      case 0x10:
-        if (!(SR & SR_NEG))
-         PC += argument_addr;
-        break;
-      //BRK
+      //BRK (the NMOS 6502 leaves D alone)
       case 0x00:
         PC++;
         push16(PC);
         push8(SR | SR_BRK);
         SR |= SR_INT;
         PC = read16(0xFFFE);
-        SR &= 0xF7; //e
-        break;
-      //BRA
-      case 0x80: //e
-        PC += argument_addr;
-        break;
-      //BVC
-      case 0x50:
-        if (!(SR & SR_OVER)) PC += argument_addr;
-        break;
-      //BVS
-      case 0x70:
-        if (SR & SR_OVER) PC += argument_addr;
         break;
       //CLC
       case 0x18:
@@ -736,7 +706,6 @@ C64_HOT void cpuLoop() {
       case 0xD9:
       case 0xC1:
       case 0xD1:
-      case 0xD2: //e
         value16 = ((unsigned short)read8(argument_addr)) ^ 0x00FF;
         result = (unsigned short)A + value16 + (unsigned short)1;
         setflags();
@@ -765,12 +734,7 @@ C64_HOT void cpuLoop() {
         value16 = (unsigned short)read8(argument_addr);
         result = value16 - 1;
         setflags();
-        write8(argument_addr, result & 0xFF);
-        break;
-          case 0x3A: //e
-        result = A - 1;
-        setflags();
-        A = result;
+        rmwWrite(argument_addr, value16, result & 0xFF);
         break;
 		//DEX
       case 0xCA:
@@ -791,7 +755,6 @@ C64_HOT void cpuLoop() {
       case 0x59:
       case 0x41:
       case 0x51:
-      case 0x52: //e
         value8 = read8(argument_addr);
         result = A ^ value8;
         setflags();
@@ -805,14 +768,9 @@ C64_HOT void cpuLoop() {
         value16 = (unsigned short)read8(argument_addr);
         result = value16 + 1;
         setflags();
-        write8(argument_addr, result & 0xFF);
+        rmwWrite(argument_addr, value16, result & 0xFF);
         break;
 		  //INX
-      case 0x1A: //e
-        result = A + 1;
-        setflags();
-        A = result;
-        break;
       case 0xE8:
         result = ++X;
         setflags();
@@ -825,7 +783,6 @@ C64_HOT void cpuLoop() {
       //JMP
       case 0x4C:
       case 0x6C:
-      case 0x7C: //e
         PC = argument_addr;
         break;
       //JSR
@@ -842,7 +799,6 @@ C64_HOT void cpuLoop() {
       case 0xB9:
       case 0xA1:
       case 0xB1:
-      case 0xB2: //e
         A = read8(argument_addr);
         result = A;
         setflags();
@@ -884,7 +840,7 @@ C64_HOT void cpuLoop() {
         result = value8 >> 1;
         result |= (value8 & 0x1) ? 0x8000 : 0;
         setflags();
-        write8(argument_addr, result & 0xFF);
+        rmwWrite(argument_addr, value8, result & 0xFF);
         break;
 		//ORA
       case 0x09:
@@ -895,31 +851,12 @@ C64_HOT void cpuLoop() {
       case 0x19:
       case 0x01:
       case 0x11:
-      case 0x12: //e
-        value8 = read8(argument_addr);
-        result = value8 | A;
-        setflags();
-        if ((result & 0x80) == 0x80)
-          SR |= 0x80;
-        else
-          SR &= 0x7f;
-        if ((result & 0xFF) == 0)
-          SR |= 0x02;
-        else
-          SR &= 0xfd;
-        A = result;
+        A |= read8(argument_addr);
+        setNZ(A);
         break;
       //PHA
       case 0x48:
         push8(A);
-        break;
-      //PHX
-      case 0xDA: //e
-        push8(X);
-        break;
-      //PHY
-      case 0x5A: //e
-        push8(Y);
         break;
       //PHP
       case 0x08:
@@ -930,18 +867,6 @@ C64_HOT void cpuLoop() {
         result = pull8();
         setflags();
         A = result;
-        break;
-      //PLX
-      case 0xFA: //e
-        result = pull8();
-        setflags();
-        X = result;
-        break;
-      //PLY
-      case 0x7A: //e
-        result = pull8();
-        setflags();
-        Y = result;
         break;
         //PLP
       case 0x28:
@@ -962,7 +887,7 @@ C64_HOT void cpuLoop() {
         value16 = (unsigned short)read8(argument_addr);
         result = (value16 << 1) | (SR & SR_CARRY);
         setflags();
-        write8(argument_addr, result & 0xFF);
+        rmwWrite(argument_addr, value16, result & 0xFF);
         break;
       //ROR A
       case 0x6A:
@@ -981,18 +906,18 @@ C64_HOT void cpuLoop() {
         result = (value16 >> 1) | ((SR & SR_CARRY) << 7);
         result |= (value16 & 0x1) ? 0x8000 : 0;
         setflags();
-        write8(argument_addr, result & 0xFF);
+        rmwWrite(argument_addr, value16, result & 0xFF);
         break;
       //RTI
       case 0x40:
-        SR = pull8();
+        SR = pull8() | SR_FIXED_BITS;
         PC = pull16();
         break;
       //RTS
       case 0x60:
         PC = pull16() + 1;
         break;
-      //SBC
+      //SBC ($EB is the undocumented copy of $E9)
       case 0xE9:
       case 0xE5:
       case 0xF5:
@@ -1001,41 +926,8 @@ C64_HOT void cpuLoop() {
       case 0xF9:
       case 0xE1:
       case 0xF1:
-      case 0xF2:
-        if (SR & SR_DEC) { // Decimal
-            value16 = (unsigned short)read8(argument_addr);
-          if (!(((A ^ value16) & 0x80) > 0))
-            SR |= 0x40;
-          else
-            SR &= 0xbf;
-          unsigned short value2 = (unsigned short)(A - value16 - (!(SR & 0x01 > 0)));
-          result = (unsigned short)((unsigned short)(A & 0x0F) - (unsigned short)(value16 & 0x0F) - (unsigned short)(!(SR & 0x01 > 0)));
-          if ((result & 0x10) > 0)
-            result = ((result - 0x06) & 0x0F) | ((A & 0xF0) - (value16 & 0xF0) - 0x10);
-          else
-            result = (result & 0x0F) | ((A & 0xF0) - (value16 & 0xF0));
-          if ((result & 0x100) > 0)
-            result -= 0x60;
-
-          if ((unsigned short)value2 < (unsigned short)0x0100) // carry
-            SR |= 0x01;
-          else
-            SR &= 0xfe;
-        }
-        else {
-          value16 = ((unsigned short)read8(argument_addr)) ^ 0x00FF;
-          result = (unsigned short)A + value16 + (unsigned short)(SR & SR_CARRY);
-          setflags();
-        }
-        A = result & 0xFF;
-        if ((A & 0x80) > 0) // Negative
-          SR |= 0x80;
-        else
-          SR &= 0x7f;
-        if (!((A & 0xFF) > 0)) // Zero
-          SR |= 0x02;
-        else
-          SR &= 0xfd;
+      case 0xEB:
+        doSBC(read8(argument_addr));
         break;
 		//SEC
       case 0x38:
@@ -1057,7 +949,6 @@ C64_HOT void cpuLoop() {
       case 0x99:
       case 0x81:
       case 0x91:
-      case 0x92:
         write8(argument_addr, A);
         break;
       //STX
@@ -1071,13 +962,6 @@ C64_HOT void cpuLoop() {
       case 0x94:
       case 0x8C:
         write8(argument_addr, Y);
-        break;
-      //STZ
-      case 0x64:
-      case 0x74:
-      case 0x9C:
-      case 0x9E:
-        write8(argument_addr, 0);
         break;
       //TAX
       case 0xAA:
@@ -1106,8 +990,6 @@ C64_HOT void cpuLoop() {
       //TXS
       case 0x9A:
         STP = X;
-        result = X;
-        setflags();
         break;
       //TYA
       case 0x98:
@@ -1115,106 +997,148 @@ C64_HOT void cpuLoop() {
         result = Y;
         setflags();
         break;
-      //TRB
-      case 0x14:
-      case 0x1C:
+
+      // ---- Undocumented NMOS opcodes (used by many games, demos, crunchers and loaders) ----
+      //SLO: ASL mem, then ORA
+      case 0x03: case 0x07: case 0x0F: case 0x13: case 0x17: case 0x1B: case 0x1F:
         value8 = read8(argument_addr);
-        result = value8 & A;
-        value8 = (char)(value8 & ~A);
-        write8(argument_addr, value8);
-        setflags();
+        SR = (SR & ~SR_CARRY) | (value8 >> 7);
+        rmwWrite(argument_addr, value8, (uint8_t)(value8 << 1));
+        A |= (uint8_t)(value8 << 1);
+        setNZ(A);
         break;
-      //TSB
-      case 0x04:
+      //RLA: ROL mem, then AND
+      case 0x23: case 0x27: case 0x2F: case 0x33: case 0x37: case 0x3B: case 0x3F: {
+        value8 = read8(argument_addr);
+        uint8_t n = (uint8_t)((value8 << 1) | (SR & SR_CARRY));
+        SR = (SR & ~SR_CARRY) | (value8 >> 7);
+        rmwWrite(argument_addr, value8, n);
+        A &= n;
+        setNZ(A);
+        break;
+      }
+      //SRE: LSR mem, then EOR
+      case 0x43: case 0x47: case 0x4F: case 0x53: case 0x57: case 0x5B: case 0x5F:
+        value8 = read8(argument_addr);
+        SR = (SR & ~SR_CARRY) | (value8 & 1);
+        rmwWrite(argument_addr, value8, value8 >> 1);
+        A ^= value8 >> 1;
+        setNZ(A);
+        break;
+      //RRA: ROR mem, then ADC
+      case 0x63: case 0x67: case 0x6F: case 0x73: case 0x77: case 0x7B: case 0x7F: {
+        value8 = read8(argument_addr);
+        uint8_t n = (uint8_t)((value8 >> 1) | ((SR & SR_CARRY) << 7));
+        SR = (SR & ~SR_CARRY) | (value8 & 1);
+        rmwWrite(argument_addr, value8, n);
+        doADC(n);
+        break;
+      }
+      //SAX: store A AND X
+      case 0x83: case 0x87: case 0x8F: case 0x97:
+        write8(argument_addr, A & X);
+        break;
+      //LAX: LDA + LDX
+      case 0xA3: case 0xA7: case 0xAF: case 0xB3: case 0xB7: case 0xBF:
+        A = X = read8(argument_addr);
+        setNZ(A);
+        break;
+      //LAX #imm (unstable; $EE is the usual "magic" constant)
+      case 0xAB:
+        A = X = (uint8_t)((A | 0xEE) & read8(argument_addr));
+        setNZ(A);
+        break;
+      //XAA/ANE #imm (unstable)
+      case 0x8B:
+        A = (uint8_t)((A | 0xEE) & X & read8(argument_addr));
+        setNZ(A);
+        break;
+      //DCP: DEC mem, then CMP
+      case 0xC3: case 0xC7: case 0xCF: case 0xD3: case 0xD7: case 0xDB: case 0xDF:
+        value8 = read8(argument_addr);
+        rmwWrite(argument_addr, value8, (uint8_t)(value8 - 1));
+        cmpReg(A, (uint8_t)(value8 - 1));
+        break;
+      //ISC: INC mem, then SBC
+      case 0xE3: case 0xE7: case 0xEF: case 0xF3: case 0xF7: case 0xFB: case 0xFF:
+        value8 = read8(argument_addr);
+        rmwWrite(argument_addr, value8, (uint8_t)(value8 + 1));
+        doSBC((uint8_t)(value8 + 1));
+        break;
+      //ANC #imm: AND, C = N
+      case 0x0B: case 0x2B:
+        A &= read8(argument_addr);
+        setNZ(A);
+        SR = (SR & ~SR_CARRY) | (A >> 7);
+        break;
+      //ALR/ASR #imm: AND, then LSR A
+      case 0x4B:
+        A &= read8(argument_addr);
+        SR = (SR & ~SR_CARRY) | (A & 1);
+        A >>= 1;
+        setNZ(A);
+        break;
+      //ARR #imm: AND, then ROR A; C = bit 6, V = bit 6 XOR bit 5
+      case 0x6B:
+        A &= read8(argument_addr);
+        A = (uint8_t)((A >> 1) | ((SR & SR_CARRY) << 7));
+        setNZ(A);
+        SR &= ~(SR_CARRY | SR_OVER);
+        if (A & 0x40) SR |= SR_CARRY;
+        if ((A ^ (A << 1)) & 0x40) SR |= SR_OVER;
+        break;
+      //SBX/AXS #imm: X = (A AND X) - imm, flags as CMP
+      case 0xCB: {
+        uint8_t ax = A & X;
+        value8 = read8(argument_addr);
+        cmpReg(ax, value8);
+        X = (uint8_t)(ax - value8);
+        break;
+      }
+      //LAS: A = X = SP = mem AND SP
+      case 0xBB:
+        A = X = STP = read8(argument_addr) & STP;
+        setNZ(A);
+        break;
+      //TAS/SHS: SP = A AND X, store SP AND (H+1)
+      case 0x9B:
+        STP = A & X;
+        shStore(baseAddr, argument_addr, STP);
+        break;
+      //SHA/AHX
+      case 0x93: case 0x9F:
+        shStore(baseAddr, argument_addr, A & X);
+        break;
+      //SHY
+      case 0x9C:
+        shStore(baseAddr, argument_addr, Y);
+        break;
+      //SHX
+      case 0x9E:
+        shStore(baseAddr, argument_addr, X);
+        break;
+      //NOP (implied)
+      case 0xEA: case 0x1A: case 0x3A: case 0x5A: case 0x7A: case 0xDA: case 0xFA:
+        break;
+      //NOP with an operand: it is fetched like a load (NOP $DC0D acknowledges the CIA)
+      case 0x80: case 0x82: case 0x89: case 0xC2: case 0xE2:
+      case 0x04: case 0x44: case 0x64:
+      case 0x14: case 0x34: case 0x54: case 0x74: case 0xD4: case 0xF4:
       case 0x0C:
-        value8 = read8(argument_addr);
-        result = value8 & A;
-        value8 = (char)(value8 | A);
-        write8(argument_addr, value8);
-        setflags();
+      case 0x1C: case 0x3C: case 0x5C: case 0x7C: case 0xDC: case 0xFC:
+        read8(argument_addr);
         break;
-        //NOP
-      case 0x02:
-        PC++;
-        break;
-      case 0x22:
-        PC++;
-        break;
-      case 0x42:
-        PC++;
-        break;
-      case 0x62:
-        PC++;
-        break;
-      case 0x82:
-        PC++;
-        break;
-      case 0xc2:
-        PC++;
-        break;
-      case 0xe2:
-        PC++;
-        break;
-      case 0xea:
-        //PC++;
-        break;
-      case 0x03:
-        break;
-      case 0x13:
-        break;
-      case 0x23:
-        break;
-      case 0x33:
-        break;
-      case 0x43:
-        break;
-      case 0x53:
-        break;
-      case 0x63:
-        break;
-      case 0x73:
-        break;
-      case 0x83:
-        break;
-      case 0x93:
-        break;
-      case 0xa3:
-        break;
-      case 0xb3:
-        break;
-      case 0xc3:
-        break;
-      case 0xd3:
-        break;
-      case 0xe3:
-        break;
-      case 0xf3:
-        break;
-      case 0x44:
-        PC++;
-        break;
-      case 0x54:
-        PC++;
-        break;
-      case 0xd4:
-        PC++;
-        break;
-      case 0xf4:
-        PC++;
-        break;
-      case 0x5c:
-        PC++;
-        PC++;
-        break;
-      case 0xdc:
-        PC++;
-        PC++;
-        break;
-      case 0xfc:
-        PC++;
-        PC++;
+      //KIL/JAM: the CPU locks up until reset
+      case 0x02: case 0x12: case 0x22: case 0x32: case 0x42: case 0x52:
+      case 0x62: case 0x72: case 0x92: case 0xB2: case 0xD2: case 0xF2:
+        PC--;
         break;
     }
+#undef C64_BRANCH
+    // The pacer was charged cycles[opcode] before the instruction ran; it picks the rest up on
+    // the next one, along with the VIC's stolen cycles.
+    instrCycles += extraCyc;
+    vicStolenCyc += extraCyc;
 
     // Advance CIA timers and the VIC raster by this instruction's cycle count.
     // A PAL scanline is ~63 cycles; render each line as the raster crosses it.

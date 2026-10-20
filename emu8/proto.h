@@ -160,7 +160,7 @@ const char *romBaseDir();                 // general settings: folder of the def
 const char *appsBaseDir();                // general settings: where every file browser starts ("/")
 bool setRomBaseDir(const char *dir);      // nullptr = back to the default; commits
 bool setAppsBaseDir(const char *dir);
-#define SNAP_DEFAULT_DIR "/emu8-snapshot"
+#define SNAP_DEFAULT_DIR "/emu8"
 const char *snapBaseDir();                // general settings: where snapshots go (<this>/<system>/)
 bool setSnapBaseDir(const char *dir);     // nullptr = back to the default; commits
 void romSelEraseAll();                    // EEPROM reset: every ROM pick and both base folders

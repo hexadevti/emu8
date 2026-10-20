@@ -25,9 +25,9 @@ void  apple2JoycalFeed(int rawX, int rawY);
 // The paddle timer (JOY_MIN..JOY_MAX) a raw reading on axis 0 (X) / 1 (Y) means.
 float apple2JoycalPaddle(int axis, int raw);
 
-// (Re)read /apple2/joycal.txt. Missing file = the source's raw range.
+// (Re)read /emu8/apple2/joycal.txt. Missing file = the source's raw range.
 void  apple2JoycalLoad();
-bool  apple2JoycalSave();                       // /apple2/joycal.txt
+bool  apple2JoycalSave();                       // /emu8/apple2/joycal.txt
 bool  apple2JoycalReset();                      // forget it (deletes the file)
 bool  apple2JoycalCustom();                     // a calibration is in use (not the default range)
 

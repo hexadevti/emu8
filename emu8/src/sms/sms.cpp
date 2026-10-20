@@ -86,7 +86,7 @@ void smsSetup() {
   }
 
 #if BOARD_INPUT_USB
-  smsKeymapLoad();                                 // host key -> SMS pad button overrides (/sms/keymap.txt)
+  smsKeymapLoad();                                 // host key -> SMS pad button overrides (/emu8/sms/keymap.txt)
 #endif
   sms::machineWire();
   sms::machineReset();

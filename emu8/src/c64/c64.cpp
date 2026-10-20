@@ -75,8 +75,8 @@ void c64Setup() {
   c64::ciaReset();
   c64::kbReset();
 #if BOARD_INPUT_USB
-  c64KeymapLoad();                                 // host key -> C64 key overrides (/c64/keymap.txt)
-  c64JoymapLoad();                                 // host key -> joystick overrides (/c64/joymap.txt)
+  c64KeymapLoad();                                 // host key -> C64 key overrides (/emu8/c64/keymap.txt)
+  c64JoymapLoad();                                 // host key -> joystick overrides (/emu8/c64/joymap.txt)
 #endif
   c64::register1 = 0x37;
   c64::decodeRegister1(0x37 & 7);                  // default banking: BASIC + KERNAL + I/O

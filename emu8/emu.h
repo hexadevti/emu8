@@ -252,7 +252,8 @@ extern int logLineCount;
 #define dacSoundEEPROMaddress 7
 #define PlatformEEPROMaddress 8
 #define C64AutoloadEEPROMaddress 9     // C64: auto-load the saved image on boot (0/1)
-#define JoyPortEEPROMaddress 10        // C64: joystick port (1 or 2)
+#define JoyPortEEPROMaddress 10        // C64: joystick port (JOYPORT1_SAVED = 1, else 2)
+#define JOYPORT1_SAVED 0x11            // (a plain 1 is the old port-1 default, read as 2)
 #define ScreenFillEEPROMaddress 11     // JC4827W543: fill-screen video upscale (char: 1 = fill)
 #define NesDisplaySkipEEPROMaddress 12 // JC4827W543 NES: display frame-skip 1..3 (char)
 #define MsxSpeedEEPROMaddress 13       // MSX: 1 = FAST (uncapped) / 0 = NORMAL (paced to 3.58 MHz)
@@ -303,7 +304,7 @@ enum RomSlot : uint8_t {
 // Record numbers, not slots: the slots added after them (ROMSEL_MSX2_BIOS...) follow at record 16.
 #define ROMSEL_BASE_ROMS  ROMSEL_LEGACY_SLOTS          // 2624..2687, empty = "/roms"
 #define ROMSEL_BASE_APPS  (ROMSEL_LEGACY_SLOTS + 1)    // 2688..2751, empty = "/"
-#define ROMSEL_BASE_SNAP  (ROMSEL_LEGACY_SLOTS + 2)    // 2752..2815, empty = "/emu8-snapshot" (snapshot.cpp)
+#define ROMSEL_BASE_SNAP  (ROMSEL_LEGACY_SLOTS + 2)    // 2752..2815, empty = "/emu8" (snapshot.cpp)
 #define ROMSEL_RECORDS    (ROMSEL_COUNT + 3)
 struct RomSlotInfo {
   uint8_t platform;                       // Platform the ROM belongs to

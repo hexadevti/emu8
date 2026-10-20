@@ -2,7 +2,7 @@
 // keyboard, the desktop build's PC keyboard: everything that reaches usbKeyboardReport()).
 //
 // A built-in default map, plus overrides read from a text file on the SD card when the NES boots:
-// /nes/keymap.txt (or /neskeymap.txt at the root). One rule per line, '#' starts a comment:
+// /emu8/nes/keymap.txt (or /neskeymap.txt at the root). One rule per line, '#' starts a comment:
 //
 //     <host key> = <NES button>
 //
@@ -15,8 +15,8 @@
 // The NES has no SHIFT: a key is the same button with or without it. The full default map is in
 // docs/nes-keymap.txt.
 //
-// The default: the arrows are the D-pad, X / Z are A / B, Enter / Tab are Start / Select, and the
-// function row (the PicoCalc's buttons) F2 = Start, F3 = Select, F4 = A, F5 = B.
+// The default: the arrows are the D-pad; the PicoCalc's third row gives the buttons: ` Select,
+// / Start, [ B, ] A.
 
 #include "../../emu.h"
 
@@ -32,16 +32,7 @@ struct NesRule { uint8_t hid, code; };
 // HID usage codes (the standard USB HID keyboard page), numeric so every board's header works.
 static const NesRule kDefault[] = {
   {0x52, NESK_UP}, {0x51, NESK_DOWN}, {0x50, NESK_LEFT}, {0x4F, NESK_RIGHT},   // arrows
-  {0x1B, NESK_A}, {0x1D, NESK_B},                                              // X  Z
-  {0x28, NESK_START}, {0x2B, NESK_SELECT},                                     // Enter  Tab
-  // the function row: the PicoCalc's bare F3 arrives as F12 (input_picocalc.cpp)
-  {0x3B, NESK_START},                                                          // F2
-#if UI_PICOCALC
-  {0x45, NESK_SELECT},                                                         // F12 (= F3)
-#else
-  {0x3C, NESK_SELECT},                                                         // F3
-#endif
-  {0x3D, NESK_A}, {0x3E, NESK_B},                                              // F4  F5
+  {0x35, NESK_SELECT}, {0x38, NESK_START}, {0x2F, NESK_B}, {0x30, NESK_A},     // `  /  [  ]
 };
 
 // Overrides from the SD card. Rules equal to the default are not stored.
@@ -104,7 +95,7 @@ static void parseLine(char *s, int line)
 void nesKeymapLoad()
 {
   kOverCount = 0;
-  static const char *const kPaths[] = { "/nes/keymap.txt", "/neskeymap.txt" };
+  static const char *const kPaths[] = { "/emu8/nes/keymap.txt", "/nes/keymap.txt", "/neskeymap.txt" };
   for (const char *path : kPaths) {
     File f;
     try { f = FSTYPE.open(path, FILE_READ); }
@@ -172,12 +163,13 @@ int  nesKeymapChangedCount() { return kOverCount; }
 
 bool nesKeymapSave()
 {
-  static const char *const kPath = "/nes/keymap.txt";
+  static const char *const kPath = "/emu8/nes/keymap.txt";
   // Timed lock, not busTake(): this runs in the render task (the menu).
   if (gBusLock && xSemaphoreTake(gBusLock, pdMS_TO_TICKS(5000)) != pdTRUE) return false;
   bool ok = false;
   try {
-    if (!FSTYPE.exists("/nes")) FSTYPE.mkdir("/nes");
+    if (!FSTYPE.exists("/emu8")) FSTYPE.mkdir("/emu8");
+    if (!FSTYPE.exists("/emu8/nes")) FSTYPE.mkdir("/emu8/nes");
     if (FSTYPE.exists(kPath)) FSTYPE.remove(kPath);     // FILE_WRITE appends on arduino-pico
     File f = FSTYPE.open(kPath, FILE_WRITE);
     if (f) {

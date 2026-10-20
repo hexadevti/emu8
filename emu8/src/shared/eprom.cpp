@@ -164,8 +164,11 @@ void epromSetup() {
 
   // C64 settings (validated so old/uninitialised EEPROM doesn't enable surprises).
   c64Autoload = (EEPROM.readChar(C64AutoloadEEPROMaddress) == 1);
-  joyPort = EEPROM.readChar(JoyPortEEPROMaddress);
-  if (joyPort != 1 && joyPort != 2) joyPort = 1;
+  // JOY PORT. Port 1 is stored as JOYPORT1_SAVED: a plain 1 is the old default (port 1), saved
+  // by every device that ever closed the settings, and becomes port 2 -- the port games read, and
+  // the one that leaves the keyboard alone (port 1 shares CIA1 port B with the matrix rows, so
+  // FIRE / the arrows typed SPACE, 1, 2, CTRL and <- and SHIFT seemed to "tab").
+  joyPort = (EEPROM.readChar(JoyPortEEPROMaddress) == JOYPORT1_SAVED) ? 1 : 2;
   // Range-checked so an uninitialised 0xFF on older devices reads as ORIG (old ON = 1 = ENLARGE).
   { char s = EEPROM.readChar(ScreenFillEEPROMaddress); screenFill = (s >= 0 && s < SCREEN_MODES) ? (uint8_t)s : SCREEN_ORIG; }
   { char s = EEPROM.readChar(NesDisplaySkipEEPROMaddress); nesDisplaySkip = (s >= 1 && s <= 3) ? (uint8_t)s : 3; }  // default 3; fresh EEPROM (0xFF) -> 3
@@ -347,7 +350,7 @@ void saveEEPROM() {
 void saveConfig() {
     saveEEPROM();
     EEPROM.writeChar(C64AutoloadEEPROMaddress, c64Autoload ? 1 : 0);
-    EEPROM.writeChar(JoyPortEEPROMaddress, joyPort);
+    EEPROM.writeChar(JoyPortEEPROMaddress, joyPort == 1 ? JOYPORT1_SAVED : 2);
     writeStringToEEPROM(C64FileNameEEPROMaddress, selectedC64FileName);
     writeStringToEEPROM(NesFileNameEEPROMaddress, selectedNesFileName);
     writeStringToEEPROM(AtariFileNameEEPROMaddress, selectedAtariFileName);

@@ -25,7 +25,7 @@ static inline uint8_t msxkMake(uint8_t index, int mode) { return (uint8_t)(mode 
 // The MSX key for host key `hid` typed with the host SHIFT `shift` down: a SHIFT+ rule first,
 // then the plain rule; the SD card's overrides before the built-in default in each case.
 uint8_t msxKeymapLookup(uint8_t hid, bool shift);
-// (Re)read the overrides from /msx/keymap.txt (or /msxkeymap.txt). Missing file = defaults only.
+// (Re)read the overrides from /emu8/msx/keymap.txt (or /msxkeymap.txt). Missing file = defaults only.
 void    msxKeymapLoad();
 
 // ---- for the KEYBOARD page (optionsui.cpp) ----
@@ -43,5 +43,5 @@ uint8_t msxKeymapDefault(uint8_t hid, bool shifted);
 bool    msxKeymapSet(uint8_t hid, bool shifted, uint8_t code);
 void    msxKeymapResetAll();
 int     msxKeymapChangedCount();
-// Write the overrides to /msx/keymap.txt. False if the card could not be written.
+// Write the overrides to /emu8/msx/keymap.txt. False if the card could not be written.
 bool    msxKeymapSave();

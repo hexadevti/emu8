@@ -1,6 +1,6 @@
 # emu8 - MSX1 joystick map
 #
-# Copy this file to the SD card as /msx/joymap.txt (or /msxjoymap.txt) and edit it to choose which
+# Copy this file to the SD card as /emu8/msx/joymap.txt (or /msxjoymap.txt) and edit it to choose which
 # keys steer and fire the joystick in port 1. It is read when the MSX boots. Every line below is
 # the BUILT-IN DEFAULT, so this file as shipped changes nothing; only lines that differ from the
 # default count (up to 64 of them). Deleting a line does not unmap the key, it just leaves the
@@ -9,7 +9,7 @@
 #
 # The MSX menu edits it too: CONFIG > JOYSTICK (on the PicoCalc a picture of its keyboard over an
 # MSX joystick: black base, orange stick, TRIG A and TRIG B; elsewhere a list). A change there is
-# live at once and rewrites /msx/joymap.txt with only the changed keys.
+# live at once and rewrites /emu8/msx/joymap.txt with only the changed keys.
 #
 # The map is used while JOYSTICK is ON in the MSX menu. It applies to every keyboard that reaches
 # the MSX through the HID path: the PicoCalc's built-in keyboard, a USB keyboard (JC4827W543 /
@@ -27,7 +27,6 @@
 #
 # JOYSTICK ACTIONS
 #   UP DOWN LEFT RIGHT
-#   UP+LEFT UP+RIGHT DOWN+LEFT DOWN+RIGHT   a diagonal on one key
 #   TRIG_A TRIG_B    the two buttons (FIRE / FIRE2 also accepted)
 #   NONE             the key does not touch the stick
 #
@@ -46,5 +45,5 @@ LEFT = LEFT
 RIGHT = RIGHT
 
 # ---- the buttons ----
-SPACE = TRIG_A
-# PicoCalc only: SHIFT = TRIG_A (both Shifts flank the bottom row, next to the cursor keys)
+RBRACKET = TRIG_A
+LBRACKET = TRIG_B

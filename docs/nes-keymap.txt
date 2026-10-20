@@ -1,6 +1,6 @@
 # emu8 - NES keyboard map
 #
-# Copy this file to the SD card as /nes/keymap.txt (or /neskeymap.txt) and edit it to remap keys.
+# Copy this file to the SD card as /emu8/nes/keymap.txt (or /neskeymap.txt) and edit it to remap keys.
 # It is read when the NES boots. Every line below is the BUILT-IN DEFAULT, so this file as shipped
 # changes nothing; only lines that differ from the default count (up to 64 of them). Deleting a
 # line does not unmap the key, it just leaves the default; use "= NONE" to make a key do nothing.
@@ -8,7 +8,7 @@
 #
 # The NES menu edits it too: CONFIG > KEYBOARD (on the PicoCalc a picture of its keyboard over an
 # NES controller; elsewhere a list). A change there is live at once and rewrites
-# /nes/keymap.txt with only the changed keys.
+# /emu8/nes/keymap.txt with only the changed keys.
 #
 # Applies to every keyboard that reaches the NES through the HID path: the PicoCalc's built-in
 # keyboard, a USB keyboard (JC4827W543 / JC1060P470), and the PC keyboard in the desktop build.
@@ -33,8 +33,7 @@
 #   UP DOWN LEFT RIGHT SELECT START B A
 #   NONE             the key does nothing
 #
-# PicoCalc notes: its F3 key arrives as F12, so on the PicoCalc the default has "F12 = SELECT" in
-# place of the "F3 = SELECT" below. The menu keys (Ctrl-F1 ...) are not remapped here.
+# PicoCalc notes: the menu keys (Ctrl-F1 ...) are not remapped here.
 
 # ---- the D-pad ----
 UP = UP
@@ -43,13 +42,7 @@ LEFT = LEFT
 RIGHT = RIGHT
 
 # ---- the buttons ----
-X = A
-Z = B
-ENTER = START
-TAB = SELECT
-
-# ---- the function row (the PicoCalc's buttons) ----
-F2 = START
-F3 = SELECT
-F4 = A
-F5 = B
+GRAVE = SELECT
+SLASH = START
+LBRACKET = B
+RBRACKET = A

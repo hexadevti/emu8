@@ -132,7 +132,7 @@ float appleClockMhz = 1.0f;    // Apple II: target clock when throttled (1.0 = s
 volatile int  g_pcSpkFreq = 0;     // PCXT PC-speaker: PIT ch2 frequency (Hz)
 volatile bool g_pcSpkOn   = false; // PCXT PC-speaker: gate+data enabled (port 0x61)
 bool c64Autoload = false;     // C64: auto-load the saved image on boot
-uint8_t joyPort = 1;          // C64: joystick port (1 or 2)
+uint8_t joyPort = 2;          // C64: joystick port (1 or 2); 2 is the one nearly every game reads
 volatile bool c64AutoloadPending = false;  // .prg/.d64 autoload deferred to the BASIC READY trap
 String NewDeviceConfig;
 byte selectedHdFile;

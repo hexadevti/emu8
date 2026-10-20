@@ -79,14 +79,15 @@ bool picocalcLoaderCmdFeed(uint8_t c)
 }
 
 // Called once per frame from picocalcPumpInput(). Other bytes are dropped so they can't block the
-// command, except a 'D' under the C64, which is the trigger of its frame dump (c64DumpFrame).
+// command. (A 'D' under the C64 used to be left in the buffer for its frame dump; that reader is
+// gone, so one stray 'D' stalled every later command, "@sdmgr" included, until a reset.)
 void picocalcCheckLoaderCmd()
 {
   if (currentPlatform == PLATFORM_SDMANAGER) return;       // sdserial reads the port there
   while (Serial.available()) {
     int c = Serial.peek();
     if (c < 0) break;
-    if (!picocalcLoaderCmdFeed((uint8_t)c) && currentPlatform == PLATFORM_C64 && c == 'D') break;
+    picocalcLoaderCmdFeed((uint8_t)c);
     Serial.read();
   }
 }

@@ -50,7 +50,7 @@ extern bool apple2CapsLock;
 // A key that is held rather than typed and takes no SHIFT / CTRL mode (CAPS LOCK, the apple keys):
 // the KEYBOARD page skips the SHIFT step for it.
 static inline bool a2kIsPlainOnly(uint8_t index) { return index >= A2K_CAPS && index < A2K_NKEYS; }
-// (Re)read the overrides from /apple2/keymap.txt (or /apple2keymap.txt); the IIe from keymap-iie.txt
+// (Re)read the overrides from /emu8/apple2/keymap.txt (or /apple2keymap.txt); the IIe from keymap-iie.txt
 // (or /apple2keymap-iie.txt). Missing file = defaults only.
 void apple2KeymapLoad();
 
@@ -73,5 +73,5 @@ uint8_t apple2KeymapDefault(uint8_t hid, bool shifted);
 bool    apple2KeymapSet(uint8_t hid, bool shifted, uint8_t code);
 void    apple2KeymapResetAll();
 int     apple2KeymapChangedCount();
-// Write the overrides to /apple2/keymap.txt (IIe: keymap-iie.txt). False if the card could not be written.
+// Write the overrides to /emu8/apple2/keymap.txt (IIe: keymap-iie.txt). False if the card could not be written.
 bool    apple2KeymapSave();
