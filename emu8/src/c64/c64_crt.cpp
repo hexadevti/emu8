@@ -276,6 +276,11 @@ static bool c64LoadCRTLocked(const char *path)
   } else {                                       // it then remaps banks/mode via $DE00/$DE02.
     c64::cartExrom = (exrom != 0);             // line HIGH (inactive) when byte != 0
     c64::cartGame  = (game  != 0);
+    // Some generic .crt files (C64anabalt) claim 8K mode in the header but carry a 16K chip at
+    // $8000 whose code reads $A000-$BFFF: the chip size wins, as on the real board.
+    if (hwType == 0 && !c64::cartExrom && c64::cartGame)
+      for (int i = 0; i < cartChipCount; i++)
+        if (cartChips[i].loadAddr == 0x8000 && cartChips[i].size > 0x2000) { c64::cartGame = false; break; }
   }
   c64::cartActive = true;
   loadCartBank(0);                             // map the reset bank
