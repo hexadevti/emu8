@@ -226,8 +226,8 @@ to some components).
   on-screen note.
 - Analog stick / USB gamepad → controller 1.
 - **Remappable keyboard** — every host key (PicoCalc, USB, PC) can press any NES button. The default:
-  arrows = D-pad, `X` / `Z` = A / B, `Enter` / `Tab` = Start / Select, and `F2` / `F3` / `F4` / `F5` =
-  Start / Select / A / B. To change a key, open the system menu → **CONFIG → KEYBOARD**; on the PicoCalc
+  arrows = D-pad, `]` / `[` = A / B, `/` / `` ` `` = Start / Select (the PicoCalc's third row of
+  keys). To change a key, open the system menu → **CONFIG → KEYBOARD**; on the PicoCalc
   it shows its keyboard over an NES controller: pick the key, then the button on the controller (or
   DEFAULT / NONE). Other boards show it as a list. Changes apply at once and are saved to
   `/emu8/nes/keymap.txt`; to edit it by hand start from [`docs/nes-keymap.txt`](docs/nes-keymap.txt).
@@ -260,8 +260,8 @@ to some components).
   system menu → **CONFIG → KEYBOARD**; on the PicoCalc it shows its keyboard over an MSX1 keyboard
   (Philips VG-8020 style): pick the key, then the MSX key (or DEFAULT / NONE), then the SHIFT state.
   **CONFIG → JOYSTICK** does the same for the joystick in port 1 (drawn as a black MSX stick with an
-  orange top: TRIG A / TRIG B), used while **JOYSTICK** is on; the default is the arrows plus Space
-  (and, on the PicoCalc, either SHIFT) = TRIG A. Other boards show both as lists. Changes apply at once
+  orange top: TRIG A / TRIG B), used while **JOYSTICK** is on; the default is the arrows plus `]` = TRIG A
+  and `[` = TRIG B. Other boards show both as lists. Changes apply at once
   and are saved to `/emu8/msx/keymap.txt` / `/emu8/msx/joymap.txt`; to edit them by hand start from
   [`docs/msx-keymap.txt`](docs/msx-keymap.txt) and [`docs/msx-joymap.txt`](docs/msx-joymap.txt).
 
@@ -273,8 +273,7 @@ to some components).
   bank-switched carts; `.sms` / `.bin` images.
 - 8-way d-pad + two fire buttons on controller port 1; **F11** = the SMS **PAUSE** button (NMI).
 - **Remappable keyboard** — every host key (PicoCalc, USB, PC) can press any SMS pad button. The
-  default: arrows = D-pad, `Space` / `Z` = button 1 (START), `X` = button 2, and on the PicoCalc
-  `F4` / `F5` = 1 / 2. To change a key, open the system menu → **CONFIG → KEYBOARD**; on the PicoCalc
+  default: arrows = D-pad, `[` = button 1 (START), `]` = button 2. To change a key, open the system menu → **CONFIG → KEYBOARD**; on the PicoCalc
   it shows its keyboard over an SMS control pad: pick the key, then the button on the pad (or
   DEFAULT / NONE). Other boards show it as a list. Changes apply at once and are saved to
   `/emu8/sms/keymap.txt`; to edit it by hand start from [`docs/sms-keymap.txt`](docs/sms-keymap.txt).
@@ -289,7 +288,7 @@ to some components).
   `LOAD ""` is typed for you; the ROM's LD-BYTES routine is trapped so each block loads instantly.
   Custom/turbo loaders that bypass the ROM routine do not load.
 - USB keyboard: `Shift` = CAPS SHIFT, `Ctrl`/`Alt` = SYMBOL SHIFT, `Backspace` = DELETE, `Esc` = BREAK,
-  arrows = cursor keys (Kempston stick + `Space` fire when **JOYSTICK** is on), common punctuation is
+  arrows = cursor keys (Kempston stick + `]` fire when **JOYSTICK** is on), common punctuation is
   translated to its SYMBOL SHIFT chord, `F12` = reset.
 - **Remappable keyboard and joystick** — every host key (PicoCalc, USB, PC) can press any of the 48K's
   40 keys, with CAPS SHIFT held or released or SYMBOL SHIFT held (the default is the line above). Open
@@ -305,10 +304,10 @@ to some components).
 
 - **Z80** CPU with the **TMS9918** VDP (shared with the MSX core) and the **SN76489** PSG (shared with the SMS core).
 - Needs the ColecoVision BIOS on the SD card at `/roms/coleco.rom`; loads `.col` / `.rom` / `.bin` cartridges.
-- Arrows = joystick, `Space`/`F4` = left fire, `X`/`F5` = right fire, `0`–`9` = keypad, `-` = `*`, `=` = `#`, `F3` = reset.
+- Arrows = joystick, `[` = left fire, `]` = right fire, `0`–`9` = keypad, `-` = `*`, `=` = `#`, `F3` = reset.
 - **Remappable keyboard** — every host key (PicoCalc, USB, PC) can press any hand-controller button:
   the stick, the two side buttons and the 12 keypad keys. The default is the line above, plus
-  `Z` = left fire, the numeric keypad, and `Shift`+`8` / `Shift`+`3` = `*` / `#` (how the PicoCalc
+  the numeric keypad, and `Shift`+`8` / `Shift`+`3` = `*` / `#` (how the PicoCalc
   types them). To change a key, open the system menu → **CONFIG → KEYBOARD**; on the PicoCalc it
   shows its keyboard over a ColecoVision controller (stick, side buttons, keypad): pick the key, then
   the button on the controller (or DEFAULT / NONE). Other boards show it as a list. Changes apply at
@@ -366,9 +365,9 @@ USB keyboard mapping (works on every platform):
 | Arrow keys | Cursor / d-pad |
 | `F10` | Open / close the options menu (arrows navigate, `Enter` activates) |
 | `F11` | Apple **Reset** (CPU reset) |
-| NES: arrows + `X`=A · `Z`=B · `Enter`=Start · `Tab`=Select | NES controller 1 |
-| Atari: arrows + `Space`/`X`=Fire · `Enter`=Reset · `Tab`=Select | Atari stick + console switches |
-| C64 (when **JOYSTICK** is on): arrows + `Space`=Fire | C64 joystick (port per **JOY PORT**) |
+| NES: arrows + `]`=A · `[`=B · `/`=Start · `` ` ``=Select | NES controller 1 |
+| Atari: arrows + `]`=Fire · `/`=Reset · `` ` ``=Select | Atari stick + console switches |
+| C64 (when **JOYSTICK** is on): arrows + `]`=Fire · `[`=Fire 2 · `=`=Fire 3 | C64 joystick (port per **JOY PORT**) |
 
 > Only keyboards that expose the standard HID **boot** protocol are decoded, and one USB device works at
 > a time (no hub). The native USB port has no VBUS switching, so **hot-swapping devices needs a tap of
