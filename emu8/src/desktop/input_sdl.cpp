@@ -113,22 +113,24 @@ static void desktopScriptInput() {
   static long f = -1; f++;
   static int  tap  = []{ const char*s=getenv("EMU_TAP");       return s?atoi(s):-1; }();
   static int  hfrom= []{ const char*s=getenv("EMU_HOLD_FROM"); return s?atoi(s):-1; }();
-  static char dir  = []{ const char*s=getenv("EMU_HOLD_DIR");  return s?s[0]:'R'; }();
+  static const char *dir = []{ const char*s=getenv("EMU_HOLD_DIR"); return s?s:"R"; }();
   static int  trig = []{ const char*s=getenv("EMU_TRIG");      return s?atoi(s):0; }();
   static long trigTo=[]{ const char*s=getenv("EMU_TRIG_TO");   return s?atol(s):-1L; }();
   if (tap < 0 && hfrom < 0) return;                      // no script
   static int jp = []{ const char*s=getenv("EMU_JOYPORT"); return s?atoi(s):0; }();   // C64: 1 or 2
   static long jpAt = []{ const char*s=getenv("EMU_JOYPORT_AT"); return s?atol(s):-1L; }();
-  if (jp == 1 || jp == 2) joyPort = (uint8_t)((jpAt >= 0 && f >= jpAt) ? 3 - jp : jp);
+  if (jp == 1 || jp == 2) { joyPort = (uint8_t)((jpAt >= 0 && f >= jpAt) ? 3 - jp : jp); joystick = true; }   // keys drive the stick
   static long tapEvery = []{ const char*s=getenv("EMU_TAP_EVERY"); return s?atol(s):0L; }();   // repeat the tap
   if (tap >= 0) {
     const long t = (tapEvery > 0 && f >= tap) ? (f - tap) % tapEvery : f - tap;
-    if (t >= 0 && t < 15) pressAdd(0x2C); else pressRemove(0x2C);   // SPACE = HID 0x2C
+    static long tapLen = []{ const char*s=getenv("EMU_TAP_LEN"); return s?atol(s):15L; }();   // frames held
+    static uint8_t tapKey = []{ const char*s=getenv("EMU_TAP_KEY"); return (uint8_t)(s?strtol(s,nullptr,16):0x2C); }();   // HID code
+    if (t >= 0 && t < tapLen) pressAdd(tapKey); else pressRemove(tapKey);   // default SPACE = HID 0x2C
   }
   // arrow-key HID codes: Right 0x4F, Left 0x50, Down 0x51, Up 0x52
   const uint8_t AR=0x4F, AL=0x50, AD=0x51, AU=0x52;
   if (hfrom >= 0 && f >= hfrom) {
-    bool R=(dir=='R'),L=(dir=='L'),U=(dir=='U'),D=(dir=='D');
+    bool R=strchr(dir,'R'),L=strchr(dir,'L'),U=strchr(dir,'U'),D=strchr(dir,'D');   // e.g. "UL" = a diagonal
     if(R)pressAdd(AR);else pressRemove(AR);  if(L)pressAdd(AL);else pressRemove(AL);
     if(U)pressAdd(AU);else pressRemove(AU);  if(D)pressAdd(AD);else pressRemove(AD);
     joyY = L?0:R?2:1; joyX = U?0:D?2:1;                   // also drive the joystick
@@ -164,14 +166,14 @@ static void desktopTypeInject() {
   if (fr < at || (fr % 6) != 0) return;         // wait for boot, then ~1 transition / 6 frames
   if (!s[idx]) return;
   // {F10} {F1} {F5} {UP} {DOWN} {LEFT} {RIGHT} {ENTER} {ESC} {DEL} {HOME} {END} {INS} {PGUP} {PGDN}
-  // {TAB} {BKSP} name a special key; {WAIT} idles one step. Punctuation types its US-layout key.
+  // {TAB} {BKSP} {PAUSE} name a special key; {WAIT} idles one step. Punctuation types its US-layout key.
   static const struct { const char *name; SDL_Scancode sc; } kTok[] = {
     {"F10", SDL_SCANCODE_F10}, {"F1", SDL_SCANCODE_F1}, {"F5", SDL_SCANCODE_F5}, {"UP", SDL_SCANCODE_UP}, {"DOWN", SDL_SCANCODE_DOWN},
     {"LEFT", SDL_SCANCODE_LEFT}, {"RIGHT", SDL_SCANCODE_RIGHT}, {"ENTER", SDL_SCANCODE_RETURN},
     {"ESC", SDL_SCANCODE_ESCAPE}, {"DEL", SDL_SCANCODE_DELETE}, {"HOME", SDL_SCANCODE_HOME},
     {"END", SDL_SCANCODE_END}, {"INS", SDL_SCANCODE_INSERT}, {"PGUP", SDL_SCANCODE_PAGEUP},
     {"PGDN", SDL_SCANCODE_PAGEDOWN}, {"TAB", SDL_SCANCODE_TAB}, {"BKSP", SDL_SCANCODE_BACKSPACE},
-    {"WAIT", SDL_SCANCODE_UNKNOWN}};
+    {"PAUSE", SDL_SCANCODE_PAUSE}, {"WAIT", SDL_SCANCODE_UNKNOWN}};
   size_t len = 1;
   SDL_Scancode sc = SDL_SCANCODE_UNKNOWN;
   if (s[idx] == '{') {

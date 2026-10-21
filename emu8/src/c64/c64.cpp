@@ -368,18 +368,19 @@ static void c64RenderBitmap() {
   lastOsk = osk;
 
   if (now - c64VidLogMs >= 5000) {
+    static uint32_t collLast = 0;
     if (c64VidLogMs) {
       char vb[400];                        // longer than the shared 255-byte buf
       snprintf(vb, sizeof(vb), "C64 video: %lu whole + %lu torn frames, %lu skipped in %lu ms; ms drawing %lu, "
               "waiting beam %lu, waiting SPI %lu; %lu rows sent; lag avg %lu max %lu lines, %lu frames > 30; "
-              "6510 %lu kHz, VIC %u%%, longest line gap %lu us; free heap %u, LCD SPI %lu kHz",
+              "6510 %lu kHz, VIC %u%%, %lu collision lines, longest line gap %lu us; free heap %u, LCD SPI %lu kHz",
               (unsigned long)c64VidFrames, (unsigned long)c64VidTorn, (unsigned long)c64VidSkipped,
               (unsigned long)(now - c64VidLogMs), (unsigned long)(c64VidDrawUs / 1000),
               (unsigned long)(c64VidBeamUs / 1000), (unsigned long)(c64VidPushUs / 1000),
               (unsigned long)c64VidRowsSent,
               (unsigned long)(c64VidLagN ? c64VidLagSum / c64VidLagN : 0), (unsigned long)c64VidLagMax,
               (unsigned long)c64VidLagFrames, (unsigned long)c64::c64PerfKhz, (unsigned)c64::c64PerfVicPct,
-              (unsigned long)c64::c64MaxLineGapUs,
+              (unsigned long)(c64::c64CollLines - collLast), (unsigned long)c64::c64MaxLineGapUs,
               (unsigned)ESP.getFreeHeap(),
 #if defined(PICOCALC_MAINBOARD)
               (unsigned long)(lcdSpiHz() / 1000));
@@ -392,6 +393,7 @@ static void c64RenderBitmap() {
     c64VidDrawUs = c64VidBeamUs = c64VidPushUs = c64VidRowsSent = 0;
     c64VidLagSum = c64VidLagN = c64VidLagMax = c64VidLagFrames = 0;
     c64::c64MaxLineGapUs = 0;
+    collLast = c64::c64CollLines;
     c64VidLogMs = now;
   }
 }

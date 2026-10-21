@@ -219,11 +219,15 @@ static void c64ApplyModifiers(bool shift, bool ctrl, bool alt, const uint8_t *ke
   // Dropped first, so the SHIFT a held key's rule asks for (CRSR LEFT/UP, F2...) still gets applied.
   if (shift && joystick && c64jIsAction(c64JoymapLookup(C64K_HID_SHIFT)) && !c64HasTypingKey(keys)) wantShift = false;
 
+  // The SHIFT a key's rule asks for goes on RIGHT SHIFT. The KERNAL reads either shift the same, but
+  // games that poll SHIFT LOCK read only the left one (it is the key the lock latches): Great Giana
+  // Sisters pauses on it, so holding the CRSR LEFT / UP arrows -- SHIFT+CRSR -- froze the game.
+  bool ruleShift = false;
   uint64_t want = 0;
   auto hold = [&](uint8_t code) {
     if (!c64kIsMatrix(code)) return;
     want |= 1ULL << c64kIndex(code);
-    if (c64kShift(code) == C64K_SHIFT_ON)  wantShift = true;    // the key's rule decides SHIFT
+    if (c64kShift(code) == C64K_SHIFT_ON)  ruleShift = true;    // the key's rule decides SHIFT
     if (c64kShift(code) == C64K_SHIFT_OFF) wantShift = false;
   };
   if (ctrl) hold(c64KeymapLookup(C64K_HID_CTRL, false));   // CTRL by default
@@ -234,6 +238,7 @@ static void c64ApplyModifiers(bool shift, bool ctrl, bool alt, const uint8_t *ke
     hold(h.code);
   }
   if (wantShift) want |= 1ULL << C64K_LSHIFT_INDEX;
+  if (ruleShift) want |= 1ULL << C64K_RSHIFT_INDEX;
 
   const uint64_t changed = want ^ c64Down;
   for (int i = 0; i < 64; i++)

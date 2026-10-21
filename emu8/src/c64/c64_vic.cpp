@@ -11,27 +11,22 @@
 
 namespace c64 {
 
-uint8_t spritespritecoll[320 + 16];   // +16: a sprite's right edge reads/writes past x=319
-bool spritedatacoll[320 + 16];
 uint8_t startbyte;
 bool badlinecond;
 bool vertborder;
 uint8_t lineC64map;
 
-// True while the current line has a sprite on it. Only then does the background renderer record
-// its foreground pixels in spritedatacoll (drawSprites needs them for $D01F collisions and the
-// sprite-behind-background priority); on every other line that per-pixel bookkeeping is skipped.
-static bool vicColl = false;
+volatile uint32_t c64CollLines = 0;   // lines vicCollideLine checked for the collision registers
 
 // Set by read8 the first time the program reads a collision register ($D01E/$D01F); cleared on
 // reset. Until then, and while the collision IRQs ($D01A bits 1-2) are off, nothing can observe a
-// collision, so a skipped frame does not have to render its sprite lines just to detect them.
+// collision, so the emulator core does not have to work them out.
 bool vicCollPolled = false;
 
-#define VIC_DRAW_FN   // this copy only runs for the collision registers: flash is fine
+// The emulator core draws nothing (see vicCollideLine for the collision registers); only the render
+// core includes the renderer (c64_vic_draw.h, below).
 #define VIC_SCREENMAP (ram + screenmemstart)
 #define VIC_SPRPTR(nr) ram[screenmemstart + 1016 + (nr)]
-#include "c64_vic_draw.h"
 
 
 void initVarsAndRegs() {
@@ -78,7 +73,7 @@ void checkFrameColor() {
   uint8_t framecol = vicreg[0x20] & 15;
   if (framecol != syncd020) {
     syncd020 = framecol;
-    drawFrame(tftColorFromC64ColorArr[framecol]);
+    drawFrame(framecol);   // 8-bit colour index, as the framebuffer holds
   }
 }
 
@@ -175,14 +170,14 @@ C64_HOT uint8_t nextRasterline() {
 // 3-pixel jumps, and sprites a game shows on alternate frames blinked or vanished.
 // A record carries the number of the frame it belongs to, 0 while it is being written, so the
 // reader can tell when a record it copied was overwritten by the next frame.
-// The emulator core still renders a line a sprite is on, into its own line buffer, while the
-// program watches collisions: the collision registers ($D01E/$D01F) are set by the renderer.
+// While the program watches collisions, the emulator core works out the collision registers
+// ($D01E/$D01F) for each line a sprite is on, without drawing it (vicCollideLine).
 static_assert(VIC_SNAP_OFFSET + 2 * 25 * 80 <= 65536, "strips + records + rows exceed sharedBigBuf");
 VicLineRec *vicRec = nullptr;
 uint8_t *vicSnap = nullptr;
 static uint8_t vicSnapRow = 0xFF;      // the character row last copied into vicSnap this frame
 volatile uint8_t vicRecFrame = 0;
-uint8_t vicLineBuf[320 + 16];          // the emulator core's line (collisions only); +16: sprite spill
+uint8_t vicLineBuf[320 + 16];          // unused by the emulator core now: `bitmap` pointing here = graphics on
 
 #if defined(BOARD_PICOCALC)
 #define VIC_DMB() __asm volatile("dmb" ::: "memory")
@@ -222,6 +217,93 @@ static void vicRecordLine(uint8_t dline) {
   r->frame = vicRecFrame;
 }
 
+// Is background pixel q (0 = the first pixel of the first character column, before the X scroll)
+// foreground on this line? Multicolour 00 and 01 are background, as on the chip.
+static C64_HOT bool vicBgFg(uint16_t q, uint8_t row, uint16_t base) {
+  const uint8_t d011 = vicreg[0x11], d016 = vicreg[0x16];
+  const uint16_t c = base + (q >> 3);
+  const uint8_t bit = q & 7;
+  uint8_t data;
+  bool mc;
+  if (d011 & 0x20) {                                   // bitmap
+    data = ram[(bitmapstart + c * 8 + row) & 0xFFFF];
+    mc = d016 & 0x10;
+  } else {
+    const uint8_t ch = VIC_SCREENMAP[c];
+    data = charset[((d011 & 0x40) ? (ch & 0x3f) : ch) * 8 + row];
+    mc = (d016 & 0x10) && (colormap[c] & 8);
+  }
+  if (mc) return (data >> (6 - (bit & 6))) & 2;
+  return (data >> (7 - bit)) & 1;
+}
+
+// The collision registers for raster line `rasterline`, without drawing it: what the chip sets in
+// $D01E (sprite-sprite) and $D01F (sprite-background), and the IRQ the first hit raises. The
+// emulator core used to render the whole line (background and sprites, into a scratch buffer) for
+// this, on every line a sprite is on while the program polls collisions -- dozens of lines a frame
+// in a sprite game, taken from the 6510's time.
+static C64_HOT void vicCollideLine() {
+  if (vertborder) return;                              // border line: no sprite is drawn
+  const uint16_t line = rasterline - 1;                // the renderer's sprite-line numbering
+  int16_t sx[8];
+  uint64_t sm[8];                                      // bit k = sprite pixel sx + k is set
+  uint8_t sbit[8], n = 0;
+  const uint8_t en = vicreg[0x15];
+  for (uint8_t nr = 0; nr < 8; nr++) {
+    const uint8_t b = 1 << nr;
+    if (!(en & b)) continue;
+    const uint16_t y = vicreg[0x01 + nr * 2];
+    const uint8_t fac = (vicreg[0x17] & b) ? 2 : 1;
+    if (line < y || line >= y + 21 * fac) continue;
+    const uint8_t *p = ram + ((vicmem + VIC_SPRPTR(nr) * 64 + ((line - y) / fac) * 3) & 0xFFFF);
+    uint32_t d = ((uint32_t)p[0] << 16) | ((uint32_t)p[1] << 8) | p[2];
+    if (!d) continue;
+    if (vicreg[0x1c] & b) d |= ((d & 0xAAAAAA) >> 1) | ((d & 0x555555) << 1);   // a pair is 2 pixels
+    const bool wide = vicreg[0x1d] & b;
+    uint64_t m = 0;
+    for (uint8_t k = 0; k < 24; k++)
+      if (d & (0x800000u >> k)) m |= wide ? (3ull << (2 * k)) : (1ull << k);
+    sx[n] = vicreg[nr * 2] + ((vicreg[0x10] & b) ? 256 : 0) - 24;
+    sm[n] = m;
+    sbit[n++] = b;
+  }
+  if (!n) return;
+  c64CollLines++;
+
+  const uint8_t coll1e = vicreg[0x1e], coll1f = vicreg[0x1f];
+  for (uint8_t i = 0; i < n; i++)
+    for (uint8_t j = i + 1; j < n; j++) {
+      const int16_t dx = sx[j] - sx[i];
+      if (dx >= 48 || dx <= -48) continue;
+      if (dx >= 0 ? (sm[i] & (sm[j] << dx)) : ((sm[i] << -dx) & sm[j])) vicreg[0x1e] |= sbit[i] | sbit[j];
+    }
+
+  // Sprite-background: the line's graphics, at the sprites' pixels only. Lines the Y scroll leaves
+  // empty and the invalid modes (ECM with BMM or MCM, drawn black) have no foreground.
+  const uint8_t d011 = vicreg[0x11];
+  const int8_t dy = (int8_t)((d011 & 7) - 3);
+  const int16_t dline = rasterline - 51;
+  const bool invalid = (d011 & 0x40) && ((d011 & 0x20) || (vicreg[0x16] & 0x10));
+  if (!invalid && dline >= dy && dy >= dline - 199) {
+    const uint8_t corr = (uint8_t)(lineC64map - dy);
+    const uint8_t row = corr & 7;
+    const uint16_t base = (corr >> 3) * 40;
+    const uint8_t xs = vicreg[0x16] & 7;
+    for (uint8_t i = 0; i < n; i++) {
+      if (vicreg[0x1f] & sbit[i]) continue;
+      for (uint64_t m = sm[i]; m; m &= m - 1) {
+        const int16_t q = sx[i] + __builtin_ctzll(m) - xs;
+        if (q < 0) continue;
+        if (q >= 320 - xs) break;
+        if (vicBgFg(q, row, base)) { vicreg[0x1f] |= sbit[i]; break; }
+      }
+    }
+  }
+
+  if (vicreg[0x1f] != 0 && coll1f == 0) vicreg[0x19] |= (vicreg[0x1a] & 2) ? 0x82 : 0x02;
+  if (vicreg[0x1e] != 0 && coll1e == 0) vicreg[0x19] |= (vicreg[0x1a] & 4) ? 0x84 : 0x04;
+}
+
 void drawRasterline() {
   if ((rasterline >= 51) && (rasterline < 251)) {
     if (rasterline == 51) {
@@ -231,11 +313,7 @@ void drawRasterline() {
       vicSnapRow = 0xFF;
     }
     vicRecordLine(rasterline - 51);
-    vicColl = vicSpriteOnLine(rasterline - 1);
-    if (vicColl && (vicCollPolled || (vicreg[0x1a] & 0x06))) {
-      bitmap = vicLineBuf;
-      vicDrawLineBody();
-    }
+    if ((vicCollPolled || (vicreg[0x1a] & 0x06)) && vicreg[0x15]) vicCollideLine();
     lineC64map++;
   }
 }

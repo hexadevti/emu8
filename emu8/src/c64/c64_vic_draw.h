@@ -1,9 +1,7 @@
-// VIC-II line renderer (ported from C64Esp32 VIC.ino). Included TWICE by c64_vic.cpp:
-//  - in namespace c64, on the emulator core, where it only runs for the collision registers;
-//  - in namespace c64::rend, on the render core, which draws every visible line from the
-//    per-line VIC state the emulator core recorded (see c64_vic.cpp).
-// Each copy resolves vicreg / bitmap / vicColl / spritedatacoll / ... to its own namespace's
-// variables, and ram / colormap to the shared C64 memory. VIC_SCREENMAP (the screen matrix) and
+// VIC-II line renderer (ported from C64Esp32 VIC.ino). Included by c64_vic.cpp in namespace
+// c64::rend, on the render core, which draws every visible line from the per-line VIC state the
+// emulator core recorded (see c64_vic.cpp). It resolves vicreg / bitmap / vicColl / spritedatacoll /
+// ... to that namespace's variables, and ram to the shared C64 memory. VIC_SCREENMAP (the screen matrix) and
 // VIC_SPRPTR(nr) (sprite pointer nr) are defined by the includer. Deliberately no include guard.
 
 // The framebuffer is 8-bit indexed now, so the renderer stores raw C64 colour indices

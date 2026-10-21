@@ -314,9 +314,11 @@ static void perfSample() {
   c64PerfKhz = perfCyc / ms;
   c64PerfVicPct = (uint8_t)((uint64_t)perfVicUs / 10 / ms);
 #else
-  snprintf(buf, sizeof(buf), "C64: 6510 %.2f MHz (%d%% of PAL 0.985), VIC render %d%% of CPU core",
+  static uint32_t lastColl = 0;
+  snprintf(buf, sizeof(buf), "C64: 6510 %.2f MHz (%d%% of PAL 0.985), VIC render %d%% of CPU core, %lu collision lines",
            c64MeasuredMhz, (int)(c64MeasuredMhz * 100.0f / 0.985f + 0.5f),
-           (int)((uint64_t)perfVicUs / 10 / ms));
+           (int)((uint64_t)perfVicUs / 10 / ms), (unsigned long)(c64CollLines - lastColl));
+  lastColl = c64CollLines;
   printLog(buf);
 #endif
   perfLastMs = now; perfCyc = 0; perfVicUs = 0;

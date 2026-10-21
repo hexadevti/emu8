@@ -82,6 +82,7 @@ extern uint8_t vicLineBuf[320 + 16];
 extern volatile uint32_t c64PerfKhz;       // last second's 6510 speed (kHz), logged by the render task
 extern volatile uint8_t c64PerfVicPct;     // share of the emulator core spent recording/drawing lines
 extern volatile uint32_t c64MaxLineGapUs;  // longest gap between two visible lines (render task resets)
+extern volatile uint32_t c64CollLines;     // lines checked for $D01E/$D01F collisions (running total)
 void vicRenderRecord(const VicLineRec &r, uint8_t dline, uint8_t *out, uint16_t *dst,
                      const uint16_t *pal);                  // render core: one line (dst: also RGB565)
 void vicLineToRgb(const uint8_t *out, uint16_t *dst, const uint16_t *pal);   // 320 indices -> RGB565

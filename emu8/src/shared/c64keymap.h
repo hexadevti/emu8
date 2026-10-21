@@ -18,6 +18,7 @@
 #define C64K_HID_SHIFT  0xE1   // either Shift pressed on its own (only the PicoCalc mapper uses it)
 
 #define C64K_LSHIFT_INDEX 15   // left SHIFT: col 1, row 7
+#define C64K_RSHIFT_INDEX 52   // right SHIFT: col 6, row 4
 
 static inline bool    c64kIsMatrix(uint8_t c) { return c < 0xC0; }
 static inline uint8_t c64kIndex(uint8_t c)    { return c & 63; }   // col*8 + row
