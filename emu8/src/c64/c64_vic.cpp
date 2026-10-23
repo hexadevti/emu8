@@ -134,9 +134,10 @@ C64_HOT uint8_t nextRasterline() {
   }
   // calculate cycles used by VIC
   uint8_t viccycles = 0;
-  // badline?
+  // badline? Only on lines $30-$F7: the 8-bit raster7 wraps past 255, so test the full line number
+  // (lines 304-311 were stealing cycles in the vertical blank).
   if (((vicreg[0x11] & 7) == (raster7 & 7)) && badlinecond &&
-      (raster7 >= 0x30) && (raster7 <= 0xf7)) {
+      (rasterline >= 0x30) && (rasterline <= 0xf7)) {
     viccycles = 40;
   }
   // active sprites?

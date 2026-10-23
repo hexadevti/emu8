@@ -951,6 +951,13 @@ C64_HOT void cpuLoop() {
       case 0x99:
       case 0x81:
       case 0x91:
+        // STA abs,X / abs,Y / (zp),Y read the target (high byte not yet carried) before writing.
+        // Only I/O reads have side effects: the Ghostbusters freeze restore's STA $DC00,X acks a
+        // pending CIA1 timer flag that way just before setting the mask, or IRQs storm forever.
+        if (opcode == 0x9D || opcode == 0x99 || opcode == 0x91) {
+          unsigned short dummy = (baseAddr & 0xFF00) | (argument_addr & 0x00FF);
+          if ((dummy & 0xF000) == 0xD000) (void)read8(dummy);
+        }
         write8(argument_addr, A);
         break;
       //STX

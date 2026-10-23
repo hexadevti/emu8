@@ -18,6 +18,7 @@ namespace c64 {
 struct Cia {
   uint16_t ta, taLatch, tb, tbLatch;
   uint8_t cra, crb, icr, mask;
+  uint8_t taDelay, tbDelay;                // phi2 cycles a just-started timer waits before counting
   uint8_t tod[4], alarm[4], todLatch[4];   // tenths, seconds, minutes, hours (BCD, bit 7 = PM)
   bool todLatched, todHalted;
   uint8_t todPulses;                       // mains ticks towards the next tenth
@@ -37,6 +38,7 @@ static uint8_t pra2 = 0x97, ddra2 = 0x3f, prb2 = 0xff, ddrb2 = 0x00;
 static void ciaInit(Cia &c) {
   c.ta = c.taLatch = c.tb = c.tbLatch = 0xffff;
   c.cra = c.crb = c.icr = c.mask = 0;
+  c.taDelay = c.tbDelay = 0;
   c.tod[0] = 0x00; c.tod[1] = 0x00; c.tod[2] = 0x00; c.tod[3] = 0x01;   // 1:00:00.0 AM
   for (int i = 0; i < 4; i++) { c.alarm[i] = 0; c.todLatch[i] = c.tod[i]; }
   c.todLatched = c.todHalted = false;
@@ -119,19 +121,34 @@ static uint8_t ciaRegRead(Cia &c, uint8_t reg) {
   }
 }
 
+// A timer does not count on the cycle its start is written nor on the one after (the 6526's
+// start pipeline). The restore code of an Expert-cartridge freeze file (Ghostbusters .crt) starts
+// CIA2 Timer B at $00FF and stops it exactly 256 cycles later. Counting from the write itself, the
+// timer underflowed first and latched its flag, which NMI'd into garbage once the restored mask
+// enabled it.
+#define CIA_START_DELAY 2
+
 static void ciaRegWrite(Cia &c, uint8_t reg, uint8_t val) {
   switch (reg) {
     case 0x04: c.taLatch = (c.taLatch & 0xff00) | val; break;
     case 0x05:
       c.taLatch = (c.taLatch & 0x00ff) | (val << 8);
       // A stopped timer loads the new latch; in one-shot mode the write also starts it.
-      if (c.cra & 0x08) { c.ta = c.taLatch; c.cra |= 0x01; }
+      if (c.cra & 0x08) {
+        c.ta = c.taLatch;
+        if (!(c.cra & 0x01)) c.taDelay = CIA_START_DELAY;
+        c.cra |= 0x01;
+      }
       else if (!(c.cra & 0x01)) c.ta = c.taLatch;
       break;
     case 0x06: c.tbLatch = (c.tbLatch & 0xff00) | val; break;
     case 0x07:
       c.tbLatch = (c.tbLatch & 0x00ff) | (val << 8);
-      if (c.crb & 0x08) { c.tb = c.tbLatch; c.crb |= 0x01; }
+      if (c.crb & 0x08) {
+        c.tb = c.tbLatch;
+        if (!(c.crb & 0x01)) c.tbDelay = CIA_START_DELAY;
+        c.crb |= 0x01;
+      }
       else if (!(c.crb & 0x01)) c.tb = c.tbLatch;
       break;
     case 0x08: case 0x09: case 0x0a: case 0x0b: todWrite(c, reg - 0x08, val); break;
@@ -141,10 +158,12 @@ static void ciaRegWrite(Cia &c, uint8_t reg, uint8_t val) {
       if (c.icr & c.mask & 0x1f) c.icr |= 0x80;      // a flag already pending interrupts now
       break;
     case 0x0e:
+      if ((val & 0x01) && !(c.cra & 0x01)) c.taDelay = CIA_START_DELAY;
       c.cra = val & ~0x10;
       if (val & 0x10) c.ta = c.taLatch;              // bit 4 = force load (strobe)
       break;
     case 0x0f:
+      if ((val & 0x01) && !(c.crb & 0x01)) c.tbDelay = CIA_START_DELAY;
       c.crb = val & ~0x10;
       if (val & 0x10) c.tb = c.tbLatch;
       break;
@@ -152,10 +171,18 @@ static void ciaRegWrite(Cia &c, uint8_t reg, uint8_t val) {
   }
 }
 
+// Cycles still waiting out a timer's start delay are not counted.
+static inline int ciaAfterDelay(uint8_t &delay, int cpuCycles) {
+  if (!delay) return cpuCycles;
+  int d = delay < cpuCycles ? delay : cpuCycles;
+  delay -= d;
+  return cpuCycles - d;
+}
+
 C64_HOT static inline void ciaChipTick(Cia &c, int cpuCycles) {
   int taUnder = 0;
   if ((c.cra & 0x21) == 0x01) {                  // Timer A started, counting phi2
-    int32_t t = (int32_t)c.ta - cpuCycles;
+    int32_t t = (int32_t)c.ta - ciaAfterDelay(c.taDelay, cpuCycles);
     while (t < 0) {                              // counts latch..0, then reloads: latch+1 cycles
       taUnder++;
       ciaRaise(c, 0x01);
@@ -166,7 +193,7 @@ C64_HOT static inline void ciaChipTick(Cia &c, int cpuCycles) {
   }
   if (c.crb & 0x01) {                            // Timer B started
     int n = (c.crb & 0x40) ? taUnder                     // counts Timer A underflows
-                           : ((c.crb & 0x20) ? 0 : cpuCycles);   // CNT (idle) / phi2
+                           : ((c.crb & 0x20) ? 0 : ciaAfterDelay(c.tbDelay, cpuCycles));   // CNT (idle) / phi2
     if (n) {
       int32_t t = (int32_t)c.tb - n;
       while (t < 0) {
