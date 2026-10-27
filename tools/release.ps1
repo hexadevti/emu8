@@ -150,15 +150,27 @@ matching bootloader and partition table.
 
 function Build-PicoCalc {
   $assets = @()
+  # PicoMultiLoader app folder (tools/pml-app, PicoMultiLoader docs/apps.md): emu8/ with app.ini,
+  # icon.bmp and both .uf2 files under fixed names, so unzipping a new release over it upgrades.
+  $pml = Join-Path $work 'picocalc-pml\emu8'
+  if (Test-Path (Split-Path $pml)) { Remove-Item -Recurse -Force (Split-Path $pml) }
+  New-Item -ItemType Directory -Force $pml | Out-Null
   foreach ($p in $PICO_BOARDS) {
     $bin = Join-Path $work "picocalc-$($p.Tag)-out"
-    $flags = "-DBOARD_PICOCALC -I$sketch/src/picocalc/pico_shim"
+    $flags = "-DBOARD_PICOCALC -DEMU8_VERSION=$Version -I$sketch/src/picocalc/pico_shim"   # version: binfo_picocalc.c
     Invoke-Arduino $p.Fqbn $flags (Join-Path $work "picocalc-$($p.Tag)-build") $bin -LinkFlags $p.LinkFlags
     $uf2 = Join-Path $out "emu8-picocalc-$($p.Tag)-v$Version.uf2"
     Copy-Item (Join-Path $bin 'emu8.ino.uf2') $uf2 -Force
+    Copy-Item (Join-Path $bin 'emu8.ino.uf2') (Join-Path $pml "emu8-$($p.Tag).uf2")
     Write-Host "  -> $uf2"
     $assets += $uf2
   }
+  $ini = (Get-Content -Raw (Join-Path $repo 'tools\pml-app\app.ini')) -replace '(?m)^(version\s*=\s*).*$', "`${1}$Version"
+  [IO.File]::WriteAllText((Join-Path $pml 'app.ini'), $ini)   # ASCII, no BOM: the loader reads it raw
+  Copy-Item (Join-Path $repo 'tools\pml-app\icon.bmp') $pml
+  $zip = Join-Path $out "emu8-picocalc-pml-v$Version.zip"
+  New-Zip (Split-Path $pml) $zip
+  $assets += $zip
   return $assets
 }
 
@@ -289,10 +301,11 @@ Firmware for the **ClockworkPi PicoCalc**. Pick the file that matches the Pico m
 | ``emu8-picocalc-rp2040-v$Version.uf2`` | Raspberry Pi **Pico** (RP2040) — no PC-XT (not enough RAM) |
 
 **Install:**
+- With [PicoMultiLoader](https://github.com/hexadevti/PicoMultiLoader): unzip ``emu8-picocalc-pml-v$Version.zip`` into the root of the SD card (it makes an ``emu8/`` folder with both builds; the loader picks the one for your Pico). emu8 then shows on Home with its icon. From emu8, ``Ctrl``+``Shift``+``Up`` goes back to the loader.
 - With the [UF2 Loader](https://github.com/pelrun/uf2loader) (v2.4.1+): copy the ``.uf2`` into ``pico1-apps`` (Pico) or ``pico2-apps`` (Pico 2) on the SD card and pick it in the loader menu. From emu8, ``Ctrl``+``Shift``+``Up`` goes back to that menu.
 - Without it: hold **BOOTSEL** while powering on / plugging USB in, then copy the ``.uf2`` onto the ``RPI-RP2`` / ``RP2350`` drive. The board reboots into emu8 by itself. (This replaces the loader, if you had one.)
 
-Controls: ``Ctrl``+``F1`` settings, ``Ctrl``+``Shift``+``F1`` system menu, ``Ctrl``+``Shift``+``F3`` hard reset, ``Ctrl``+``Shift``+``Up`` UF2 Loader menu — see the [README](https://github.com/hexadevti/emu8#controls).
+Controls: ``Ctrl``+``F1`` settings, ``Ctrl``+``Shift``+``F1`` system menu, ``Ctrl``+``Shift``+``F3`` hard reset, ``Ctrl``+``Shift``+``Up`` loader menu (PicoMultiLoader / UF2 Loader) — see the [README](https://github.com/hexadevti/emu8#controls).
 
 $SDCARD
 "@ }

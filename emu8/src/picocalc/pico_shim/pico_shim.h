@@ -232,10 +232,12 @@ extern PicoEspClass ESP;    // the single instance lives in pico_shim.cpp
 // flash_range_erase/program, for their part, take PHYSICAL offsets, which under the loader
 // are not the XIP offset either.
 //
+// The window is also always kept clear of the chip's top 260K, where PicoMultiLoader lives
+// (RP2040) or keeps its Wi-Fi files (RP2350), with or without a loader (pico_shim.cpp).
+//
 // picoFlashRelocate() moves a linker end-of-flash address down by however much the visible
 // window is short, keeping every area at the same distance from its end; picoFlashOffset()
-// turns an XIP address into the physical offset flash_range_* want. Both are the identity on
-// the RP2040 and on an RP2350 that owns its whole chip.
+// turns an XIP address into the physical offset flash_range_* want.
 // ---------------------------------------------------------------------------------------
 uintptr_t picoFlashRelocate(const void *linkAddr);
 uint32_t  picoFlashOffset(uintptr_t xipAddr);

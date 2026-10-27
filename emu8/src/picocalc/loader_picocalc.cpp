@@ -1,4 +1,5 @@
-// loader_picocalc.cpp - hand the Pico back to the UF2 Loader's SD menu (github.com/pelrun/uf2loader).
+// loader_picocalc.cpp - hand the Pico back to its loader's menu: the UF2 Loader (github.com/pelrun/uf2loader)
+// or PicoMultiLoader, which takes the same watchdog request (its docs/apps.md, "Getting back to the menu").
 //
 // The loader only opens its menu if Up/F1/F5 shows up as a fresh key press in the first 0.5 s after
 // reset, which is hard to hit, and with the Pico on its own USB the power switch never resets it
@@ -70,7 +71,7 @@ bool picocalcLoaderCmdFeed(uint8_t c)
     delay(50);
     ESP.restart();
   }
-  if (!menu[s_menuMatched]) picocalcRebootToLoaderMenu("USB serial asked for the UF2 Loader menu");
+  if (!menu[s_menuMatched]) picocalcRebootToLoaderMenu("USB serial asked for the loader menu");
   if (!sdm[s_sdmMatched]) {
     s_sdmMatched = 0;
     if (currentPlatform != PLATFORM_SDMANAGER) { printLog("USB serial asked for the SD Manager"); rebootToSdManager(); }

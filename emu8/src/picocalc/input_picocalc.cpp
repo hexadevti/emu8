@@ -302,7 +302,7 @@ static void handleEvent(uint8_t state, uint8_t code)
     // Ctrl-Shift-Up -> the UF2 Loader's SD menu, to pick another app (loader_picocalc.cpp). The
     // keyboard sends Shift-Up as Page Up, the same way Shift-F1..F5 arrive as F6..F10.
 #if defined(BOARD_PICOCALC)   // the UF2 Loader is an RP2040/RP2350 thing
-    if (code == PCK_PAGE_UP || (code == PCK_UP && g_shiftHeld)) picocalcRebootToLoaderMenu("Ctrl-Shift-Up: rebooting to the UF2 Loader menu");
+    if (code == PCK_PAGE_UP || (code == PCK_UP && g_shiftHeld)) picocalcRebootToLoaderMenu("Ctrl-Shift-Up: rebooting to the loader menu");
 #elif defined(BOARD_PICOCALC_P4)
     // On the P4 the counterpart is esp32loader: its bootloader boots the loader instead of the app
     // when LP_STORE15 holds its magic across a software reset (esp32loader main/loader_api.h).

@@ -14,8 +14,9 @@
 // emulated machine (msx_cart.cpp / sms_cart.cpp only ever repoint bank windows), so nothing ever writes to XIP.
 //
 // Layout, top-down from the arduino-pico flash filesystem partition (the menu's "flash=..._65536"
-// size; the EEPROM sector sits above it at the very end of flash). Neither is touched. Under the
-// RP2350 UF2 Loader all of it moves down to the end of the app's partition (picoFlashRelocate):
+// size; the EEPROM sector sits above it at the very end of flash). Neither is touched. All of it
+// moves down below the loader's top 260K of flash, and under the RP2350 UF2 Loader to the end of
+// the app's partition (picoFlashRelocate):
 //
 //     _FS_start - 32K .. _FS_start                  BIOS window, fixed
 //     (BIOS base) - 16K .. BIOS base                MSX disk-ROM window, fixed

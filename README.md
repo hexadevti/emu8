@@ -126,7 +126,7 @@ has its own release (tagged `<component>-v<version>`), so you only download what
 | `cyd-v*` | ESP32 CYD firmware — *not published yet: the current tree overflows the plain ESP32's static RAM (DRAM) by ~7 KB* | Flash `emu8-cyd-*-merged.bin` at `0x0` (esptool or [esptool-js](https://espressif.github.io/esptool-js/)) |
 | `jc4827w543-v*` | Guition JC4827W543 (ESP32-S3) firmware | Same, merged `.bin` at `0x0` (hold BOOT, tap RST to enter download mode) |
 | `jc1060p470-v*` | Guition JC1060P470 (ESP32-P4) firmware | Same, merged `.bin` at `0x0` |
-| `picocalc-v*` | PicoCalc `.uf2` for **RP2350** (Pico 2) and **RP2040** (Pico) | Copy the `.uf2` into `pico1-apps` / `pico2-apps` for the [UF2 Loader](https://github.com/pelrun/uf2loader), or hold BOOTSEL and copy it onto the USB drive |
+| `picocalc-v*` | PicoCalc `.uf2` for **RP2350** (Pico 2) and **RP2040** (Pico), plus `emu8-picocalc-pml-v*.zip` | [PicoMultiLoader](https://github.com/hexadevti/PicoMultiLoader): unzip the `-pml` zip into the SD root. Or copy the `.uf2` into `pico1-apps` / `pico2-apps` for the [UF2 Loader](https://github.com/pelrun/uf2loader), or hold BOOTSEL and copy it onto the USB drive |
 | `desktop-v*` | Portable Windows build (SDL2) | Unzip and run `emu8.exe`; images go in `sdcard\` next to it |
 | `sdmanager-v*` | [SD Manager](#managing-the-sd-card-over-usb): Windows `.exe`, plus a zip with the web app + Python CLI | Run `emu8-sdmanager-*-windows.exe` (portable); for the zip see `START-HERE.txt` |
 
@@ -383,7 +383,7 @@ behind `Ctrl`, so bare function keys stay available to the emulated system:
 | `Ctrl` + `Shift` + `F1` | System menu over the running emulator, no reboot (see above) |
 | `Ctrl` + `Shift` + `F3` | Hard reset: settings saved, then reboot straight back into the running system (no menu) |
 | `Ctrl` + `Shift` + `F5` | Snapshots: save / load / delete the machine's state |
-| `Ctrl` + `Shift` + `Up` | Reboot into the [UF2 Loader](https://github.com/pelrun/uf2loader) menu, to pick another app from the SD card |
+| `Ctrl` + `Shift` + `Up` | Reboot into the loader menu ([PicoMultiLoader](https://github.com/hexadevti/PicoMultiLoader) or the [UF2 Loader](https://github.com/pelrun/uf2loader)), to pick another app from the SD card |
 | `F3` | Atari **RESET** switch; reset on PC-XT, Coleco and ZX |
 
 In the settings menu the arrows move between controls and skip empty grid slots and the read-only
@@ -472,6 +472,21 @@ arduino-cli upload -p COM5 --fqbn esp32:esp32:esp32s3:PSRAM=opi,PartitionScheme=
 
 > The JC4827W543 has no auto-reset circuit: to upload, hold **BOOT**, tap **RST**, release **BOOT**;
 > tap **RST** alone to run. Both boards use the `huge_app` partition scheme.
+
+### ClockworkPi PicoCalc (PicoMultiLoader)
+
+emu8 is a [PicoMultiLoader](https://github.com/hexadevti/PicoMultiLoader) app. The release's
+`emu8-picocalc-pml-v*.zip` unzips into the SD root as `emu8/`: [`app.ini`](tools/pml-app/app.ini),
+the icon ([`tools/pml-app/make_icon.py`](tools/pml-app/make_icon.py) draws it) and both `.uf2`
+builds, so Home shows emu8 with its name, version and icon and runs the build for the Pico it is on.
+The `.uf2` carries its program name, version and build date as `binary_info`
+([`binfo_picocalc.c`](emu8/src/picocalc/binfo_picocalc.c)) for the loader's details screen.
+`Ctrl` + `Shift` + `Up` goes back to the loader: emu8 makes the watchdog request the UF2 Loader
+uses, and PicoMultiLoader takes it too.
+
+The same `.uf2` runs without any loader and under the UF2 Loader. In every case emu8 keeps its
+settings and ROM-in-flash windows out of the top 260 KB of flash, where PicoMultiLoader lives on
+the RP2040 and keeps its Wi-Fi files on the RP2350.
 
 ### ClockworkPi PicoCalc (UF2 Loader)
 

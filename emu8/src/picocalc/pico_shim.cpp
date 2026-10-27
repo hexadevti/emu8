@@ -95,6 +95,8 @@ extern "C" uint8_t _FS_start;
 extern "C" uint8_t __flash_binary_end;
 void printLog(const char *txt);
 
+static const uint32_t kLoaderReserve = 0x41000;   // loader area at the top of flash, see flashMap()
+
 struct PicoFlashMap {
   uintptr_t shift;      // linker end-of-flash minus the visible end: what every area moves down
   uint32_t  physBase;   // physical offset of XIP_BASE
@@ -120,6 +122,12 @@ static const PicoFlashMap &flashMap()
   m.physBase          = ((at & QMI_ATRANS0_BASE_BITS) >> QMI_ATRANS0_BASE_LSB) * FLASH_SECTOR_SIZE;
   if (size < m.visible) m.visible = size;
 #endif
+  // Keep the last 256K of the chip, and the 4K below it, free for a loader whatever runs us:
+  // PicoMultiLoader lives there on the RP2040 (0x1C0000, its app record at 0x1BF000) and keeps
+  // its Wi-Fi files there on the RP2350 (docs/apps.md in PicoMultiLoader). Without a loader this
+  // only costs the MSX/SMS cartridge window 260K.
+  const uint32_t chipTop = (uint32_t)(linkTop - XIP_BASE) - kLoaderReserve;
+  if (m.physBase + m.visible > chipTop) m.visible = chipTop - m.physBase;
   m.shift = linkTop - (XIP_BASE + m.visible);
   // Lowest flash any settings area uses: the ROM-in-flash BIOS + disk-ROM windows (48K) under the
   // filesystem partition. Everything from there up must lie above the firmware image.
@@ -140,7 +148,7 @@ void picoFlashLogMap()
   snprintf(line, sizeof(line), "FLASH: %uK visible at physical 0x%06x, settings at 0x%08x%s",
            (unsigned)(m.visible / 1024), (unsigned)m.physBase,
            (unsigned)picoFlashRelocate(&_EEPROM_start),
-           m.ok ? (m.shift ? " (moved into the UF2 Loader partition)" : "")
+           m.ok ? (m.physBase ? " (inside the loader's app partition)" : "")
                 : " -- window too small, settings kept in RAM only");
   printLog(line);
 }
