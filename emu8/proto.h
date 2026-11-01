@@ -502,6 +502,8 @@ int c64CartBankCount();  // total bank count of the mounted cart (0 = none)
 int  c64D64LoadByName(const uint8_t *name, uint8_t len, bool useFileAddr,
                       uint16_t altAddr, uint16_t *startAddr, uint16_t *endAddr);
 bool c64D64LoadDirectory(uint16_t altAddr, uint16_t *endAddr);
+// KERNAL SAVE trap: write RAM start..end-1 as a PRG. Returns 0, or a KERNAL error (5, 8).
+int  c64D64SaveByName(const uint8_t *name, uint8_t len, uint16_t start, uint16_t end);
 
 // optionsui.cpp joystick navigation
 void optionsUiNav(int dir);

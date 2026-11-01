@@ -376,6 +376,37 @@ static bool c64LoadTrap() {
   return true;
 }
 
+// Virtual-disk KERNAL SAVE trap. $FFD8 JMPs to $F5DD, which stores the end address in $AE/$AF and
+// copies the start pointer (zero page, indexed by A) to $C1/$C2, then JMPs through ISAVE ($0332);
+// the ROM's handler starts at $F5ED. Trapped there with device 8 (or 1, as for LOAD) and a .d64
+// mounted, the file is written into the image and we RTS back to the caller. Without the trap the
+// ROM's IEC code finds no drive and reports DEVICE NOT PRESENT.
+static bool c64SaveTrap() {
+  uint8_t dev = read8(0xBA);
+  if (dev != 8 && dev != 1) return false;
+  if (!::c64DiskMounted()) return false;
+  if (bankERAM || (cartActive && cartExrom && !cartGame)) return false;
+
+  uint8_t  len  = read8(0xB7);
+  uint16_t fnad = (uint16_t)(read8(0xBB) | (read8(0xBC) << 8));
+  uint8_t  name[24];
+  if (len > 24) len = 24;
+  for (uint8_t i = 0; i < len; i++) name[i] = read8(fnad + i);
+  uint16_t start = (uint16_t)(read8(0xC1) | (read8(0xC2) << 8));
+  uint16_t end   = (uint16_t)(read8(0xAE) | (read8(0xAF) << 8));
+
+  int err = ::c64D64SaveByName(name, len, start, end);
+  if (err == 0) {
+    write8(0x90, 0x00);                       // STATUS = OK
+    SR &= ~SR_CARRY;
+  } else {
+    A = (uint8_t)err;                         // 5 = DEVICE NOT PRESENT, 8 = MISSING FILE NAME
+    SR |= SR_CARRY;
+  }
+  PC = pull16() + 1;                          // RTS to the JSR $FFD8 caller
+  return true;
+}
+
 // ---- Snapshots (see c64_snapshot.cpp) ----
 bool cpuWaitParked(uint32_t ms) {
   for (uint32_t t0 = millis(); !cpuParked && millis() - t0 < ms; ) delay(5);
@@ -487,8 +518,9 @@ C64_HOT void cpuLoop() {
     // RESTORE is not in the matrix: it pulls NMI through a one-shot, so a press is one NMI.
     if (c64RestoreReq) { c64RestoreReq = false; cpuNMI(); extraCyc += 7; }
 
-    // Virtual disk: intercept the KERNAL LOAD entry before it runs the (absent) IEC code.
+    // Virtual disk: intercept the KERNAL LOAD / SAVE entries before they run the (absent) IEC code.
     if (PC == 0xF49E && c64LoadTrap()) continue;
+    if (PC == 0xF5ED && c64SaveTrap()) continue;
 
     // Boot-autoload (.prg/.d64): once the KERNAL reaches the BASIC main loop (READY), load
     // the saved image (which queues RUN). One-shot.

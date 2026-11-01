@@ -13,6 +13,8 @@
 //            is trapped (see c64_cpu.cpp, PC==$F49E) and serviced here by reading the
 //            directory (track 18) and following the file's sector chain straight out
 //            of the image on the SD card. LOAD"name",8 / LOAD"*",8,1 / LOAD"$",8 work.
+//            KERNAL SAVE is trapped too (PC==$F5ED): SAVE"name",8 writes a PRG into
+//            the image (BAM, sector chain, directory entry); "@0:name" replaces a file.
 //
 // Loading from the menu happens while the CPU is paused (settings window open), so
 // writing c64::ram directly is safe. The KERNAL trap runs from cpuLoop on the CPU core.
@@ -418,6 +420,165 @@ bool c64D64LoadDirectory(uint16_t altAddr, uint16_t *endAddr)
   *endAddr = (uint16_t)a;
   c64CloseLocked(f);
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// SAVE"name",8 - write a PRG into the mounted .d64 (KERNAL SAVE trap, c64_cpu.cpp).
+//
+// Done the way a 1541 does it: the blocks come out of the BAM (track 18 sector 0; per track a
+// free count and a 24-bit map, bit set = free), the file's chain is written, then a directory
+// entry (closed PRG) and the BAM. "@0:name" replaces an existing file; a plain SAVE onto an
+// existing name is refused (the drive's "63, FILE EXISTS" -- the KERNAL reports no error).
+// ---------------------------------------------------------------------------
+static bool d64WriteSector(File &f, int track, int sector, const uint8_t *buf256) {
+  long off = d64Offset(track, sector);
+  if (off < 0 || (uint32_t)off + 256 > (uint32_t)f.size()) return false;
+  if (!f.seek(off)) return false;
+  return f.write(buf256, 256) == 256;
+}
+
+static bool bamFree(const uint8_t *bam, int t, int s) {
+  return bam[4 + (t - 1) * 4 + 1 + (s >> 3)] & (1 << (s & 7));
+}
+static void bamSet(uint8_t *bam, int t, int s, bool free) {
+  uint8_t *e = &bam[4 + (t - 1) * 4];
+  uint8_t bit = 1 << (s & 7);
+  if (free == !!(e[1 + (s >> 3)] & bit)) return;
+  if (free) { e[1 + (s >> 3)] |= bit; e[0]++; }
+  else      { e[1 + (s >> 3)] &= ~bit; e[0]--; }
+}
+
+// Next free data block, 1541-style: tracks nearest the directory first (17, 19, 16, 20, ...),
+// and within a track 10 sectors on from the previous block, so the chain reads back quickly.
+// Only the 35 tracks the standard BAM maps are used, also on a 40-track image.
+static bool bamAlloc(uint8_t *bam, int *t, int *s) {
+  int prevT = *t, prevS = *s;
+  for (int i = prevT ? -1 : 0; i < 34; i++) {
+    int tk = (i < 0) ? prevT : (i & 1) ? 19 + i / 2 : 17 - i / 2;   // previous, then 17,19,16,20,...
+    if (tk < 1 || tk > 35 || bam[4 + (tk - 1) * 4] == 0) continue;
+    int spt = D64_SPT[tk];
+    int s0 = (tk == prevT) ? (prevS + 10) % spt : 0;
+    for (int k = 0; k < spt; k++) {
+      int sc = (s0 + k) % spt;
+      if (bamFree(bam, tk, sc)) { bamSet(bam, tk, sc, false); *t = tk; *s = sc; return true; }
+    }
+  }
+  return false;
+}
+
+static int bamFreeBlocks(const uint8_t *bam) {
+  int n = 0;
+  for (int tk = 1; tk <= 35; tk++) if (tk != 18) n += bam[4 + (tk - 1) * 4];
+  return n;
+}
+
+int c64D64SaveByName(const uint8_t *name, uint8_t len, uint16_t start, uint16_t end)
+{
+  if (!c64::ram || !c64DiskMounted()) return 5;
+  // "@0:NAME" / "0:NAME" / "NAME,P,W": the drive prefix and replace flag, then the bare name.
+  bool replace = false;
+  if (len && name[0] == '@') { replace = true; name++; len--; }
+  for (uint8_t i = 0; i < len; i++)
+    if (name[i] == ':') { name += i + 1; len -= i + 1; break; }
+  for (uint8_t i = 0; i < len; i++)
+    if (name[i] == ',') { len = i; break; }
+  if (len == 0) return 8;                         // MISSING FILE NAME
+  if (len > 16) len = 16;
+  for (uint8_t i = 0; i < len; i++)
+    if (name[i] == '*' || name[i] == '?') { printLog("d64: SAVE name has a wildcard"); return 0; }
+  uint8_t entry[16];
+  for (int i = 0; i < 16; i++) entry[i] = i < len ? name[i] : 0xa0;
+
+  busTake();
+  File f;
+  try { f = FSTYPE.open(d64Path, "r+"); }
+  catch (const std::bad_alloc &) { printLog("C64: out of heap opening a file"); }
+  if (!f) { busGive(); printLog("d64: cannot open the image for writing"); return 5; }
+  const char *why = nullptr;
+  uint8_t bam[256], sec[256];
+  // Directory: the matching entry (an old copy to replace) and the first empty slot.
+  int hitT = 0, hitS = 0, hitE = -1, freeT = 0, freeS = 0, freeE = -1, lastT = 18, lastS = 1;
+  if (!d64ReadSector(f, 18, 0, bam)) { why = "BAM unreadable"; goto done; }
+  {
+    int t = 18, s = 1, guard = 0;
+    while (t != 0 && guard++ < 40) {
+      if (!d64ReadSector(f, t, s, sec)) { why = "directory unreadable"; goto done; }
+      for (int e = 0; e < 8; e++) {
+        const uint8_t *d = &sec[e * 32];
+        if (d[2] == 0) { if (freeE < 0) { freeT = t; freeS = s; freeE = e; } continue; }
+        if (hitE < 0 && (d[2] & 0x80) && !memcmp(&d[5], entry, 16)) { hitT = t; hitS = s; hitE = e; }
+      }
+      lastT = t; lastS = s;
+      t = sec[0]; s = sec[1];
+    }
+  }
+  if (hitE >= 0 && !replace) { why = "63, FILE EXISTS"; goto done; }
+  if (hitE >= 0) {                                // @: free the old file's blocks, reuse its slot
+    if (!d64ReadSector(f, hitT, hitS, sec)) { why = "directory unreadable"; goto done; }
+    int t = sec[hitE * 32 + 3], s = sec[hitE * 32 + 4], guard = 0;
+    uint8_t blk[256];
+    while (t != 0 && guard++ < 768 && d64ReadSector(f, t, s, blk)) {
+      if (t != 18 && t <= 35) bamSet(bam, t, s, true);
+      t = blk[0]; s = blk[1];
+    }
+    freeT = hitT; freeS = hitS; freeE = hitE;
+  }
+  {
+    uint32_t bytes = 2 + (end > start ? (uint32_t)(end - start) : 0);
+    int blocks = (int)((bytes + 253) / 254);
+    if (freeE < 0) {                              // directory full: chain one more track-18 sector
+      int ns = -1;
+      for (int k = 1; k < D64_SPT[18]; k++) {
+        int sc = (lastS + 3 * k) % D64_SPT[18];
+        if (sc != 0 && bamFree(bam, 18, sc)) { ns = sc; break; }
+      }
+      if (ns < 0) { why = "72, DISK FULL (directory)"; goto done; }
+      if (!d64ReadSector(f, lastT, lastS, sec)) { why = "directory unreadable"; goto done; }
+      sec[0] = 18; sec[1] = (uint8_t)ns;
+      if (!d64WriteSector(f, lastT, lastS, sec)) { why = "write failed"; goto done; }
+      memset(sec, 0, 256); sec[1] = 0xff;
+      if (!d64WriteSector(f, 18, ns, sec)) { why = "write failed"; goto done; }
+      bamSet(bam, 18, ns, false);
+      freeT = 18; freeS = ns; freeE = 0;
+    }
+    if (bamFreeBlocks(bam) < blocks) { why = "72, DISK FULL"; goto done; }
+
+    // The chain: 254 data bytes per block, the first two being the load address.
+    int t = 0, s = 0;
+    if (!bamAlloc(bam, &t, &s)) { why = "72, DISK FULL"; goto done; }
+    int firstT = t, firstS = s;
+    uint32_t a = start, remain = bytes;
+    bool first = true;
+    while (remain) {
+      uint8_t blk[256];
+      memset(blk, 0, 256);
+      int n = remain > 254 ? 254 : (int)remain, i = 2;
+      if (first) { blk[2] = start & 0xff; blk[3] = start >> 8; i = 4; first = false; }
+      for (; i < 2 + n; i++) blk[i] = c64::ram[a++ & 0xffff];
+      remain -= n;
+      int nt = 0, ns = 0;
+      if (remain) { nt = t; ns = s; if (!bamAlloc(bam, &nt, &ns)) { why = "72, DISK FULL"; goto done; } }
+      blk[0] = (uint8_t)nt; blk[1] = (uint8_t)(remain ? ns : n + 1);   // last block: index of its last byte
+      if (!d64WriteSector(f, t, s, blk)) { why = "write failed"; goto done; }
+      t = nt; s = ns;
+    }
+
+    if (!d64ReadSector(f, freeT, freeS, sec)) { why = "directory unreadable"; goto done; }
+    uint8_t *d = &sec[freeE * 32];
+    memset(d + 2, 0, 30);                         // bytes 0-1 are the sector link (entry 0 only)
+    d[2] = 0x82;                                  // closed PRG
+    d[3] = (uint8_t)firstT; d[4] = (uint8_t)firstS;
+    memcpy(&d[5], entry, 16);
+    d[30] = blocks & 0xff; d[31] = blocks >> 8;
+    if (!d64WriteSector(f, freeT, freeS, sec) || !d64WriteSector(f, 18, 0, bam)) { why = "write failed"; goto done; }
+    snprintf(buf, sizeof(buf), "d64: saved $%04X..$%04X, %d blocks", start, end, blocks);
+    printLog(buf);
+  }
+done:
+  f.flush();
+  c64CloseLocked(f);
+  if (why) { snprintf(buf, sizeof(buf), "d64: SAVE failed: %s", why); printLog(buf); }
+  return 0;                                       // drive errors are not KERNAL errors
 }
 
 // ---------------------------------------------------------------------------
