@@ -1,0 +1,201 @@
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; background: #0b0b0d; color: #ddd; overflow: hidden;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: none; overscroll-behavior: none; }
+button { font: inherit; color: inherit; }
+
+#app { position: fixed; inset: 0; display: flex;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+
+#screen-wrap { position: relative; display: flex; align-items: center; justify-content: center; background: #000; }
+#screen { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; display: block; }
+#screen.stretch { object-fit: fill; }
+
+#toolbar { display: flex; gap: 6px; justify-content: center; }
+#toolbar button { width: 44px; height: 36px; border-radius: 10px; border: 1px solid #333; background: #1c1c22; font-size: 18px; }
+#toolbar button.on { background: #2e4f8a; border-color: #4a73c0; }
+
+/* ---------- pad ---------- */
+#controls { display: flex; align-items: center; justify-content: space-between; }
+.pad-side { display: flex; align-items: center; justify-content: center; touch-action: none; }
+/* floating: the pads jump to the thumb while held (transform set in app.js) and glide home after */
+#dpad, #abtns { transition: transform .15s ease-out; }
+#dpad.held, #abtns.held { transition: none; }
+#dpad { position: relative; width: var(--dpad, 150px); height: var(--dpad, 150px); border-radius: 50%;
+  background: radial-gradient(circle, #26262e 0 60%, #1a1a20 61%); touch-action: none; }
+#dpad .dp { position: absolute; background: #3a3a44; border-radius: 6px; }
+#dpad .up, #dpad .down { left: 35%; width: 30%; height: 35%; }
+#dpad .left, #dpad .right { top: 35%; height: 30%; width: 35%; }
+#dpad .up { top: 2%; } #dpad .down { bottom: 2%; } #dpad .left { left: 2%; } #dpad .right { right: 2%; }
+#dpad .dp-center { position: absolute; left: 35%; top: 35%; width: 30%; height: 30%; background: #3a3a44; }
+#dpad .dp.on { background: #6a8fd8; }
+
+#abtns { position: relative; width: var(--ab, 150px); height: var(--ab, 150px); }
+.ab { position: absolute; width: 46%; height: 46%; border-radius: 50%; border: none; font-weight: 700; font-size: 20px;
+  background: #8a2b3a; color: #fff; box-shadow: 0 3px 0 #4d1520; touch-action: none; }
+.ab.a { right: 0; top: 8%; } .ab.b { left: 0; bottom: 8%; }
+.ab.on, .pill.on { filter: brightness(1.5); transform: translateY(2px); box-shadow: none; }
+#pad-mid { display: flex; gap: 10px; }
+.pill { border: none; border-radius: 14px; padding: 6px 12px; font-size: 11px; letter-spacing: 1px;
+  background: #33333c; color: #bbb; touch-action: none; }
+
+/* ---------- keyboard ---------- */
+#kbd { display: flex; flex-direction: column; gap: 4px; padding: 4px; background: #15151a; }
+#kbd .krow { display: flex; gap: 4px; }
+#kbd .k { flex: 1 1 0; min-width: 0; height: var(--kh, 38px); border: none; border-radius: 6px; background: #2b2b33;
+  font-size: 13px; padding: 0; touch-action: none; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; line-height: 1.05; overflow: hidden; }
+#kbd .k span { white-space: nowrap; }
+#kbd .k.mod span, #kbd .k.warn span { white-space: normal; text-align: center; word-break: break-word; }
+#kbd .k small { font-size: 8px; opacity: .75; white-space: nowrap; }
+#kbd .k.mod { background: #3a3a46; font-size: 10px; }
+#kbd .k.warn { background: #7a2a2a; font-size: 10px; }
+#kbd .k.latch { background: #2e4f8a !important; }
+#kbd .k.down { background: #6a8fd8 !important; }
+/* the machines' own colours */
+#kbd.kb-apple, #kbd.kb-apple2p { background: #1d1b17; }
+#kbd.kb-apple .k, #kbd.kb-apple2p .k { background: #4a453c; color: #f2ecdc; }
+#kbd.kb-apple .k.mod, #kbd.kb-apple2p .k.mod { background: #3a362f; }
+#kbd.kb-c64 { background: #2a231d; }
+#kbd.kb-c64 .k { background: #4d3f33; color: #f1e6d6; }
+#kbd.kb-c64 .k.mod { background: #3b3028; font-size: 9px; }
+#kbd.kb-c64 .k.fkey { background: #a88a62; color: #2a1f14; }
+#kbd.kb-msx { background: #1e1f22; }
+#kbd.kb-msx .k { background: #3c3e44; color: #eee; }
+#kbd.kb-msx .k.fkey { background: #5b6c86; }
+#kbd.kb-zx { background: #111; }
+#kbd.kb-zx .k { background: #2a2a2a; color: #fff; }
+#kbd.kb-zx .k small.red { color: #ff5a4a; opacity: 1; }
+#kbd.kb-zx .k.sym { color: #ff5a4a; }
+#kbd.kb-zx .k.mod { font-size: 8px; }
+#kbd.small { flex: none !important; }
+#kbd.small .krow { max-width: 520px; width: 100%; margin: 0 auto; }
+#kbd.small .k { font-size: 15px; }
+
+/* ---------- portrait: screen on top, controls below ---------- */
+#app.portrait { flex-direction: column; }
+#app.portrait #screen-wrap { width: 100%; aspect-ratio: 4 / 3; flex: none; max-height: 55vh; }
+#app.portrait #toolbar { padding: 8px 0; }
+#app.portrait #controls { flex: 1; padding: 0 14px 40px; position: relative; min-height: 0; }
+#app.portrait .pad-side { flex: 1; align-self: stretch; }
+#app.portrait #pad-mid { z-index: 2; position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); }
+#app.portrait.kbd-on:not(.kbd-small) #controls { display: none; }
+#app.portrait.kbd-on.kbd-small #controls { order: 5; }
+#app.portrait #kbd { flex: 1; justify-content: center; }
+
+/* ---------- landscape (side): controls in bars left/right of the image ---------- */
+#app.side { flex-direction: row; }
+#app.side #screen-wrap { position: absolute; top: 0; bottom: 0; left: var(--sidew); right: var(--sidew); }
+#app.side #controls { position: absolute; inset: 0; pointer-events: none; }
+#app.side .pad-side { position: absolute; top: 0; bottom: 0; width: var(--sidew); pointer-events: auto; }
+#app.side #pad-left { left: 0; } #app.side #pad-right { right: 0; }
+#app.side #pad-mid { position: absolute; bottom: 10px; left: 0; width: var(--sidew); flex-direction: column; align-items: center; pointer-events: auto; }
+#app.side #toolbar { position: absolute; top: 6px; right: 0; width: var(--sidew); flex-wrap: wrap; z-index: 5; }
+#app.side #toolbar button { width: 38px; height: 32px; font-size: 15px; }
+
+/* ---------- landscape (overlay): fullscreen image, translucent controls on top ---------- */
+#app.overlay #screen-wrap { position: absolute; inset: 0; }
+#app.overlay #controls { position: absolute; inset: 0; pointer-events: none; }
+#app.overlay .pad-side { position: absolute; bottom: 0; width: 42%; height: 80%; padding: 12px 16px; align-items: flex-end; pointer-events: auto; }
+#app.overlay #pad-left { left: 0; justify-content: flex-start; } #app.overlay #pad-right { right: 0; justify-content: flex-end; }
+#app.overlay #dpad, #app.overlay #abtns { opacity: .45; }
+#app.overlay #dpad.held, #app.overlay #abtns.held { opacity: .7; }
+/* the emulator's own menu is touched on the screen: only the pads themselves stay live over it */
+#app.overlay.emu-menu .pad-side { pointer-events: none; }
+#app.overlay.emu-menu #dpad, #app.overlay.emu-menu #abtns { pointer-events: auto; }
+#app.overlay #pad-mid { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); pointer-events: auto; opacity: .5; z-index: 2; }
+#app.overlay #toolbar { position: absolute; top: 6px; left: 50%; transform: translateX(-50%); opacity: .55; z-index: 5; }
+#app.overlay #toolbar button { width: 38px; height: 30px; font-size: 15px; }
+#app.side.pad-hidden #controls, #app.overlay.pad-hidden #controls { display: none; }
+
+#app.side #kbd, #app.overlay #kbd { position: absolute; left: 0; right: 0; bottom: 0; z-index: 4; opacity: .92; }
+
+/* ---------- dialogs ---------- */
+.dialog { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: flex; align-items: center; justify-content: center; z-index: 20; }
+.dialog[hidden], #kbd[hidden] { display: none !important; }
+.dlg-body { background: #1b1b21; border: 1px solid #333; border-radius: 14px; padding: 14px; width: min(560px, 94vw);
+  max-height: 90vh; overflow: auto; user-select: text; touch-action: auto; }
+.dlg-body.center { text-align: center; }
+.dlg-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.dlg-head button, .dialog button, .btn { background: #2b2b33; border: 1px solid #444; border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+.dialog select { background: #2b2b33; color: #ddd; border: 1px solid #444; border-radius: 8px; padding: 7px; font: inherit; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+.hint { font-size: 13px; color: #999; }
+#file-list { list-style: none; padding: 0; margin: 0; font-size: 14px; }
+#file-list li { display: flex; justify-content: space-between; align-items: center; padding: 6px 4px; border-bottom: 1px solid #2a2a30; gap: 8px; }
+#file-list li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#file-list li small { color: #777; margin-left: 6px; }
+#file-list li button { padding: 3px 9px; }
+#boot h1 { margin: 4px 0 8px; letter-spacing: 3px; }
+#toolbar button.txt { width: auto; padding: 0 10px; font-size: 11px; font-weight: 700; letter-spacing: 1px; background: #7a2a2a; border-color: #a04040; }
+
+/* ---------- settings sheet (the emulator menu, touch-first) ---------- */
+#msheet { position: fixed; inset: 0; z-index: 15; display: flex; align-items: flex-end; justify-content: center;
+  background: rgba(0,0,0,.45); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
+#msheet[hidden] { display: none; }
+.ms-card { width: 100%; max-width: 560px; max-height: 88vh; display: flex; flex-direction: column;
+  background: #17171c; border-radius: 20px 20px 0 0; border-top: 1px solid #2c2c36;
+  padding: 6px 14px calc(12px + env(safe-area-inset-bottom)); box-shadow: 0 -10px 40px rgba(0,0,0,.5);
+  animation: ms-up .18s ease-out; }
+@keyframes ms-up { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+.ms-grab { width: 40px; height: 4px; border-radius: 2px; background: #3a3a46; margin: 2px auto 8px; }
+.ms-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.ms-kicker { font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: #7f8aa3; }
+.ms-title { font-size: 20px; font-weight: 700; color: #f2f2f5; }
+.ms-x { width: 38px; height: 38px; border-radius: 50%; border: none; background: #262630; font-size: 16px; }
+.ms-scroll { overflow-y: auto; touch-action: pan-y; -webkit-overflow-scrolling: touch; min-height: 0; flex: 1; margin: 0 -4px; padding: 0 4px; }
+.ms-sec { font-size: 12px; letter-spacing: 1.2px; text-transform: uppercase; color: #7f8aa3; margin: 12px 2px 8px; }
+.ms-sec small { text-transform: none; letter-spacing: 0; color: #666; }
+.ms-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(102px, 1fr)); gap: 8px; }
+.ms-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 10px 12px; min-height: 58px;
+  border: 1px solid #2c2c36; border-radius: 14px; background: #20202a; text-align: left; touch-action: manipulation; }
+.ms-tile:active { background: #2b3550; }
+.ms-tile small { font-size: 10px; letter-spacing: 1px; color: #8a8fa0; text-transform: uppercase; }
+.ms-tile b { font-size: 15px; color: #9cc2ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.ms-vol { display: flex; align-items: center; gap: 12px; margin-top: 10px; padding: 10px 12px; border-radius: 14px; background: #20202a;
+  border: 1px solid #2c2c36; font-size: 13px; color: #aab; touch-action: pan-x; }
+.ms-vol input { flex: 1; accent-color: #5b8ef0; height: 28px; }
+.ms-vol b { width: 22px; text-align: right; color: #9cc2ff; }
+#ms-files { list-style: none; margin: 0; padding: 0; border-radius: 14px; overflow: hidden; border: 1px solid #2c2c36; }
+#ms-files li { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 8px 12px; background: #1d1d25;
+  border-bottom: 1px solid #262630; font-size: 15px; touch-action: pan-y; }
+#ms-files li:last-child { border-bottom: none; }
+#ms-files li .ic { width: 22px; text-align: center; opacity: .8; flex: none; }
+#ms-files li .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#ms-files li.sel { background: #26365a; }
+#ms-files li.bad { opacity: .45; }
+#ms-files li .badge { font-size: 10px; padding: 2px 7px; border-radius: 8px; background: #2f6a3d; color: #d9ffe2; flex: none; }
+#ms-files li.empty { color: #777; justify-content: center; }
+.ms-acts { display: flex; gap: 8px; margin-top: 12px; }
+.ms-acts button { flex: 1; min-height: 48px; border-radius: 14px; border: none; font-weight: 600; font-size: 14px;
+  background: #2a2a34; color: #eee; touch-action: manipulation; }
+.ms-acts button.primary { background: #3b6fe0; color: #fff; }
+.ms-acts button.warn { background: #b4622a; color: #fff; }
+.ms-acts button:disabled { opacity: .4; }
+.ms-links { display: flex; gap: 6px; margin-top: 8px; }
+.ms-links button { flex: 1; min-height: 40px; border-radius: 12px; border: 1px solid #2c2c36; background: transparent; color: #aab;
+  font-size: 13px; touch-action: manipulation; }
+.ms-links button[hidden] { display: none; }
+/* landscape: a panel on the right, full height */
+#app.side ~ #msheet, #app.overlay ~ #msheet { justify-content: flex-end; align-items: stretch; }
+#app.side ~ #msheet .ms-card, #app.overlay ~ #msheet .ms-card { max-height: none; height: 100%; max-width: 420px;
+  border-radius: 20px 0 0 20px; border-top: none; border-left: 1px solid #2c2c36; animation-name: ms-left;
+  padding-top: calc(8px + env(safe-area-inset-top)); padding-right: calc(14px + env(safe-area-inset-right)); }
+#app.side ~ #msheet .ms-grab, #app.overlay ~ #msheet .ms-grab { display: none; }
+@keyframes ms-left { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* Apple II: analog stick + two buttons, no SELECT/START */
+#app.apple-pad #pad-mid { display: none; }
+#dpad .knob { display: none; }
+#app.apple-pad #dpad .dp, #app.apple-pad #dpad .dp-center { display: none; }
+#app.apple-pad #dpad { background: radial-gradient(circle, #1f1f26 0 62%, #2a2a33 63% 66%, #1a1a20 67%); }
+#app.apple-pad #dpad .knob { display: block; position: absolute; left: 30%; top: 30%; width: 40%; height: 40%; border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #5c5c68, #33333c 70%); box-shadow: 0 4px 10px rgba(0,0,0,.5);
+  pointer-events: none; transition: transform .08s ease-out; }
+
+/* receive from PC (Files dialog) */
+#recv { margin: 8px 0; padding: 10px 12px; border: 1px solid #444; border-radius: 10px; background: #1b1b21; }
+#recv p { margin: 0 0 6px; }
+.recv-url { font: 13px ui-monospace, monospace; color: #9cf; word-break: break-all; user-select: all; }
+.recv-code { font: 700 34px/1.2 ui-monospace, monospace; letter-spacing: .2em; text-align: center; margin: 6px 0; user-select: all; }
+#recv .row { justify-content: space-between; }

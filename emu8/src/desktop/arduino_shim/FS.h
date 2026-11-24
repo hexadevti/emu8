@@ -13,6 +13,9 @@
 #include <memory>
 #include <dirent.h>
 #include <sys/stat.h>
+#if !defined(_WIN32)
+#include <unistd.h>
+#endif
 
 #define FILE_READ   "r"
 #define FILE_WRITE  "w"

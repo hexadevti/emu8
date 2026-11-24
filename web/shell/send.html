@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>emu8 — send files</title>
+<link rel="icon" href="icon.svg">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: #15151a; color: #ddd; font: 15px/1.45 system-ui, sans-serif; display: flex; justify-content: center; }
+  main { width: min(640px, 100%); padding: 32px 20px; }
+  h1 { margin: 0 0 4px; font-size: 26px; }
+  .hint { color: #999; font-size: 13px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 18px 0; }
+  input, select, button { font: inherit; color: inherit; background: #2b2b33; border: 1px solid #444; border-radius: 8px; padding: 8px 12px; }
+  button { cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  #code { width: 9ch; font: 600 24px/1 ui-monospace, monospace; letter-spacing: .15em; text-transform: uppercase; text-align: center; }
+  #state { font-weight: 600; }
+  #state.on { color: #6c6; } #state.off { color: #d96; }
+  #drop { margin: 18px 0; border: 2px dashed #555; border-radius: 12px; padding: 40px 16px; text-align: center; color: #aaa; }
+  #drop.over { border-color: #7af; color: #fff; background: #1d2230; }
+  #drop[aria-disabled=true] { opacity: .45; }
+  ul { list-style: none; padding: 0; margin: 0; }
+  li { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 8px 0; border-bottom: 1px solid #2a2a30; }
+  li small { color: #999; }
+  li .bar { grid-column: 1 / -1; height: 4px; background: #2a2a30; border-radius: 2px; overflow: hidden; }
+  li .bar i { display: block; height: 100%; width: 0; background: #7af; }
+  li.ok .bar i { background: #6c6; } li.err .bar i { background: #d66; }
+  li.err small { color: #e88; }
+</style>
+</head>
+<body>
+<main>
+  <h1>emu8</h1>
+  <div class="hint" data-i18n-html="send.intro"></div>
+
+  <div class="row">
+    <label for="code" data-i18n="send.code"></label>
+    <input id="code" maxlength="5" autocomplete="off" spellcheck="false" placeholder="•••••">
+    <button id="connect" data-i18n="send.connect"></button>
+    <span id="state"></span>
+  </div>
+
+  <div class="row">
+    <label><span data-i18n="send.folder"></span> <select id="folder"></select></label>
+  </div>
+
+  <div id="drop" aria-disabled="true">
+    <div data-i18n="send.drop"></div>
+    <div class="row" style="justify-content:center;margin-bottom:0">
+      <button id="pick" type="button" disabled data-i18n="send.pick"></button>
+      <input id="files" type="file" multiple hidden>
+    </div>
+  </div>
+
+  <ul id="list"></ul>
+</main>
+<script src="i18n.js"></script>
+<script src="send.js"></script>
+</body>
+</html>

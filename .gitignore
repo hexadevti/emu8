@@ -61,3 +61,4 @@ roms/
 .jc1060-build/
 .s3-build/
 emu8/build/
+build-web/

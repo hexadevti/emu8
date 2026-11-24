@@ -554,7 +554,7 @@ void pcxtLoop() {
   uint32_t instrRun = 0;
   SpeedMeter meter; meter.restart(instrRun);
   for (;;) {
-    if (OptionsWindow) { vTaskDelay(pdMS_TO_TICKS(20)); meter.restart(instrRun); continue; }
+    if (OptionsWindow || paused) { vTaskDelay(pdMS_TO_TICKS(20)); meter.restart(instrRun); continue; }
     if (pcResetReq)    { pcResetReq = false; g_pcxtMachine.trigReset(); }
 #if defined(BOARD_DESKTOP)
     g_pcxtMachine.run(400000);   // desktop: bigger batch — the device's 1ms-per-40k throttle (for WDT/

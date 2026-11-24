@@ -1435,15 +1435,18 @@ void renderLoop(void *pvParameters)
                   bool lastCol = false;
                   // End Upscale
                   if (gfxPad) tft.writeColor(TFT_BLACK, gfxPad);   // mixed-mode 80-col frame: center in 320
+                  // The previous byte's bit 6 colours this byte's first pixel: it has to survive from
+                  // one column to the next (declared inside the loop it was undefined -- garbage under
+                  // WebAssembly: a black seam every 7 pixels, Karateka's striped sky).
+                  char prevChr = 0;
+                  char prevChrBottom = 0;
                   for (ushort c = 0; c < 0x28; c++)
                   {
                     if (c == 0x27)
                       lastCol = true;
                     char chr;
-                    char prevChr;
                     char pixels[7];
                     char chrBottom;
-                    char prevChrBottom;
                     char pixelsBottom[7];
                     if (smoothUpscale) {
                       if (videoColor && repeat_y > 0) {

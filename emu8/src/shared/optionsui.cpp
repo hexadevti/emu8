@@ -371,8 +371,18 @@ static void ouiFocusRing(int x, int y, int w, int h, int r)
   tft.drawRoundRect(x + 1, y + 1, w - 2, h - 2, r, c);
 }
 
+#if defined(EMU_WEB)
+// Browser menu (optionsUiWebState): while set, the toggle / action-button drawers report what they
+// would draw instead of drawing it, so the phone's HTML menu lists exactly the same controls.
+static void (*ouiWebToggleCb)(int idx, const char *label, const char *value) = nullptr;
+static void (*ouiWebActCb)(const char *label, int focusId) = nullptr;
+#endif
+
 static void ouiDrawToggle(int idx, const char *label, const char *value, uint16_t valColor)
 {
+#if defined(EMU_WEB)
+  if (ouiWebToggleCb) { ouiWebToggleCb(idx, label, value); return; }
+#endif
   char sig[48];
   snprintf(sig, sizeof(sig), "%s|%s|%u|%d", label, value, (unsigned)valColor, ouiFocusState(idx));
   if (!ouiChanged(ouiSigCard[idx], ouiHash(sig))) return;
@@ -402,6 +412,9 @@ static void ouiDrawToggle(int idx, const char *label, const char *value, uint16_
 // Blank a toggle slot (so stale Apple labels don't linger on the C64 screen).
 static void ouiClearToggle(int idx)
 {
+#if defined(EMU_WEB)
+  if (ouiWebToggleCb) return;
+#endif
   if (!ouiChanged(ouiSigCard[idx], OUI_SIG_CLEARED)) return;
   int col = idx % 4, row = idx / 4;
   int x = col * OUI_TG_W, y = OUI_TG_TOP + row * OUI_TG_H;
@@ -667,6 +680,9 @@ void uiDirScanProgress(int count)
 // Draw one labelled action button (rounded, optional focus ring).
 static void ouiActBtn(int x, int w, const char *label, uint16_t face, uint16_t txt, int focusId)
 {
+#if defined(EMU_WEB)
+  if (ouiWebActCb) { ouiWebActCb(label, focusId); return; }
+#endif
   int y = OUI_ACT_TOP, h = OUI_ACT_H;
   tft.fillRoundRect(x, y, w, h, 6, face);
   tft.drawRoundRect(x, y, w, h, 6, OUI_BORDER);
@@ -753,6 +769,9 @@ static void ouiDrawActions()
   char sig[48];
   snprintf(sig, sizeof(sig), "B|%d|%d|%d|%d|%d|%d|%d", (int)currentPlatform, (int)canMount, (int)curA, (int)curC,
            (int)msxDsk, (int)cur, actFocus ? f : -1);
+#if defined(EMU_WEB)
+  if (!ouiWebActCb)
+#endif
   if (!ouiChanged(ouiSigAct, ouiHash(sig))) return;
 #if OUI_PICOCALC
   tft.fillRect(0, OUI_ACT_TOP, 320, OUI_ACT_H, OUI_BG);   // wipe the hint panel from the gaps
@@ -5007,3 +5026,103 @@ void optionsUiMarkDirty()
   }
   optionsUiDirty = true;
 }
+
+#if defined(EMU_WEB)
+// ---------------------------------------------------------------------------
+// Browser menu bridge (web/): the phone draws its own touch-friendly menu from this state and
+// drives the very same actions, so every setting keeps working exactly as here. Both run on the
+// render thread (web/src/input_web.cpp queues the commands).
+// ---------------------------------------------------------------------------
+static std::string ouiWebOut;
+static void ouiWebStr(const char *s)
+{
+  ouiWebOut += '"';
+  for (; *s; s++) {
+    const unsigned char c = (unsigned char)*s;
+    if (c == '"' || c == '\\') { ouiWebOut += '\\'; ouiWebOut += (char)c; }
+    else if (c < 0x20) ouiWebOut += ' ';
+    else ouiWebOut += (char)c;
+  }
+  ouiWebOut += '"';
+}
+static bool ouiWebFirst;
+static void ouiWebSep() { if (!ouiWebFirst) ouiWebOut += ','; ouiWebFirst = false; }
+static void ouiWebToggleRow(int idx, const char *label, const char *value)
+{
+  ouiWebSep();
+  char b[16]; snprintf(b, sizeof(b), "[%d,", idx); ouiWebOut += b;
+  ouiWebStr(label); ouiWebOut += ','; ouiWebStr(value); ouiWebOut += ']';
+}
+static void ouiWebActRow(const char *label, int focusId)
+{
+  ouiWebSep();
+  char b[16]; snprintf(b, sizeof(b), "[%d,", focusId); ouiWebOut += b;
+  ouiWebStr(label); ouiWebOut += ']';
+}
+
+// JSON: { page, title, toggles[[slot,label,value]], cfg, vol, files[[name,dir,mounted,bad]], sel, acts[[id,label]], snap }
+// page: "main" = the settings page this menu replaces; anything else = a sub-page (CONFIG, HELP,
+// ROMS, snapshots, general settings) that the classic menu on the canvas shows.
+const char *optionsUiWebState()
+{
+  ouiWebOut.clear();
+  const char *page = !OptionsWindow ? "closed" : ouiGenMode ? "general" : ouiSnapMode ? "snap" : ouiHelpOpen ? "help"
+                   : ouiRomMode ? "roms" : ouiCfgMode ? "cfg" : "main";
+  ouiWebOut += "{\"page\":"; ouiWebStr(page);
+  if (strcmp(page, "main")) { ouiWebOut += '}'; return ouiWebOut.c_str(); }
+  const char *title = ouiIsC64() ? "Commodore 64" : ouiIsNES() ? "Nintendo NES" : ouiIsAtari() ? "Atari 2600"
+                    : ouiIsMsx() ? "MSX" : ouiIsSms() ? "Master System" : ouiIsColeco() ? "ColecoVision"
+                    : ouiIsZx() ? "ZX Spectrum 48K" : ouiIsPcxt() ? "PC-XT" : AppleIIe ? "Apple IIe" : "Apple II+";
+  ouiWebOut += ",\"title\":"; ouiWebStr(title);
+  ouiWebOut += ",\"toggles\":["; ouiWebFirst = true;
+  ouiWebToggleCb = ouiWebToggleRow; ouiDrawToggles(); ouiWebToggleCb = nullptr;
+  ouiWebOut += "],\"cfg\":"; ouiWebStr(ouiHasCfg() ? "CONFIG" : "HELP");
+  char b[64];
+  snprintf(b, sizeof(b), ",\"vol\":%d,\"hasVol\":%d,\"snap\":%d", volume / 0x10, OUI_HAS_VOLUME ? 1 : 0, snapSystemName() ? 1 : 0);
+  ouiWebOut += b;
+  FileList &files = ouiFiles();
+  ouiWebOut += ",\"files\":["; ouiWebFirst = true;
+  for (int i = 0; i < (int)files.size(); i++) {
+    const std::string &f = files[i];
+    const bool dir = ouiIsDir(f);
+    bool mnt = !dir && mediaIsMounted(f.c_str());
+    if (ouiIsPcxt()) mnt = (ouiPcA().length() && f == std::string(ouiPcA().c_str())) || (ouiPcC().length() && f == std::string(ouiPcC().c_str()));
+    ouiWebSep(); ouiWebOut += '['; ouiWebStr(ouiDisplayName(f).c_str());
+    snprintf(b, sizeof(b), ",%d,%d,%d]", dir ? 1 : 0, mnt ? 1 : 0, ouiEntryProblem(i) ? 1 : 0);
+    ouiWebOut += b;
+  }
+  snprintf(b, sizeof(b), "],\"more\":%d,\"sel\":%d", fbListTruncated(files) ? 1 : 0, shownFile < files.size() ? (int)shownFile : -1);
+  ouiWebOut += b;
+  ouiWebOut += ",\"acts\":["; ouiWebFirst = true;
+  ouiWebActCb = ouiWebActRow; ouiDrawActions(); ouiWebActCb = nullptr;
+  ouiWebOut += "]}";
+  return ouiWebOut.c_str();
+}
+
+// cmd: 1 toggle slot arg | 2 volume = arg (0..15) | 3 highlight file arg | 4 open file arg (folder:
+// enter it; file: the list's double tap = MOUNT / LOAD & RUN) | 5 action button arg (OUI_FOC_*) |
+// 6 CONFIG/HELP | 7 snapshots | 9 close (REBOOT = action 12 leads to the system picker)
+void optionsUiWebCmd(int cmd, int arg)
+{
+  if (!OptionsWindow) return;
+  FileList &files = ouiFiles();
+  switch (cmd) {
+    case 1: if (arg >= 0 && arg < OUI_TG_COUNT && arg != OUI_FOC_HELP) ouiToggle(arg); break;
+    case 2: if (arg >= 0 && arg <= 15) { volume = (uint8_t)(arg * 0x10); optionsUiDirty = true; } break;
+    case 3: case 4:
+      if (arg < 0 || arg >= (int)files.size()) break;
+      shownFile = (uint16_t)arg;
+      optionsUiMarkDirty();
+      if (cmd == 4) { if (ouiIsDir(files[arg])) ouiBrowse(files[arg]); else ouiMount(); }
+      break;
+    case 5:
+      if (arg == OUI_FOC_MOUNT) ouiActFirst();
+      else if (arg == OUI_FOC_MNTREBOOT) ouiActMiddle();
+      else if (arg == OUI_FOC_REBOOT) ouiReboot();
+      break;
+    case 6: ouiToggle(OUI_FOC_HELP); break;
+    case 7: optionsUiOpenSnap(); break;
+    case 9: showHideOptionsWindow(); break;
+  }
+}
+#endif // EMU_WEB

@@ -11,7 +11,11 @@
 
 #include <Arduino.h>
 #include <EEPROM.h>
+#if defined(EMU_WEB)
+#include <emscripten.h>   // browser build: no SDL; persistence lives in the IndexedDB-backed /persist
+#else
 #include <SDL.h>          // SDL_GetBasePath: anchor the persistence files next to the .exe
+#endif
 #include <string>
 
 #include <atomic>
@@ -38,8 +42,12 @@ char **g_emuArgv = nullptr;
 const char *desktopBaseDir() {
   static std::string dir;
   if (dir.empty()) {
+#if defined(EMU_WEB)
+    dir = "/persist/";
+#else
     if (char *b = SDL_GetBasePath()) { dir = b; SDL_free(b); }
     else dir = "";   // fall back to cwd-relative
+#endif
   }
   return dir.c_str();
 }
@@ -90,6 +98,16 @@ static void unsetEnv(const char *name) {
 }
 
 void desktopResetInit() {
+#if defined(EMU_WEB)
+  // Browser: the page reloads instead of re-exec; the soft-reset words come back through a file.
+  if (FILE *f = fopen("/persist/softreset", "r")) {
+    uint32_t v[2] = {0, 0};
+    g_softReset = fscanf(f, "%x,%x", &v[0], &v[1]) == 2;
+    fclose(f);
+    remove("/persist/softreset");
+    if (g_softReset) desktopNoinitSet(v);
+  }
+#endif
   if (const char *p = getenv("EMU_PLATFORM")) {
     snprintf(g_platformOverride, sizeof(g_platformOverride), "%s", p);
     unsetEnv("EMU_PLATFORM");   // a later ESP.restart() must boot the platform saved in EEPROM
@@ -107,6 +125,12 @@ static void doReboot() {
   fflush(nullptr);
   uint32_t v[2];
   desktopNoinitGet(v);
+#if defined(EMU_WEB)
+  if (FILE *f = fopen("/persist/softreset", "w")) { fprintf(f, "%08x,%08x", (unsigned)v[0], (unsigned)v[1]); fclose(f); }
+  MAIN_THREAD_EM_ASM({ if (Module.webReboot) Module.webReboot(); });   // sync IndexedDB + reload
+  { extern bool running; running = false; }
+  for (;;) std::this_thread::sleep_for(std::chrono::seconds(1));
+#endif
   static char env[48];
   snprintf(env, sizeof(env), "EMU_SOFT_RESET=%08x,%08x", (unsigned)v[0], (unsigned)v[1]);
   putenv(env);
@@ -300,6 +324,9 @@ bool EEPROMClass::commit() {
     remove(g_eePath.c_str());
     ok = rename(tmp.c_str(), g_eePath.c_str()) == 0;
   }
+#if defined(EMU_WEB)
+  MAIN_THREAD_ASYNC_EM_ASM({ if (Module.webPersist) Module.webPersist(); });   // flush to IndexedDB
+#endif
   return ok;
 }
 uint8_t &EEPROMClass::operator[](int addr) {

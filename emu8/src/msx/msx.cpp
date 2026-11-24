@@ -354,7 +354,7 @@ void msxLoop() {
   uint32_t nextUs = micros();
   SpeedMeter meter; meter.restart(msx::cpu.cycles);
   for (;;) {
-    if (OptionsWindow) { vTaskDelay(pdMS_TO_TICKS(20)); nextUs = micros(); meter.restart(msx::cpu.cycles); continue; }  // paused in settings
+    if (OptionsWindow || paused) { vTaskDelay(pdMS_TO_TICKS(20)); nextUs = micros(); meter.restart(msx::cpu.cycles); continue; }  // paused (settings / page hidden)
     if (msxResetReq)   { msxResetReq = false; msx::machineReset(); nextUs = micros(); meter.restart(msx::cpu.cycles); }
     if (msx::biosLen == 0) { vTaskDelay(pdMS_TO_TICKS(100)); continue; }                 // no BIOS -> nothing to run
 

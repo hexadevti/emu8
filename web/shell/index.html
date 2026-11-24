@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#111">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<title>emu8</title>
+<script>
+  // SharedArrayBuffer needs a secure context: never run from plain http (except localhost)
+  if (location.protocol === 'http:' && !/^(localhost|127\.)/.test(location.hostname)) location.replace('https://' + location.host + location.pathname + location.search);
+</script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app" class="portrait">
+  <div id="screen-wrap">
+    <canvas id="screen" width="320" height="240"></canvas>
+  </div>
+
+  <div id="toolbar">
+    <button data-act="menu" data-i18n-title="tb.menu" title="Menu (F10)">☰</button>
+    <button data-act="kbd" data-i18n-title="tb.kbd">⌨</button>
+    <button data-act="files" data-i18n-title="tb.files">📁</button>
+    <button data-act="reset" data-i18n-title="tb.reset">⟲</button>
+    <button data-act="sound" data-i18n-title="tb.sound">🔊</button>
+    <button data-act="fs" data-i18n-title="tb.fs">⛶</button>
+  </div>
+
+  <div id="controls">
+    <div id="pad-left" class="pad-side">
+      <div id="dpad"><div class="dp up"></div><div class="dp down"></div><div class="dp left"></div><div class="dp right"></div><div class="dp-center"></div></div>
+    </div>
+    <div id="pad-mid">
+      <button class="pill" data-bit="64">SELECT</button>
+      <button class="pill" data-bit="128">START</button>
+    </div>
+    <div id="pad-right" class="pad-side">
+      <div id="abtns">
+        <button class="ab b" data-bit="32">B</button>
+        <button class="ab a" data-bit="16">A</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="kbd" hidden></div>
+</div>
+
+<div id="msheet" hidden>
+  <div class="ms-card">
+    <div class="ms-grab"></div>
+    <div class="ms-head">
+      <div><div class="ms-kicker" data-i18n="ms.kicker">Menu</div><div class="ms-title" id="ms-title"></div></div>
+      <button class="ms-x" data-ms="close" data-i18n-aria="ms.close">✕</button>
+    </div>
+    <div class="ms-scroll">
+      <div class="ms-sec" data-i18n="ms.settings"></div>
+      <div class="ms-grid" id="ms-toggles"></div>
+      <label class="ms-vol" id="ms-volrow"><span data-i18n="ms.volume"></span><input type="range" id="ms-vol" min="0" max="15" step="1"><b id="ms-volv"></b></label>
+      <div class="ms-sec"><span data-i18n="ms.files"></span> <small id="ms-more"></small></div>
+      <ul id="ms-files"></ul>
+    </div>
+    <div class="ms-acts" id="ms-acts"></div>
+    <div class="ms-links">
+      <button data-ms="cfg" id="ms-cfg">Config</button>
+      <button data-ms="snap" id="ms-snap" data-i18n="ms.snapshots">Snapshots</button>
+      <button data-ms="classic" data-i18n="ms.classic"></button>
+    </div>
+  </div>
+</div>
+
+<div id="files" class="dialog" hidden>
+  <div class="dlg-body">
+    <div class="dlg-head"><b data-i18n="files.title"></b><button data-close>✕</button></div>
+    <p class="hint" data-i18n-html="files.hint"></p>
+    <div class="row">
+      <label><span data-i18n="files.folder"></span> <select id="folder"></select></label>
+      <label class="btn"><span data-i18n="files.upload"></span><input id="upload" type="file" multiple hidden></label>
+    </div>
+    <div id="upload-status" class="hint"></div>
+    <div class="row"><button id="btn-recv" data-i18n="recv.start"></button></div>
+    <div id="recv" hidden>
+      <p class="hint" data-i18n-html="recv.how"></p>
+      <div class="recv-url" id="recv-url"></div>
+      <div class="recv-code" id="recv-code"></div>
+      <div class="row"><span id="recv-status" class="hint"></span><button id="btn-recv-stop" data-i18n="recv.stop"></button></div>
+    </div>
+    <ul id="file-list"></ul>
+    <div class="row">
+      <button id="btn-reboot" data-i18n="files.reboot"></button>
+      <label><span data-i18n="files.lang"></span> <select id="lang"></select></label>
+    </div>
+  </div>
+</div>
+
+<div id="boot" class="dialog">
+  <div class="dlg-body center">
+    <h1>emu8</h1>
+    <p id="boot-msg" data-i18n="boot.loading">…</p>
+  </div>
+</div>
+
+<script src="i18n.js"></script>
+<script src="emu8.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

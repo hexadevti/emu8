@@ -148,10 +148,20 @@ static void appleApplyJoystick(bool shift, bool ctrl, bool lalt, bool ralt, cons
   if (shift) press(C64K_HID_SHIFT);
   // Both ways at once is centre, as on a real stick.
   const uint8_t x = pull & (A2J_LEFT | A2J_RIGHT), y = pull & (A2J_UP | A2J_DOWN);
-  timerpdl0 = x == A2J_LEFT ? JOY_MIN : x == A2J_RIGHT ? JOY_MAX : JOY_MID;   // paddle 0 = X
-  timerpdl1 = y == A2J_UP   ? JOY_MIN : y == A2J_DOWN  ? JOY_MAX : JOY_MID;   // paddle 1 = Y
-  Pb0 = (pull & A2J_BTN0) != 0;                      // open-apple
-  Pb1 = (pull & A2J_BTN1) != 0;                      // solid-apple
+  float p0 = x == A2J_LEFT ? JOY_MIN : x == A2J_RIGHT ? JOY_MAX : JOY_MID;   // paddle 0 = X
+  float p1 = y == A2J_UP   ? JOY_MIN : y == A2J_DOWN  ? JOY_MAX : JOY_MID;   // paddle 1 = Y
+  bool b0 = (pull & A2J_BTN0) != 0;                  // open-apple
+  bool b1 = (pull & A2J_BTN1) != 0;                  // solid-apple
+#if defined(EMU_WEB)
+  // the page's on-screen stick / pad goes on top before anything is written: a PDL read running on the
+  // CPU thread must never see the keys' centre flash by under a held stick
+  void webApplePadOverlay(float &p0, float &p1, bool &b0, bool &b1);
+  webApplePadOverlay(p0, p1, b0, b1);
+#endif
+  timerpdl0 = p0;
+  timerpdl1 = p1;
+  Pb0 = b0;
+  Pb1 = b1;
 }
 
 // ============================ C64 keyboard matrix ========================================

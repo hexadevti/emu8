@@ -915,6 +915,12 @@ void oskPoll()
     return;
   }
 
+#if defined(EMU_WEB)
+  // Browser: the page has its own keyboard (⌨ in the toolbar); a tap on the picture does nothing.
+  osk_prevDown = down;
+  return;
+#endif
+
   if (!osk_visible) {
     if (down && !osk_prevDown) {              // first contact opens the keyboard
       osk_visible     = true;
